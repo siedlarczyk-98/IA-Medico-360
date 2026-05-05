@@ -14,10 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.prompts import DISCLAIMER_RESPOSTA
+from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
     AuditLog,
     Conversation,
-    FeatureEnum,
     Interaction,
     InteractionResponse,
 )
@@ -43,39 +43,45 @@ class AgregadorService:
     async def query(self, request: AgregadorRequest) -> AgregadorResponse:
         """
         Executa consulta no Agregador:
-        1. Cria/recupera conversa
-        2. Registra interação
-        3. Chama providers em paralelo
-        4. Salva respostas + auditoria
+        1. Sanitiza prompt via DLP
+        2. Cria/recupera conversa
+        3. Registra interação
+        4. Chama providers em paralelo
+        5. Salva respostas + auditoria
         """
         start_time = time.monotonic()
 
-        # 1. Conversation
+        # 1. DLP: sanitizar prompt antes de enviar para APIs externas
+        dlp_result = sanitize_prompt(request.prompt)
+        sanitized_prompt = dlp_result.sanitized_text
+
+        # 2. Conversation
         conversation_id = await self._ensure_conversation(
             request.conversation_id, request.prompt
         )
 
-        # 2. Interaction
+        # 3. Interaction (salva prompt ORIGINAL no banco para auditoria)
         interaction = Interaction(
             conversation_id=conversation_id,
             user_id=self.user_id,
             company_id=self.company_id,
             feature="AGREGADOR",
-            mode=None,  # Agregador não tem modo
+            mode=None,
             prompt_text=request.prompt,
+            prompt_sanitized=dlp_result.was_sanitized,
             cache_hit=False,
             started_at=datetime.now(timezone.utc),
         )
         self.db.add(interaction)
-        await self.db.flush()  # get interaction.id
+        await self.db.flush()
 
-        # 3. Chamadas concorrentes aos providers
+        # 4. Chamadas concorrentes aos providers (com prompt SANITIZADO)
         model_responses = await self._call_providers(
-            prompt=request.prompt,
+            prompt=sanitized_prompt,
             models=request.models,
         )
 
-        # 4. Salvar respostas no banco
+        # 5. Salvar respostas no banco
         total_cost = Decimal("0")
         response_models: list[ModelResponse] = []
 
@@ -85,7 +91,7 @@ class AgregadorService:
                     interaction_id=interaction.id,
                     model_used=model_id,
                     response_text=result.text,
-                    response_time_ms=None,  # set below
+                    response_time_ms=None,
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
                     cost_usd=Decimal(str(result.cost_usd or 0)),
@@ -106,7 +112,6 @@ class AgregadorService:
                     )
                 )
             else:
-                # Erro no provider
                 error_msg = str(result)
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
@@ -127,13 +132,13 @@ class AgregadorService:
                     )
                 )
 
-        # 5. Finalizar interaction
+        # 6. Finalizar interaction
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         interaction.response_time_ms = elapsed_ms
         interaction.token_cost_usd = total_cost
         interaction.completed_at = datetime.now(timezone.utc)
 
-        # 6. Audit log
+        # 7. Audit log
         audit = AuditLog(
             user_id=self.user_id,
             interaction_id=interaction.id,
@@ -145,6 +150,8 @@ class AgregadorService:
                 "prompt_length": len(request.prompt),
                 "response_count": len(response_models),
                 "total_cost_usd": str(total_cost),
+                "dlp_sanitized": dlp_result.was_sanitized,
+                "dlp_replacements": dlp_result.replacement_count,
             },
         )
         self.db.add(audit)
@@ -199,7 +206,6 @@ class AgregadorService:
             if conv:
                 return conv.id
 
-        # Criar nova conversa
         title = prompt[:100] + ("..." if len(prompt) > 100 else "")
         conv = Conversation(
             user_id=self.user_id,

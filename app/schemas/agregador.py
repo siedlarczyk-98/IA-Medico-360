@@ -19,14 +19,13 @@ class AIModelEnum(str, Enum):
     GEMINI_FLASH = "gemini-2.5-flash"
     PERPLEXITY_SONAR = "sonar-pro"
 
-
 class AIModelDisplay(BaseModel):
-    """Info de exibição de cada modelo."""
     model_id: AIModelEnum
     provider: str
     display_name: str
     use_case: str
-    cost_tier: str  # baixo, médio, alto
+    cost_tier: str
+    available: bool = True
 
 
 # ── Request ──────────────────────────────────────────────────

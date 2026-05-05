@@ -66,12 +66,32 @@ MODELS_CATALOG = [
     ),
 ]
 
-
 @router.get("/models", response_model=list[AIModelDisplay])
 async def list_models():
-    """Retorna os modelos de IA disponíveis no Agregador."""
-    return MODELS_CATALOG
-
+    """Retorna todos os modelos, indicando quais estão disponíveis."""
+    from app.core.config import get_settings
+    settings = get_settings()
+    
+    placeholders = {"", "xxx", "sk-ant-xxx", "pplx-xxx", "sk-xxx"}
+    
+    key_map = {
+        AIModelEnum.CLAUDE_SONNET: settings.anthropic_api_key,
+        AIModelEnum.GPT_4O: settings.openai_api_key,
+        AIModelEnum.GEMINI_FLASH: settings.google_ai_api_key,
+        AIModelEnum.PERPLEXITY_SONAR: settings.perplexity_api_key,
+    }
+    
+    return [
+        AIModelDisplay(
+            model_id=model.model_id,
+            provider=model.provider,
+            display_name=model.display_name,
+            use_case=model.use_case,
+            cost_tier=model.cost_tier,
+            available=key_map.get(model.model_id, "") not in placeholders,
+        )
+        for model in MODELS_CATALOG
+    ]
 
 # ── Consulta (Non-Streaming) ────────────────────────────────
 
