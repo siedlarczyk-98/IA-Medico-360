@@ -4,26 +4,18 @@ Validação de entrada/saída conforme RN-AGR-001 a RN-AGR-004.
 """
 
 from datetime import datetime
-from enum import Enum
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
 
-# ── Enums ────────────────────────────────────────────────────
-
-class AIModelEnum(str, Enum):
-    """Modelos disponíveis no Agregador (Seção 2.2 das regras)."""
-    CLAUDE_SONNET = "claude-sonnet-4-20250514"
-    GPT_4O = "gpt-4o"
-    GEMINI_FLASH = "gemini-2.5-flash"
-    PERPLEXITY_SONAR = "sonar-pro"
+# ── Model Display ────────────────────────────────────────────
 
 class AIModelDisplay(BaseModel):
-    model_id: AIModelEnum
+    """Info de exibição de cada modelo — vem do banco."""
+    model_id: str
     provider: str
     display_name: str
-    use_case: str
     cost_tier: str
     available: bool = True
 
@@ -39,13 +31,13 @@ class AgregadorRequest(BaseModel):
         ...,
         min_length=1,
         max_length=4000,
-        description="Pergunta clínica do médico",
+        description="Pergunta do médico",
     )
-    models: list[AIModelEnum] = Field(
+    models: list[str] = Field(
         ...,
         min_length=1,
         max_length=4,
-        description="Modelos selecionados (1 a 4)",
+        description="IDs dos modelos selecionados (1 a 4)",
     )
     conversation_id: UUID | None = Field(
         default=None,
@@ -54,7 +46,7 @@ class AgregadorRequest(BaseModel):
 
     @field_validator("models")
     @classmethod
-    def unique_models(cls, v: list[AIModelEnum]) -> list[AIModelEnum]:
+    def unique_models(cls, v: list[str]) -> list[str]:
         if len(v) != len(set(v)):
             raise ValueError("Modelos duplicados não são permitidos")
         return v
@@ -93,7 +85,7 @@ class AgregadorResponse(BaseModel):
 class StreamChunk(BaseModel):
     """Chunk individual para streaming SSE."""
     model_id: str
-    delta: str  # token parcial
+    delta: str
     done: bool = False
 
 
@@ -122,7 +114,7 @@ class InteractionHistoryItem(BaseModel):
 class HistorySearchParams(BaseModel):
     """Parâmetros de busca no histórico."""
     query: str | None = None
-    model_filter: AIModelEnum | None = None
+    model_filter: str | None = None
     date_from: datetime | None = None
     date_to: datetime | None = None
     page: int = Field(default=1, ge=1)

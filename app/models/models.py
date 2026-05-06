@@ -215,6 +215,7 @@ class InteractionMedication(Base):
     medication_name: Mapped[str] = mapped_column(String(255), nullable=False)
     rxcui: Mapped[str | None] = mapped_column(String(50))
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    source: Mapped[str] = mapped_column(String(20), default="prompt")
 
     # Relationships
     interaction: Mapped["Interaction"] = relationship(back_populates="medications")
@@ -267,4 +268,20 @@ class ConsentLog(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+# ── Pricing AI Models ──────────────────────────────────────────────
+
+class ModelPricing(Base):
+    __tablename__ = "model_pricing"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    model_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_per_million: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    output_per_million: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    status: Mapped[bool] = mapped_column(Boolean, default=True)
+    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

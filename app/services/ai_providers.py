@@ -1,10 +1,10 @@
 """
 Médico 360 — Camada de abstração para providers de IA.
-Cada provider implementa a mesma interface para o Agregador.
+Providers por tipo, modelos vêm do banco (model_pricing).
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncIterator
 
 import httpx
@@ -21,7 +21,6 @@ class ProviderResponse:
     text: str
     tokens_in: int | None = None
     tokens_out: int | None = None
-    cost_usd: float | None = None
     model_id: str = ""
     provider: str = ""
 
@@ -38,30 +37,21 @@ class StreamToken:
 class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
-    provider_name: str = ""
-    model_id: str = ""
-    timeout: int = 30
-
     @abstractmethod
-    async def complete(self, prompt: str) -> ProviderResponse:
-        """Resposta completa (non-streaming)."""
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
         ...
 
     @abstractmethod
-    async def stream(self, prompt: str) -> AsyncIterator[StreamToken]:
-        """Streaming token a token."""
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
         ...
 
 
-# ── Anthropic (Claude) ──────────────────────────────────────
+# ── Anthropic ────────────────────────────────────────────────
 
 class AnthropicProvider(BaseProvider):
-    provider_name = "Anthropic"
-    model_id = "claude-sonnet-4-20250514"
-    timeout = 30  # RN-SHERLOCK-001: 30s
 
-    async def complete(self, prompt: str) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -70,7 +60,7 @@ class AnthropicProvider(BaseProvider):
                     "content-type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "max_tokens": 4096,
                     "system": SYSTEM_PROMPT_AGREGADOR,
                     "messages": [{"role": "user", "content": prompt}],
@@ -78,7 +68,6 @@ class AnthropicProvider(BaseProvider):
             )
             resp.raise_for_status()
             data = resp.json()
-
             text = "".join(
                 block["text"] for block in data["content"] if block["type"] == "text"
             )
@@ -87,12 +76,12 @@ class AnthropicProvider(BaseProvider):
                 text=text,
                 tokens_in=usage.get("input_tokens"),
                 tokens_out=usage.get("output_tokens"),
-                model_id=self.model_id,
-                provider=self.provider_name,
+                model_id=model_id,
+                provider="Anthropic",
             )
 
-    async def stream(self, prompt: str) -> AsyncIterator[StreamToken]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 "https://api.anthropic.com/v1/messages",
@@ -102,7 +91,7 @@ class AnthropicProvider(BaseProvider):
                     "content-type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "max_tokens": 4096,
                     "stream": True,
                     "system": SYSTEM_PROMPT_AGREGADOR,
@@ -119,30 +108,21 @@ class AnthropicProvider(BaseProvider):
                         break
                     event = json.loads(payload)
                     event_type = event.get("type", "")
-
                     if event_type == "content_block_delta":
                         delta = event.get("delta", {})
                         if delta.get("type") == "text_delta":
                             yield StreamToken(delta=delta.get("text", ""))
-
                     elif event_type == "message_delta":
                         usage = event.get("usage", {})
-                        yield StreamToken(
-                            delta="",
-                            done=True,
-                            tokens_out=usage.get("output_tokens"),
-                        )
+                        yield StreamToken(delta="", done=True, tokens_out=usage.get("output_tokens"))
 
 
-# ── OpenAI (GPT-4o) ─────────────────────────────────────────
+# ── OpenAI ───────────────────────────────────────────────────
 
 class OpenAIProvider(BaseProvider):
-    provider_name = "OpenAI"
-    model_id = "gpt-4o"
-    timeout = 30
 
-    async def complete(self, prompt: str) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -150,12 +130,12 @@ class OpenAIProvider(BaseProvider):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 4096,
+                    "max_completion_tokens": 4096,
                 },
             )
             resp.raise_for_status()
@@ -166,12 +146,12 @@ class OpenAIProvider(BaseProvider):
                 text=choice["message"]["content"],
                 tokens_in=usage.get("prompt_tokens"),
                 tokens_out=usage.get("completion_tokens"),
-                model_id=self.model_id,
-                provider=self.provider_name,
+                model_id=model_id,
+                provider="OpenAI",
             )
 
-    async def stream(self, prompt: str) -> AsyncIterator[StreamToken]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 "https://api.openai.com/v1/chat/completions",
@@ -180,12 +160,12 @@ class OpenAIProvider(BaseProvider):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 4096,
+                    "max_completion_tokens": 4096,
                     "stream": True,
                 },
             ) as response:
@@ -205,28 +185,21 @@ class OpenAIProvider(BaseProvider):
                         yield StreamToken(delta=content)
 
 
-# ── Google (Gemini Flash) ────────────────────────────────────
+# ── Google (Gemini) ──────────────────────────────────────────
 
 class GeminiProvider(BaseProvider):
-    provider_name = "Google"
-    model_id = "gemini-2.5-flash"
-    timeout = 15
 
-    async def complete(self, prompt: str) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15) -> ProviderResponse:
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_id}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
             f":generateContent?key={settings.google_ai_api_key}"
         )
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 url,
                 json={
-                    "system_instruction": {
-                        "parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]
-                    },
-                    "contents": [
-                        {"parts": [{"text": prompt}]}
-                    ],
+                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]},
+                    "contents": [{"parts": [{"text": prompt}]}],
                 },
             )
             resp.raise_for_status()
@@ -237,26 +210,22 @@ class GeminiProvider(BaseProvider):
                 text=text,
                 tokens_in=usage.get("promptTokenCount"),
                 tokens_out=usage.get("candidatesTokenCount"),
-                model_id=self.model_id,
-                provider=self.provider_name,
+                model_id=model_id,
+                provider="Google",
             )
 
-    async def stream(self, prompt: str) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15) -> AsyncIterator[StreamToken]:
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_id}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
             f":streamGenerateContent?alt=sse&key={settings.google_ai_api_key}"
         )
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 url,
                 json={
-                    "system_instruction": {
-                        "parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]
-                    },
-                    "contents": [
-                        {"parts": [{"text": prompt}]}
-                    ],
+                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]},
+                    "contents": [{"parts": [{"text": prompt}]}],
                 },
             ) as response:
                 response.raise_for_status()
@@ -271,27 +240,22 @@ class GeminiProvider(BaseProvider):
                         for part in parts:
                             if "text" in part:
                                 yield StreamToken(delta=part["text"])
-
                         finish = candidates[0].get("finishReason")
                         if finish:
                             usage = event.get("usageMetadata", {})
                             yield StreamToken(
-                                delta="",
-                                done=True,
+                                delta="", done=True,
                                 tokens_in=usage.get("promptTokenCount"),
                                 tokens_out=usage.get("candidatesTokenCount"),
                             )
 
 
-# ── Perplexity (Sonar Pro) ──────────────────────────────────
+# ── Perplexity ───────────────────────────────────────────────
 
 class PerplexityProvider(BaseProvider):
-    provider_name = "Perplexity"
-    model_id = "sonar-pro"
-    timeout = 15
 
-    async def complete(self, prompt: str) -> ProviderResponse:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15) -> ProviderResponse:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={
@@ -299,7 +263,7 @@ class PerplexityProvider(BaseProvider):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
                         {"role": "user", "content": prompt},
@@ -315,12 +279,12 @@ class PerplexityProvider(BaseProvider):
                 text=choice["message"]["content"],
                 tokens_in=usage.get("prompt_tokens"),
                 tokens_out=usage.get("completion_tokens"),
-                model_id=self.model_id,
-                provider=self.provider_name,
+                model_id=model_id,
+                provider="Perplexity",
             )
 
-    async def stream(self, prompt: str) -> AsyncIterator[StreamToken]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15) -> AsyncIterator[StreamToken]:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 "https://api.perplexity.ai/chat/completions",
@@ -329,7 +293,7 @@ class PerplexityProvider(BaseProvider):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.model_id,
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
                         {"role": "user", "content": prompt},
@@ -354,19 +318,19 @@ class PerplexityProvider(BaseProvider):
                         yield StreamToken(delta=content)
 
 
-# ── Registry ────────────────────────────────────────────────
+# ── Registry por tipo ────────────────────────────────────────
 
-PROVIDER_REGISTRY: dict[str, BaseProvider] = {
-    "claude-sonnet-4-20250514": AnthropicProvider(),
-    "gpt-4o": OpenAIProvider(),
-    "gemini-2.5-flash": GeminiProvider(),
-    "sonar-pro": PerplexityProvider(),
+PROVIDER_TYPE_REGISTRY: dict[str, BaseProvider] = {
+    "anthropic": AnthropicProvider(),
+    "openai": OpenAIProvider(),
+    "google": GeminiProvider(),
+    "perplexity": PerplexityProvider(),
 }
 
 
-def get_provider(model_id: str) -> BaseProvider:
-    """Retorna o provider correspondente ao model_id."""
-    provider = PROVIDER_REGISTRY.get(model_id)
+def get_provider_by_type(provider_type: str) -> BaseProvider:
+    """Retorna o provider correspondente ao tipo."""
+    provider = PROVIDER_TYPE_REGISTRY.get(provider_type)
     if not provider:
-        raise ValueError(f"Modelo não suportado: {model_id}")
+        raise ValueError(f"Provider type não suportado: {provider_type}")
     return provider

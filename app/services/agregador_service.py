@@ -12,22 +12,26 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.services.specialty_detector import detect_specialty
+from app.services.medication_extractor import extract_from_interaction
+from app.models.models import InteractionMedication
 from app.core.prompts import DISCLAIMER_RESPOSTA
+
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
     AuditLog,
     Conversation,
     Interaction,
     InteractionResponse,
+    ModelPricing,
 )
 from app.schemas.agregador import (
     AgregadorRequest,
     AgregadorResponse,
-    AIModelEnum,
     ModelResponse,
 )
-from app.services.ai_providers import ProviderResponse, get_provider
+from app.services.ai_providers import ProviderResponse, get_provider_by_type
+from app.services.pricing import calculate_cost
 
 
 class AgregadorService:
@@ -46,8 +50,9 @@ class AgregadorService:
         1. Sanitiza prompt via DLP
         2. Cria/recupera conversa
         3. Registra interação
-        4. Chama providers em paralelo
-        5. Salva respostas + auditoria
+        4. Busca modelos no banco
+        5. Chama providers em paralelo
+        6. Salva respostas + auditoria
         """
         start_time = time.monotonic()
 
@@ -60,14 +65,14 @@ class AgregadorService:
             request.conversation_id, request.prompt
         )
 
-        # 3. Interaction (salva prompt ORIGINAL no banco para auditoria)
+        # 3. Interaction (salva prompt SANITIZADO no banco)
         interaction = Interaction(
             conversation_id=conversation_id,
             user_id=self.user_id,
             company_id=self.company_id,
             feature="AGREGADOR",
             mode=None,
-            prompt_text=request.prompt,
+            prompt_text=sanitized_prompt,
             prompt_sanitized=dlp_result.was_sanitized,
             cache_hit=False,
             started_at=datetime.now(timezone.utc),
@@ -75,18 +80,23 @@ class AgregadorService:
         self.db.add(interaction)
         await self.db.flush()
 
-        # 4. Chamadas concorrentes aos providers (com prompt SANITIZADO)
+        # 4. Buscar modelos no banco pra saber o provider_type
+        models_info = await self._get_models_info(request.models)
+
+        # 5. Chamadas concorrentes aos providers
         model_responses = await self._call_providers(
             prompt=sanitized_prompt,
-            models=request.models,
+            models_info=models_info,
         )
 
-        # 5. Salvar respostas no banco
+        # 6. Salvar respostas no banco
         total_cost = Decimal("0")
         response_models: list[ModelResponse] = []
 
         for model_id, result in model_responses.items():
             if isinstance(result, ProviderResponse):
+                cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
+
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
                     model_used=model_id,
@@ -94,11 +104,11 @@ class AgregadorService:
                     response_time_ms=None,
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
-                    cost_usd=Decimal(str(result.cost_usd or 0)),
+                    cost_usd=cost,
                     is_fallback=False,
                 )
                 self.db.add(ir)
-                total_cost += ir.cost_usd
+                total_cost += cost
 
                 response_models.append(
                     ModelResponse(
@@ -108,7 +118,7 @@ class AgregadorService:
                         response_time_ms=0,
                         tokens_in=result.tokens_in,
                         tokens_out=result.tokens_out,
-                        cost_usd=float(result.cost_usd or 0),
+                        cost_usd=float(cost),
                     )
                 )
             else:
@@ -132,13 +142,27 @@ class AgregadorService:
                     )
                 )
 
-        # 6. Finalizar interaction
+        # 7. Finalizar interaction
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         interaction.response_time_ms = elapsed_ms
         interaction.token_cost_usd = total_cost
         interaction.completed_at = datetime.now(timezone.utc)
 
-        # 7. Audit log
+        # 8. Detectar especialidade médica via IA
+        specialty = await detect_specialty(sanitized_prompt)
+        interaction.specialty_detected = specialty
+
+        # 9. Extrair medicamentos mencionados
+        response_texts = [r.response_text for r in response_models if r.response_text]
+        medications = await extract_from_interaction(sanitized_prompt, response_texts)
+        for med in medications:
+            self.db.add(InteractionMedication(
+                interaction_id=interaction.id,
+                medication_name=med["medication_name"],
+                source=med["source"],
+            ))
+
+        # 10. Audit log
         audit = AuditLog(
             user_id=self.user_id,
             interaction_id=interaction.id,
@@ -146,12 +170,14 @@ class AgregadorService:
             entity_type="interaction",
             entity_id=interaction.id,
             metadata_={
-                "models": [m.value for m in request.models],
+                "models": request.models,
                 "prompt_length": len(request.prompt),
                 "response_count": len(response_models),
                 "total_cost_usd": str(total_cost),
                 "dlp_sanitized": dlp_result.was_sanitized,
                 "dlp_replacements": dlp_result.replacement_count,
+                "specialty_detected": specialty,
+                "medications": [m["medication_name"] for m in medications],
             },
         )
         self.db.add(audit)
@@ -166,21 +192,34 @@ class AgregadorService:
             created_at=interaction.createdat,
         )
 
+    # ── Buscar info dos modelos no banco ─────────────────────
+
+    async def _get_models_info(self, model_ids: list[str]) -> dict[str, ModelPricing]:
+        """Busca provider_type e info de cada modelo no banco."""
+        result = await self.db.execute(
+            select(ModelPricing).where(
+                ModelPricing.model_id.in_(model_ids),
+                ModelPricing.status == True,
+            )
+        )
+        models = result.scalars().all()
+        return {m.model_id: m for m in models}
+
     # ── Chamadas paralelas aos providers ─────────────────────
 
     async def _call_providers(
         self,
         prompt: str,
-        models: list[AIModelEnum],
+        models_info: dict[str, ModelPricing],
     ) -> dict[str, ProviderResponse | Exception]:
         """
         RN-AGR-001: Se um modelo falhar, não impacta os demais.
-        Executa todos em paralelo com asyncio.gather(return_exceptions=True).
+        Busca o provider pelo tipo e passa o model_id dinâmico.
         """
         tasks = {}
-        for model in models:
-            provider = get_provider(model.value)
-            tasks[model.value] = provider.complete(prompt)
+        for model_id, model_info in models_info.items():
+            provider = get_provider_by_type(model_info.provider_type)
+            tasks[model_id] = provider.complete(model_id, prompt)
 
         results = await asyncio.gather(
             *tasks.values(),
