@@ -78,6 +78,9 @@ class AgregadorResponse(BaseModel):
     disclaimer: str
     total_response_time_ms: int
     created_at: datetime
+    specialty_detected: str | None = None  # <-- faltou esse
+    topic_detected: str | None = None
+
 
 
 # ── SSE Streaming ────────────────────────────────────────────

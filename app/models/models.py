@@ -153,6 +153,7 @@ class Interaction(Base):
     token_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0"))
     confidence_score: Mapped[float | None] = mapped_column(Float)
     specialty_detected: Mapped[str | None] = mapped_column(String(100))
+    topic_detected: Mapped[str | None] = mapped_column(String(255))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -212,8 +213,9 @@ class InteractionMedication(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False)
-    medication_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    rxcui: Mapped[str | None] = mapped_column(String(50))
+    medication_raw: Mapped[str] = mapped_column(String(255), nullable=False)
+    medication_normalized: Mapped[str | None] = mapped_column(String(255))
+    atc_code: Mapped[str | None] = mapped_column(String(50))
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     source: Mapped[str] = mapped_column(String(20), default="prompt")
 

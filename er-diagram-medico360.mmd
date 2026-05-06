@@ -1,0 +1,201 @@
+erDiagram
+  company ||--o{ users : has
+  company ||--o| company_legacy_mapping : maps_from
+  company ||--o{ semantic_cache : caches
+  users ||--o{ conversations : starts
+  users ||--o| user_preferences : configures
+  users ||--o| legacy_user_mapping : maps_from
+  users ||--o{ consent_logs : consents
+  users ||--o{ audit_logs : audits
+  conversations ||--o{ interactions : contains
+  interactions ||--o{ interaction_responses : generates
+  interactions ||--o{ pharma_alerts : triggers
+  interactions ||--o{ interaction_medications : mentions
+  interactions ||--o{ pubmed_validations : validates
+  interactions ||--o{ audit_logs : logs
+
+  company {
+    uuid id PK
+    string name
+    string slug
+    jsonb settings
+    boolean company_status
+    string legacy_company_id
+    timestamp createdat
+    timestamp updatedat
+  }
+
+  company_legacy_mapping {
+    uuid id PK
+    uuid company_id FK
+    string legacy_company_id
+    string legacy_source
+    timestamp synced_at
+    timestamp legacy_createdat
+  }
+
+  users {
+    uuid id PK
+    varchar20 phone_number
+    uuid company_id FK
+    string email
+    string name
+    string crm
+    string crm_state
+    string role
+    boolean status
+    string legacy_user_id
+    timestamp createdat
+    timestamp updatedat
+  }
+
+  legacy_user_mapping {
+    uuid id PK
+    uuid user_id FK
+    string legacy_user_id
+    string legacy_source
+    string legacy_role
+    timestamp syncedat
+    timestamp legacy_createdat
+  }
+
+  user_preferences {
+    uuid id PK
+    uuid user_id FK
+    jsonb selected_models
+    jsonb ui_settings
+    jsonb notification_prefs
+    timestamp updatedat
+  }
+
+  conversations {
+    uuid id PK
+    uuid user_id FK
+    string title
+    string feature
+    boolean status
+    timestamp createdat
+    timestamp updatedat
+  }
+
+  interactions {
+    uuid id PK
+    uuid conversation_id FK
+    uuid user_id FK
+    uuid company_id FK
+    varchar feature
+    varchar mode
+    varchar input_type
+    text prompt_text
+    boolean prompt_sanitized
+    float triage_confidence
+    string triage_category
+    integer response_time_ms
+    boolean cache_hit
+    decimal token_cost_usd
+    float confidence_score
+    string specialty_detected
+    string topic_detected
+    timestamp started_at
+    timestamp completed_at
+    timestamp createdat
+  }
+
+  interaction_responses {
+    uuid id PK
+    uuid interaction_id FK
+    string model_used
+    text response_text
+    integer response_time_ms
+    integer tokens_in
+    integer tokens_out
+    decimal cost_usd
+    boolean is_fallback
+    text error_message
+    timestamp createdat
+  }
+
+  pharma_alerts {
+    uuid id PK
+    uuid interaction_id FK
+    integer alert_level
+    string alert_color
+    text description
+    string source_api
+    text doctor_justification
+    timestamp acknowledged_at
+    timestamp createdat
+  }
+
+  interaction_medications {
+    uuid id PK
+    uuid interaction_id FK
+    string medication_raw
+    string medication_normalized
+    string source
+    string rxcui
+    timestamp createdat
+  }
+
+  pubmed_validations {
+    uuid id PK
+    uuid interaction_id FK
+    string pmid
+    text article_title
+    text abstract_snippet
+    float relevance_score
+    timestamp createdat
+  }
+
+  semantic_cache {
+    uuid id PK
+    uuid company_id FK
+    varchar mode
+    vector embedding
+    string prompt_hash
+    text prompt_text
+    text cached_response
+    string model_used
+    integer ttl_hours
+    integer hit_count
+    timestamp createdat
+    timestamp expires_at
+  }
+
+  model_pricing {
+    uuid id PK
+    string model_id UK
+    string provider
+    string provider_type
+    string display_name
+    decimal input_per_million
+    decimal output_per_million
+    boolean status
+    timestamp updatedat
+    timestamp createdat
+  }
+
+  audit_logs {
+    uuid id PK
+    uuid user_id FK
+    uuid interaction_id FK
+    string action
+    string entity_type
+    uuid entity_id
+    jsonb metadata
+    inet ip_address
+    text user_agent
+    timestamp createdat
+  }
+
+  consent_logs {
+    uuid id PK
+    uuid user_id FK
+    string consent_type
+    boolean accepted
+    inet ip_address
+    text user_agent
+    timestamp accepted_at
+    timestamp revoked_at
+    timestamp createdat
+  }
