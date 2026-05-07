@@ -1,8 +1,10 @@
 """
 Médico 360 — Camada de abstração para providers de IA.
 Providers por tipo, modelos vêm do banco (model_pricing).
+System prompt configurável — padrão é SYSTEM_PROMPT_AGREGADOR.
 """
 
+import json as json_lib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -38,11 +40,11 @@ class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
     @abstractmethod
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
         ...
 
     @abstractmethod
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
         ...
 
 
@@ -50,7 +52,8 @@ class BaseProvider(ABC):
 
 class AnthropicProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
@@ -62,7 +65,7 @@ class AnthropicProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "max_tokens": 4096,
-                    "system": SYSTEM_PROMPT_AGREGADOR,
+                    "system": sys_prompt,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
@@ -80,7 +83,8 @@ class AnthropicProvider(BaseProvider):
                 provider="Anthropic",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
@@ -94,7 +98,7 @@ class AnthropicProvider(BaseProvider):
                     "model": model_id,
                     "max_tokens": 4096,
                     "stream": True,
-                    "system": SYSTEM_PROMPT_AGREGADOR,
+                    "system": sys_prompt,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             ) as response:
@@ -102,11 +106,10 @@ class AnthropicProvider(BaseProvider):
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    import json
                     payload = line[6:]
                     if payload == "[DONE]":
                         break
-                    event = json.loads(payload)
+                    event = json_lib.loads(payload)
                     event_type = event.get("type", "")
                     if event_type == "content_block_delta":
                         delta = event.get("delta", {})
@@ -121,7 +124,8 @@ class AnthropicProvider(BaseProvider):
 
 class OpenAIProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -132,7 +136,7 @@ class OpenAIProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
+                        {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "max_completion_tokens": 4096,
@@ -150,7 +154,8 @@ class OpenAIProvider(BaseProvider):
                 provider="OpenAI",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
@@ -162,7 +167,7 @@ class OpenAIProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
+                        {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "max_completion_tokens": 4096,
@@ -177,8 +182,7 @@ class OpenAIProvider(BaseProvider):
                     if payload == "[DONE]":
                         yield StreamToken(delta="", done=True)
                         break
-                    import json
-                    event = json.loads(payload)
+                    event = json_lib.loads(payload)
                     delta = event["choices"][0].get("delta", {})
                     content = delta.get("content", "")
                     if content:
@@ -189,7 +193,8 @@ class OpenAIProvider(BaseProvider):
 
 class GeminiProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> ProviderResponse:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
             f":generateContent?key={settings.google_ai_api_key}"
@@ -198,7 +203,7 @@ class GeminiProvider(BaseProvider):
             resp = await client.post(
                 url,
                 json={
-                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]},
+                    "system_instruction": {"parts": [{"text": sys_prompt}]},
                     "contents": [{"parts": [{"text": prompt}]}],
                 },
             )
@@ -214,7 +219,8 @@ class GeminiProvider(BaseProvider):
                 provider="Google",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
             f":streamGenerateContent?alt=sse&key={settings.google_ai_api_key}"
@@ -224,7 +230,7 @@ class GeminiProvider(BaseProvider):
                 "POST",
                 url,
                 json={
-                    "system_instruction": {"parts": [{"text": SYSTEM_PROMPT_AGREGADOR}]},
+                    "system_instruction": {"parts": [{"text": sys_prompt}]},
                     "contents": [{"parts": [{"text": prompt}]}],
                 },
             ) as response:
@@ -232,8 +238,7 @@ class GeminiProvider(BaseProvider):
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    import json
-                    event = json.loads(line[6:])
+                    event = json_lib.loads(line[6:])
                     candidates = event.get("candidates", [])
                     if candidates:
                         parts = candidates[0].get("content", {}).get("parts", [])
@@ -254,7 +259,8 @@ class GeminiProvider(BaseProvider):
 
 class PerplexityProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> ProviderResponse:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 "https://api.perplexity.ai/chat/completions",
@@ -265,7 +271,7 @@ class PerplexityProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
+                        {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 4096,
@@ -283,7 +289,8 @@ class PerplexityProvider(BaseProvider):
                 provider="Perplexity",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
@@ -295,7 +302,7 @@ class PerplexityProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT_AGREGADOR},
+                        {"role": "system", "content": sys_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 4096,
@@ -310,8 +317,7 @@ class PerplexityProvider(BaseProvider):
                     if payload == "[DONE]":
                         yield StreamToken(delta="", done=True)
                         break
-                    import json
-                    event = json.loads(payload)
+                    event = json_lib.loads(payload)
                     delta = event["choices"][0].get("delta", {})
                     content = delta.get("content", "")
                     if content:

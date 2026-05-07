@@ -13,6 +13,7 @@ erDiagram
   interactions ||--o{ interaction_medications : mentions
   interactions ||--o{ pubmed_validations : validates
   interactions ||--o{ audit_logs : logs
+  model_pricing ||--o{ interaction_responses : "prices"
 
   company {
     uuid id PK
@@ -199,3 +200,10 @@ erDiagram
     timestamp revoked_at
     timestamp createdat
   }
+
+  medication_interaction_cache {
+    string cache_key PK "Hash dos medicamentos"
+    jsonb interaction_data "Resultado da API"
+    timestamp createdat
+    timestamp expires_at
+}

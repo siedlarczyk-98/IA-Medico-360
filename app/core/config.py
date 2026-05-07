@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     google_ai_api_key: str = ""
     perplexity_api_key: str = ""
-
+    pharmadb_api_key: str = ""
+    
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
