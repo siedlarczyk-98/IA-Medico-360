@@ -316,7 +316,7 @@ async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
 
     # ── Conversation ─────────────────────────────────────────
 
-    async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str) -> UUID:
+async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str) -> UUID:
         if conversation_id:
             result = await self.db.execute(
                 select(Conversation).where(
