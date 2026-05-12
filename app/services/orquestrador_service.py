@@ -1,3 +1,8 @@
+"""
+Médico 360 — Serviço do Orquestrador Multi-Agente.
+Pipeline: Triagem → Roteamento → Agente Especializado → Resposta.
+"""
+
 import logging
 import time
 import traceback
@@ -7,13 +12,13 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     SYSTEM_PROMPT_CLINICAL_REASONING,
     SYSTEM_PROMPT_PRODUCTIVITY,
     SYSTEM_PROMPT_QUICK_SEARCH,
 )
-from app.models.models import PharmaAlert
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
     AuditLog,
@@ -22,6 +27,7 @@ from app.models.models import (
     InteractionMedication,
     InteractionResponse,
     ModelPricing,
+    PharmaAlert,
 )
 from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
@@ -31,7 +37,6 @@ from app.services.triage_service import triage
 
 logger = logging.getLogger(__name__)
 
-# Mapeamento modo → model_id padrão
 MODE_MODEL_MAP = {
     "QUICK_SEARCH": "sonar-pro",
     "CLINICAL_REASONING": "claude-sonnet-4-20250514",
@@ -39,12 +44,12 @@ MODE_MODEL_MAP = {
     "PRODUCTIVITY": "gpt-5.4-nano",
 }
 
-# Mapeamento modo → system prompt
 MODE_PROMPT_MAP = {
     "QUICK_SEARCH": SYSTEM_PROMPT_QUICK_SEARCH,
     "CLINICAL_REASONING": SYSTEM_PROMPT_CLINICAL_REASONING,
     "PRODUCTIVITY": SYSTEM_PROMPT_PRODUCTIVITY,
 }
+
 
 class OrquestradorService:
     """Serviço principal do Orquestrador Multi-Agente."""
@@ -55,14 +60,6 @@ class OrquestradorService:
         self.company_id = company_id
 
     async def query(self, prompt: str, conversation_id: UUID | None = None) -> dict:
-        """
-        Pipeline completo do Orquestrador:
-        1. DLP
-        2. Triagem
-        3. Roteamento
-        4. Resposta do agente
-        5. Auditoria completa
-        """
         try:
             start_time = time.monotonic()
 
@@ -75,7 +72,6 @@ class OrquestradorService:
             mode = triage_result["mode"]
             confidence = triage_result["confidence"]
 
-            # Se confiança baixa, pedir refinamento
             if confidence < 0.7:
                 return {
                     "status": "needs_refinement",
@@ -113,7 +109,7 @@ class OrquestradorService:
 
             # 6. Salvar resposta
             cost = Decimal("0")
-            if agent_response.get("model_id"):
+            if agent_response.get("model_id") and agent_response.get("model_id") != "pharmadb":
                 cost = await calculate_cost(
                     self.db,
                     agent_response["model_id"],
@@ -201,14 +197,12 @@ class OrquestradorService:
             traceback.print_exc()
             raise
 
-    # ── Agente de IA (QUICK_SEARCH, CLINICAL_REASONING, PRODUCTIVITY) ──
+    # ── Agente de IA ─────────────────────────────────────────
 
     async def _handle_ai_agent(self, mode: str, prompt: str) -> dict:
-        """Chama o modelo de IA correto pro modo, com fallback."""
         model_id = MODE_MODEL_MAP[mode]
         system_prompt = MODE_PROMPT_MAP[mode]
 
-        # Buscar provider no banco
         result = await self.db.execute(
             select(ModelPricing).where(
                 ModelPricing.model_id == model_id,
@@ -238,7 +232,6 @@ class OrquestradorService:
     # ── Fallback ─────────────────────────────────────────────
 
     async def _try_fallback(self, mode: str, prompt: str, system_prompt: str, original_error: str) -> dict:
-        """Tenta modelos alternativos em caso de falha."""
         fallbacks = {
             "QUICK_SEARCH": ["gemini-2.5-flash"],
             "CLINICAL_REASONING": ["gpt-4o", "gemini-2.5-flash"],
@@ -275,10 +268,9 @@ class OrquestradorService:
             "is_fallback": True,
         }
 
-    # ── PHARMA_CHECK (PharmaDB) ──────────────────────────────
+    # ── PHARMA_CHECK ─────────────────────────────────────────
 
-async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
-        """Checagem farmacológica via PharmaDB."""
+    async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
         from app.services.pharmadb_service import get_pharmadb_service
         from app.services.medication_extractor import extract_medications
 
@@ -296,7 +288,6 @@ async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
 
         resultado = await pharmadb.checar_interacoes(nomes)
 
-        # Salvar pharma_alerts
         for alerta in resultado.get("interacoes", []):
             self.db.add(PharmaAlert(
                 interaction_id=interaction_id,
@@ -316,7 +307,7 @@ async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
 
     # ── Conversation ─────────────────────────────────────────
 
-async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str) -> UUID:
+    async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str) -> UUID:
         if conversation_id:
             result = await self.db.execute(
                 select(Conversation).where(
