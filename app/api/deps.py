@@ -33,8 +33,6 @@ async def get_current_user(
         )
 
     token = credentials.credentials
-    # ... resto do código (try/except jwt.decode)
-    token = credentials.credentials
     try:
         payload = jwt.decode(
             token,
