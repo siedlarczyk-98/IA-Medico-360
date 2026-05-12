@@ -24,6 +24,16 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Extrai e valida o usuário a partir do token JWT."""
+    
+    # 1. Verificação de segurança extra
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token não fornecido",
+        )
+
+    token = credentials.credentials
+    # ... resto do código (try/except jwt.decode)
     token = credentials.credentials
     try:
         payload = jwt.decode(
