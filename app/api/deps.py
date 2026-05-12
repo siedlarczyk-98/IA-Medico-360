@@ -23,18 +23,18 @@ async def get_current_user(
 ) -> User:
     """Extrai e valida o usuário a partir do token JWT."""
     
-    # Debug para ver no painel do Railway o que está chegando
-    if credentials:
-        print(f"--- DEBUG RAILWAY ---")
-        print(f"Token recebido (10 chars): {credentials.credentials[:10]}...")
-
     if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token não fornecido",
         )
 
-    token = credentials.credentials
+    # Limpeza do token para evitar o erro de 'Illegal Header'
+    token = credentials.credentials.strip().replace("\n", "").replace("\r", "")
+    
+    print(f"--- DEBUG RAILWAY ---")
+    print(f"Token limpo recebido (10 chars): {token[:10]}...")
+
     try:
         payload = jwt.decode(
             token,
