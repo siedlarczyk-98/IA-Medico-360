@@ -147,11 +147,22 @@ async def _verify_citation(
     if PUBMED_API_KEY:
         base_params["api_key"] = PUBMED_API_KEY
 
-    searches = [
-        f"{clean}[tiab]",
-        f"{_build_keyword_query(citation)} AND "
-        f'("guideline"[pt] OR "practice guideline"[pt] OR "consensus"[tiab])',
-    ]
+    # detecta formato "Autor et al. Journal Ano" → busca por autor + ano
+    author_match = re.match(r"^([A-Za-z]+)\s+(?:[A-Za-z]+\s+)?et al", clean)
+    year_match = re.search(r"\b(19|20)\d{2}\b", clean)
+
+    if author_match and year_match:
+        author = author_match.group(1)
+        year = year_match.group(0)
+        keywords = _build_keyword_query(citation)
+        author_query = f"{author}[author] AND {keywords}[tiab] AND {year}[pdat]"
+        searches = [f"{clean}[tiab]", author_query]
+    else:
+        searches = [
+            f"{clean}[tiab]",
+            f"{_build_keyword_query(citation)} AND "
+            f'("guideline"[pt] OR "practice guideline"[pt] OR "consensus"[tiab])',
+        ]
 
     try:
         for term in searches:
