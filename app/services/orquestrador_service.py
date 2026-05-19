@@ -257,7 +257,7 @@ class OrquestradorService:
             traceback.print_exc()
             raise
 
-    # ── Agente de IA ─────────────────────────────────────────
+# ── Agente de IA ─────────────────────────────────────────
 
     async def _handle_ai_agent(self, mode: str, prompt: str) -> dict:
         model_id = MODE_MODEL_MAP[mode]
@@ -275,10 +275,12 @@ class OrquestradorService:
             return {"text": f"Modelo {model_id} não disponível.", "error": "model_not_found"}
 
         provider = get_provider_by_type(model_info.provider_type)
+        temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)  # ← fora do try, não precisa estar dentro
 
         try:
-            temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
-        response = await provider.complete(model_id, prompt, system_prompt=system_prompt, temperature=temperature)
+            response = await provider.complete(
+                model_id, prompt, system_prompt=system_prompt, temperature=temperature
+            )
             return {
                 "text": response.text,
                 "model_id": model_id,
