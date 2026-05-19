@@ -128,10 +128,10 @@ async def _lookup(
             result = await db.execute(
                 text(
                     "SELECT id, response_json, "
-                    "1 - (prompt_embedding <=> :emb::vector) AS sim "
+                    "1 - (prompt_embedding <=> CAST(:emb AS vector)) AS sim "
                     "FROM semantic_cache "
                     "WHERE mode = :mode AND expires_at > :now "
-                    "ORDER BY prompt_embedding <=> :emb::vector "
+                    "ORDER BY prompt_embedding <=> CAST(:emb AS vector) "
                     "LIMIT 1"
                 ),
                 {"emb": vector_str, "mode": mode, "now": now},
@@ -209,7 +209,7 @@ async def store_response(
                 text(
                     "INSERT INTO semantic_cache "
                     "(id, mode, normalized_prompt, prompt_embedding, response_json, hit_count, created_at, expires_at) "
-                    "VALUES (gen_random_uuid(), :mode, :norm, :emb::vector, :resp, 0, :now, :exp) "
+                    "VALUES (gen_random_uuid(), :mode, :norm, CAST(:emb AS vector), :resp, 0, :now, :exp) "
                     "ON CONFLICT DO NOTHING"
                 ),
                 {

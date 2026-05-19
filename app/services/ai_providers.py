@@ -195,7 +195,7 @@ class OpenAIProvider(BaseProvider):
 
 class GeminiProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
@@ -207,6 +207,7 @@ class GeminiProvider(BaseProvider):
                 json={
                     "system_instruction": {"parts": [{"text": sys_prompt}]},
                     "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": temperature},
                 },
             )
             resp.raise_for_status()
@@ -261,7 +262,7 @@ class GeminiProvider(BaseProvider):
 
 class PerplexityProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
@@ -277,6 +278,7 @@ class PerplexityProvider(BaseProvider):
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 4096,
+                    "temperature": temperature,
                 },
             )
             resp.raise_for_status()
