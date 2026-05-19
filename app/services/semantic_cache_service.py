@@ -123,25 +123,28 @@ async def _lookup(
     vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
     now = datetime.now(timezone.utc)
 
-    result = await db.execute(
-        text(
-            "SELECT id, response_json, "
-            "1 - (prompt_embedding <=> :emb::vector) AS sim "
-            "FROM semantic_cache "
-            "WHERE mode = :mode AND expires_at > :now "
-            "ORDER BY prompt_embedding <=> :emb::vector "
-            "LIMIT 1"
-        ),
-        {"emb": vector_str, "mode": mode, "now": now},
-    )
-    row = result.fetchone()
-    if row and row.sim >= SIMILARITY_THRESHOLD:
-        # incrementa hit_count
-        await db.execute(
-            text("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = :id"),
-            {"id": row.id},
-        )
-        return row.response_json
+    try:
+        async with db.begin_nested():
+            result = await db.execute(
+                text(
+                    "SELECT id, response_json, "
+                    "1 - (prompt_embedding <=> :emb::vector) AS sim "
+                    "FROM semantic_cache "
+                    "WHERE mode = :mode AND expires_at > :now "
+                    "ORDER BY prompt_embedding <=> :emb::vector "
+                    "LIMIT 1"
+                ),
+                {"emb": vector_str, "mode": mode, "now": now},
+            )
+            row = result.fetchone()
+            if row and row.sim >= SIMILARITY_THRESHOLD:
+                await db.execute(
+                    text("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = :id"),
+                    {"id": row.id},
+                )
+                return row.response_json
+    except Exception as exc:
+        logger.warning("[Cache] Erro no lookup pgvector: %s", exc)
     return None
 
 
@@ -201,22 +204,23 @@ async def store_response(
         now = datetime.now(timezone.utc)
         expires = now + timedelta(days=TTL_DAYS)
 
-        await db.execute(
-            text(
-                "INSERT INTO semantic_cache "
-                "(id, mode, normalized_prompt, prompt_embedding, response_json, hit_count, created_at, expires_at) "
-                "VALUES (gen_random_uuid(), :mode, :norm, :emb::vector, :resp, 0, :now, :exp) "
-                "ON CONFLICT DO NOTHING"
-            ),
-            {
-                "mode": mode,
-                "norm": normalized_prompt,
-                "emb": vector_str,
-                "resp": json.dumps(response_dict),
-                "now": now,
-                "exp": expires,
-            },
-        )
+        async with db.begin_nested():
+            await db.execute(
+                text(
+                    "INSERT INTO semantic_cache "
+                    "(id, mode, normalized_prompt, prompt_embedding, response_json, hit_count, created_at, expires_at) "
+                    "VALUES (gen_random_uuid(), :mode, :norm, :emb::vector, :resp, 0, :now, :exp) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {
+                    "mode": mode,
+                    "norm": normalized_prompt,
+                    "emb": vector_str,
+                    "resp": json.dumps(response_dict),
+                    "now": now,
+                    "exp": expires,
+                },
+            )
         logger.debug("[Cache] Resposta armazenada (modo=%s)", mode)
     except Exception as exc:
         logger.warning("[Cache] Erro ao armazenar resposta: %s", exc)
