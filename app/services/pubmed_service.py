@@ -111,28 +111,56 @@ async def _extract_citations(client: httpx.AsyncClient, agent_response: str) -> 
 
 # ── Trilha A: Verificar citações no PubMed ───────────────────────────────────
 
+_STOP_WORDS = {
+    "the", "for", "of", "and", "in", "on", "with", "a", "an", "to", "from",
+    "at", "by", "or", "is", "are", "was", "were", "its", "their", "this",
+    "guidelines", "guideline", "practice", "clinical", "management",
+    "treatment", "diagnosis", "international", "national", "consensus",
+    "recommendations", "statement", "care", "update", "society", "american",
+    "european", "brazilian", "heart", "failure",  # muito genérico isolado
+}
+
+
+def _build_keyword_query(citation: str) -> str:
+    """Extrai 3-4 termos clínicos significativos da citação para busca fallback."""
+    # remove abreviações entre parênteses: "(Sepsis-3)" → ""
+    text = re.sub(r"\([^)]+\)", "", citation)
+    # remove pontuação e anos
+    text = re.sub(r"[\"\',\.\-/]|\b\d{4}\b", " ", text)
+    words = [w for w in text.split() if w.lower() not in _STOP_WORDS and len(w) > 3]
+    key_terms = words[:4]
+    return " AND ".join(key_terms) if key_terms else citation[:80]
+
+
 async def _verify_citation(
     client: httpx.AsyncClient, citation: str
 ) -> VerifiedCitation:
-    """Busca uma citação no PubMed pelo título. Retorna PMID se encontrada."""
-    # limpa a citação para uso como query de título
+    """
+    Busca uma citação no PubMed em duas tentativas:
+    1. Título exato via [tiab]
+    2. Fallback com 3-4 termos-chave + filtro de guideline/consensus
+    """
     clean = re.sub(r"[\"']", "", citation)[:200]
-    params = {
-        "db": "pubmed",
-        "term": f"{clean}[tiab]",
-        "retmax": "1",
-        "retmode": "json",
-        "sort": "relevance",
-    }
+    base_params = {"db": "pubmed", "retmax": "1", "retmode": "json", "sort": "relevance"}
     if PUBMED_API_KEY:
-        params["api_key"] = PUBMED_API_KEY
+        base_params["api_key"] = PUBMED_API_KEY
+
+    searches = [
+        f"{clean}[tiab]",
+        f"{_build_keyword_query(citation)} AND "
+        f'("guideline"[pt] OR "practice guideline"[pt] OR "consensus"[tiab])',
+    ]
 
     try:
-        res = await client.get(f"{PUBMED_BASE}/esearch.fcgi", params=params)
-        res.raise_for_status()
-        pmids = res.json().get("esearchresult", {}).get("idlist", [])
-        if pmids:
-            return VerifiedCitation(title=citation, pmid=pmids[0], verified=True)
+        for term in searches:
+            res = await client.get(
+                f"{PUBMED_BASE}/esearch.fcgi",
+                params={**base_params, "term": term},
+            )
+            res.raise_for_status()
+            pmids = res.json().get("esearchresult", {}).get("idlist", [])
+            if pmids:
+                return VerifiedCitation(title=citation, pmid=pmids[0], verified=True)
     except Exception as exc:
         logger.debug("[PubMed] Erro verificando citação '%s': %s", citation[:60], exc)
 
