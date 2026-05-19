@@ -34,6 +34,7 @@ from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
+from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import triage
 
@@ -90,10 +91,20 @@ class OrquestradorService:
                     "disclaimer": DISCLAIMER_RESPOSTA,
                 }
 
-            # 3. Conversation
+            # 3. Cache semântico (apenas modos clínicos)
+            _cache_normalized: str = ""
+            _cache_embedding: list = []
+            if mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}:
+                cached, _cache_normalized, _cache_embedding = await get_cached_response(
+                    self.db, mode, sanitized_prompt
+                )
+                if cached is not None:
+                    return {**cached, "cache_hit": True}
+
+            # 4. Conversation
             conv_id = await self._ensure_conversation(conversation_id, prompt)
 
-            # 4. Interaction
+            # 5. Interaction
             interaction = Interaction(
                 conversation_id=conv_id,
                 user_id=self.user_id,
@@ -216,8 +227,9 @@ class OrquestradorService:
             self.db.add(audit)
             await self.db.flush()
 
-            return {
+            return_dict = {
                 "status": "ok",
+                "cache_hit": False,
                 "interaction_id": str(interaction.id),
                 "conversation_id": str(conv_id),
                 "mode": mode,
@@ -251,6 +263,17 @@ class OrquestradorService:
                 "total_response_time_ms": elapsed_ms,
                 "disclaimer": DISCLAIMER_RESPOSTA,
             }
+
+            # 12. Armazenar no cache semântico (apenas se não fallback e temos embedding)
+            if (
+                mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}
+                and not agent_response.get("is_fallback")
+                and _cache_embedding
+                and _cache_normalized
+            ):
+                await store_response(self.db, mode, _cache_normalized, _cache_embedding, return_dict)
+
+            return return_dict
 
         except Exception as e:
             logger.error(f"ERRO NO ORQUESTRADOR: {e}")

@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -287,3 +288,18 @@ class ModelPricing(Base):
     status: Mapped[bool] = mapped_column(Boolean, default=True)
     updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ── Semantic Cache ────────────────────────────────────────────
+
+class SemanticCache(Base):
+    __tablename__ = "semantic_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    mode: Mapped[str] = mapped_column(String(50), nullable=False)
+    normalized_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_embedding: Mapped[list] = mapped_column(Vector(1536), nullable=False)
+    response_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

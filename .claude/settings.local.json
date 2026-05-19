@@ -3,7 +3,13 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\" -Force)",
       "Bash(Select-Object Name, Mode)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(Get-ChildItem alembic/versions/)",
+      "Bash(Select-Object Name)",
+      "Bash(xargs grep -l \"semantic\\\\|vector\")",
+      "Bash(xargs cat)",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\"; $env:PYTHONPATH = \".\"; alembic upgrade head 2>&1)",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\"; $env:PYTHONPATH = \".\"; python check_table.py 2>&1)"
     ]
   }
 }
