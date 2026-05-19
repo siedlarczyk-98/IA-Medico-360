@@ -147,29 +147,14 @@ async def _verify_citation(
     if PUBMED_API_KEY:
         base_params["api_key"] = PUBMED_API_KEY
 
-    # detecta formato "Autor [Inicial] et al. Journal Ano"
     author_match = re.match(r"^([A-Za-z]+)", clean)
     year_match = re.search(r"\b(19|20)\d{2}\b", clean)
-    # captura o journal: texto entre "et al" e o ano
-    journal_match = re.search(r"et al\.?\s+([A-Za-z][A-Za-z\s]{2,40?})\s+\d{4}", clean)
 
-    if author_match and year_match and journal_match:
-        # busca precisa: autor + ano + journal
+    if author_match and year_match and "et al" in clean.lower():
+        # formato "Autor et al. Journal Ano" → autor + ano é suficientemente preciso
         author = author_match.group(1)
         year = year_match.group(0)
-        journal = journal_match.group(1).strip()
-        searches = [
-            f"{clean}[tiab]",
-            f"{author}[author] AND {year}[pdat] AND {journal}[journal]",
-        ]
-    elif author_match and year_match and "et al" in clean.lower():
-        # sem journal identificável: autor + ano
-        author = author_match.group(1)
-        year = year_match.group(0)
-        searches = [
-            f"{clean}[tiab]",
-            f"{author}[author] AND {year}[pdat]",
-        ]
+        searches = [f"{author}[author] AND {year}[pdat]"]
     else:
         searches = [
             f"{clean}[tiab]",
