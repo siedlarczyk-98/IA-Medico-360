@@ -84,7 +84,7 @@ class AnthropicProvider(BaseProvider):
                 provider="Anthropic",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
@@ -99,6 +99,7 @@ class AnthropicProvider(BaseProvider):
                     "model": model_id,
                     "max_tokens": 4096,
                     "stream": True,
+                    "temperature": temperature,
                     "system": sys_prompt,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -156,7 +157,7 @@ class OpenAIProvider(BaseProvider):
                 provider="OpenAI",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
@@ -173,6 +174,7 @@ class OpenAIProvider(BaseProvider):
                         {"role": "user", "content": prompt},
                     ],
                     "max_completion_tokens": 4096,
+                    "temperature": temperature,
                     "stream": True,
                 },
             ) as response:
@@ -222,7 +224,7 @@ class GeminiProvider(BaseProvider):
                 provider="Google",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
@@ -235,6 +237,7 @@ class GeminiProvider(BaseProvider):
                 json={
                     "system_instruction": {"parts": [{"text": sys_prompt}]},
                     "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": temperature},
                 },
             ) as response:
                 response.raise_for_status()
@@ -293,7 +296,7 @@ class PerplexityProvider(BaseProvider):
                 provider="Perplexity",
             )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
