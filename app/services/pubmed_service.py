@@ -81,13 +81,15 @@ async def _extract_citations(client: httpx.AsyncClient, agent_response: str) -> 
                 {
                     "role": "system",
                     "content": (
-                        "Extract all clinical guidelines, practice guidelines, and major "
-                        "scientific references cited in the medical text below. "
-                        "Return a JSON array of strings, each being the reference title "
-                        "as cited in the text. Include only guidelines and official "
-                        "recommendations — ignore general textbooks or vague mentions. "
+                        "Extract all references cited in the medical text below. Include: "
+                        "(1) clinical guidelines and official recommendations, "
+                        "(2) landmark/seminal scientific papers cited with author names. "
+                        "Return a JSON array of strings. For guidelines use the title as cited. "
+                        "For papers with authors use format 'Author et al. Journal Year' "
+                        "(e.g. 'Graus et al. Lancet Neurol 2016'). "
+                        "Ignore vague mentions without a specific reference. "
                         'Example: ["2022 AHA/ACC/HFSA Heart Failure Guideline", '
-                        '"2021 ESC Guidelines for Heart Failure", '
+                        '"Graus et al. Lancet Neurol 2016", '
                         '"Diretriz Brasileira de IC 2018"]. '
                         "Return an empty array [] if none are found."
                     ),
@@ -265,23 +267,24 @@ def _calculate_score(
     newer: list[PubMedArticle],
 ) -> float:
     """
-    Score baseado em fatos verificáveis:
-      - Sem citações na resposta              → 0.10
-      - Citações presentes mas não verificadas → 0.20
-      - Citações verificadas, sem novidades    → 0.85 + 0.05 por citação (max 1.0)
-      - Citações verificadas + nova diretriz   → penaliza 0.15 por novidade
+    Score baseado em fatos verificáveis. Recompensa verificações, não pune ausências
+    (diretrizes brasileiras/regionais são válidas mas não estão no PubMed).
+
+      Sem citações na resposta        → 0.10
+      Citações presentes (base)       → 0.60
+      +0.10 por citação verificada    → max +0.30
+      +0.10 se sem guidelines novas   → resposta atualizada
+      -0.15 por guideline mais nova   → modelo desatualizado
     """
     if not verified:
         return 0.10
 
     n_verified = sum(1 for c in verified if c.verified)
-
-    if n_verified == 0:
-        return 0.20
-
-    base = min(0.85 + 0.05 * n_verified, 1.0)
+    up_to_date_bonus = 0.10 if not newer else 0.0
     penalty = 0.15 * len(newer)
-    return round(max(base - penalty, 0.30), 2)
+
+    score = 0.60 + min(n_verified * 0.10, 0.30) + up_to_date_bonus - penalty
+    return round(max(score, 0.10), 2)
 
 
 # ── Pipeline interno ──────────────────────────────────────────────────────────

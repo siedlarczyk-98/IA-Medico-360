@@ -40,11 +40,11 @@ class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
     @abstractmethod
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         ...
 
     @abstractmethod
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         ...
 
 
@@ -52,7 +52,7 @@ class BaseProvider(ABC):
 
 class AnthropicProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
@@ -65,6 +65,7 @@ class AnthropicProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "max_tokens": 4096,
+                    "temperature": temperature,
                     "system": sys_prompt,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -124,7 +125,7 @@ class AnthropicProvider(BaseProvider):
 
 class OpenAIProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
@@ -140,6 +141,7 @@ class OpenAIProvider(BaseProvider):
                         {"role": "user", "content": prompt},
                     ],
                     "max_completion_tokens": 4096,
+                    "temperature": temperature,
                 },
             )
             resp.raise_for_status()

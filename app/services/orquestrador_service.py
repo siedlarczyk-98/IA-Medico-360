@@ -46,6 +46,13 @@ MODE_MODEL_MAP = {
     "PRODUCTIVITY": "gpt-5.4-nano",
 }
 
+# temperature=0 para modos clínicos garante respostas consistentes e reproduzíveis
+MODE_TEMPERATURE_MAP = {
+    "QUICK_SEARCH": 0.0,
+    "CLINICAL_REASONING": 0.0,
+    "PRODUCTIVITY": 0.7,
+}
+
 MODE_PROMPT_MAP = {
     "QUICK_SEARCH": SYSTEM_PROMPT_QUICK_SEARCH,
     "CLINICAL_REASONING": SYSTEM_PROMPT_CLINICAL_REASONING,
@@ -270,7 +277,8 @@ class OrquestradorService:
         provider = get_provider_by_type(model_info.provider_type)
 
         try:
-            response = await provider.complete(model_id, prompt, system_prompt=system_prompt)
+            temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
+        response = await provider.complete(model_id, prompt, system_prompt=system_prompt, temperature=temperature)
             return {
                 "text": response.text,
                 "model_id": model_id,
