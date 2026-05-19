@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\" -Force)",
+      "Bash(Select-Object Name, Mode)"
+    ]
+  }
+}

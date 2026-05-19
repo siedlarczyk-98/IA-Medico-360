@@ -28,10 +28,12 @@ from app.models.models import (
     InteractionResponse,
     ModelPricing,
     PharmaAlert,
+    PubmedValidation,
 )
 from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost
+from app.services.pubmed_service import validate_with_pubmed
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import triage
 
@@ -151,7 +153,34 @@ class OrquestradorService:
                     source=med["source"],
                 ))
 
-            # 10. Audit log
+            # 10. Validação PubMed (apenas modos clínicos; timeout 15s com fallback)
+            pubmed = await validate_with_pubmed(
+                agent_response=agent_response.get("text", ""),
+                mode=mode,
+                topic=classification.get("topic", ""),
+            )
+            interaction.confidence_score = pubmed.confidence_score
+            # persiste citações verificadas
+            for c in pubmed.cited_guidelines_verified:
+                if c.pmid:
+                    self.db.add(PubmedValidation(
+                        interaction_id=interaction.id,
+                        pmid=c.pmid,
+                        article_title=c.title,
+                        abstract_snippet=None,
+                        relevance_score=1.0 if c.verified else 0.0,
+                    ))
+            # persiste guidelines novas (pós-cutoff)
+            for a in pubmed.newer_guidelines_found:
+                self.db.add(PubmedValidation(
+                    interaction_id=interaction.id,
+                    pmid=a.pmid,
+                    article_title=a.article_title,
+                    abstract_snippet=a.abstract_snippet or None,
+                    relevance_score=0.0,
+                ))
+
+            # 11. Audit log
             audit = AuditLog(
                 user_id=self.user_id,
                 interaction_id=interaction.id,
@@ -169,6 +198,12 @@ class OrquestradorService:
                     "specialty_detected": classification["specialty"],
                     "topic_detected": classification["topic"],
                     "medications": [m["medication_normalized"] for m in medications],
+                    "pubmed_confidence_score": pubmed.confidence_score,
+                    "pubmed_low_evidence_alert": pubmed.low_evidence_alert,
+                    "pubmed_outdated_alert": pubmed.outdated_alert,
+                    "pubmed_fallback": pubmed.fallback,
+                    "pubmed_cited_verified": sum(1 for c in pubmed.cited_guidelines_verified if c.verified),
+                    "pubmed_newer_found": len(pubmed.newer_guidelines_found),
                 },
             )
             self.db.add(audit)
@@ -188,6 +223,24 @@ class OrquestradorService:
                 "cost_usd": float(cost),
                 "specialty_detected": classification["specialty"],
                 "topic_detected": classification["topic"],
+                "confidence_score": pubmed.confidence_score,
+                "low_evidence_alert": pubmed.low_evidence_alert,
+                "outdated_alert": pubmed.outdated_alert,
+                "cited_guidelines_verified": [
+                    {
+                        "title": c.title,
+                        "pmid": c.pmid,
+                        "verified": c.verified,
+                    }
+                    for c in pubmed.cited_guidelines_verified
+                ],
+                "newer_guidelines_found": [
+                    {
+                        "pmid": a.pmid,
+                        "title": a.article_title,
+                    }
+                    for a in pubmed.newer_guidelines_found
+                ],
                 "total_response_time_ms": elapsed_ms,
                 "disclaimer": DISCLAIMER_RESPOSTA,
             }
