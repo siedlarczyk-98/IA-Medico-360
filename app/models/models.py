@@ -155,6 +155,8 @@ class Interaction(Base):
     confidence_score: Mapped[float | None] = mapped_column(Float)
     specialty_detected: Mapped[str | None] = mapped_column(String(100))
     topic_detected: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(30), default="completed")
+    clarification_questions: Mapped[list | None] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

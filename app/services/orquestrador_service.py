@@ -31,6 +31,7 @@ from app.models.models import (
     PubmedValidation,
 )
 from app.services.ai_providers import get_provider_by_type
+from app.services.orquestrador_stream_service import _check_clarification
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
@@ -69,15 +70,25 @@ class OrquestradorService:
         self.user_id = user_id
         self.company_id = company_id
 
-    async def query(self, prompt: str, conversation_id: UUID | None = None) -> dict:
+    async def query(
+        self,
+        prompt: str,
+        conversation_id: UUID | None = None,
+        force: bool = False,
+        clarification_answers: str | None = None,
+    ) -> dict:
         try:
             start_time = time.monotonic()
 
-            # 1. DLP
+            # 1. Resolução de prompt: se há respostas de clarificação, monta contexto completo
+            if clarification_answers and conversation_id:
+                prompt = await self._resolve_clarification_prompt(conversation_id, clarification_answers)
+
+            # 2. DLP
             dlp_result = sanitize_prompt(prompt)
             sanitized_prompt = dlp_result.sanitized_text
 
-            # 2. Triagem (The Gatekeeper)
+            # 3. Triagem
             triage_result = await triage(sanitized_prompt)
             mode = triage_result["mode"]
             confidence = triage_result["confidence"]
@@ -91,7 +102,36 @@ class OrquestradorService:
                     "disclaimer": DISCLAIMER_RESPOSTA,
                 }
 
-            # 3. Cache semântico (apenas modos clínicos)
+            # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
+            if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
+                clarification = await _check_clarification(sanitized_prompt)
+                if not clarification.get("sufficient", True):
+                    questions = clarification.get("questions", [])
+                    conv_id = await self._ensure_conversation(conversation_id, prompt)
+                    pending = Interaction(
+                        conversation_id=conv_id,
+                        user_id=self.user_id,
+                        company_id=self.company_id,
+                        feature="ORQUESTRADOR",
+                        mode=mode,
+                        prompt_text=sanitized_prompt,
+                        prompt_sanitized=dlp_result.was_sanitized,
+                        triage_confidence=confidence,
+                        triage_category=mode,
+                        cache_hit=False,
+                        status="pending_clarification",
+                        clarification_questions=questions,
+                        started_at=datetime.now(timezone.utc),
+                    )
+                    self.db.add(pending)
+                    await self.db.flush()
+                    return {
+                        "status": "clarification_needed",
+                        "conversation_id": str(conv_id),
+                        "questions": questions,
+                    }
+
+            # 5. Cache semântico (apenas modos clínicos)
             _cache_normalized: str = ""
             _cache_embedding: list = []
             if mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}:
@@ -390,6 +430,37 @@ class OrquestradorService:
             "model_id": "pharmadb",
             "is_fallback": False,
         }
+
+    # ── Clarification ─────────────────────────────────────────
+
+    async def _resolve_clarification_prompt(
+        self, conversation_id: UUID, clarification_answers: str
+    ) -> str:
+        result = await self.db.execute(
+            select(Interaction).where(
+                Interaction.conversation_id == conversation_id,
+                Interaction.user_id == self.user_id,
+                Interaction.status == "pending_clarification",
+            ).order_by(Interaction.started_at.desc()).limit(1)
+        )
+        pending = result.scalar_one_or_none()
+
+        if not pending:
+            return clarification_answers
+
+        questions = pending.clarification_questions or []
+        questions_text = "\n".join(f"- {q}" for q in questions)
+
+        consolidated = (
+            f"{pending.prompt_text}\n\n"
+            f"Informações complementares solicitadas:\n{questions_text}\n\n"
+            f"Respostas do médico:\n{clarification_answers}"
+        )
+
+        pending.status = "resolved"
+        await self.db.flush()
+
+        return consolidated
 
     # ── Conversation ─────────────────────────────────────────
 

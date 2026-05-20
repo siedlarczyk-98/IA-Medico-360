@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, async_session_factory
 from app.models.models import User
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
@@ -23,6 +23,14 @@ class OrquestradorRequest(BaseModel):
     conversation_id: UUID | None = Field(
         default=None,
         description="ID da conversa existente (ou None para criar nova)",
+    )
+    force: bool = Field(
+        default=False,
+        description="Se true, pula a etapa de clarificação e executa o pipeline completo diretamente.",
+    )
+    clarification_answers: str | None = Field(
+        default=None,
+        description="Respostas do médico às perguntas de clarificação. Quando presente, o backend busca o prompt original e monta o contexto completo.",
     )
 
 
@@ -48,6 +56,8 @@ async def orquestrador_query(
     return await service.query(
         prompt=request.prompt,
         conversation_id=request.conversation_id,
+        force=request.force,
+        clarification_answers=request.clarification_answers,
     )
 
 
@@ -55,7 +65,6 @@ async def orquestrador_query(
 async def orquestrador_stream(
     request: OrquestradorRequest,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Orquestrador Multi-Agente com streaming SSE (Server-Sent Events).
@@ -71,7 +80,7 @@ async def orquestrador_stream(
     Não suporta PHARMA_CHECK — use /query para interações medicamentosas.
     """
     service = OrquestradorStreamService(
-        db=db,
+        session_factory=async_session_factory,
         user_id=user.id,
         company_id=user.company_id,
     )
@@ -79,6 +88,8 @@ async def orquestrador_stream(
         service.stream(
             prompt=request.prompt,
             conversation_id=request.conversation_id,
+            force=request.force,
+            clarification_answers=request.clarification_answers,
         ),
         media_type="text/event-stream",
         headers={
