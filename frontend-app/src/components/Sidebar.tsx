@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Logo } from './Logo';
 
 interface Props {
