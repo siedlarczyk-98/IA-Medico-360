@@ -73,9 +73,11 @@ class PharmaDBService:
                 f"{self.base_url}/auth/token",
                 headers={"x-api-key": self.api_key},
             )
+            logger.info(f"PharmaDB auth status: {resp.status_code} — {resp.text[:200]}")
             resp.raise_for_status()
             data = resp.json()
             self._jwt_token = data["access_token"]
+            logger.info(f"PharmaDB token obtido: {self._jwt_token[:20]}...")
             return self._jwt_token
 
     async def _api_get(self, path: str, params: dict | None = None) -> dict:
@@ -133,6 +135,7 @@ class PharmaDBService:
 
         try:
             data = await self._api_get("/v1/principios-ativos/busca", {"q": nome})
+            logger.info(f"PharmaDB PA busca '{nome}': {data}")
             items = data.get("items", [])
             if not items:
                 return None
