@@ -23,9 +23,9 @@ TTL_INTERACOES = timedelta(days=30)
 
 # Semáforo de segurança
 SEMAFORO = {
-    "grave": {"level": 4, "color": "vermelho", "emoji": "🔴"},
-    "moderada": {"level": 3, "color": "amarelo", "emoji": "🟡"},
-    "leve": {"level": 1, "color": "verde", "emoji": "🟢"},
+    "grave": {"level": 4, "color": "RED", "emoji": "🔴"},
+    "moderada": {"level": 3, "color": "YELLOW", "emoji": "🟡"},
+    "leve": {"level": 1, "color": "GREEN", "emoji": "🟢"},
 }
 
 
