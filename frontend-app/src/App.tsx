@@ -23,6 +23,7 @@ function App() {
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | undefined>();
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const topbarTitle = messages.length === 0
@@ -160,10 +161,15 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={setActiveConvId} />
+      <style>{`
+        @media (max-width: 700px) {
+          .sidebar { width: 0 !important; border: none !important; }
+        }
+      `}</style>
+      <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={setActiveConvId} open={sidebarOpen} onToggle={() => setSidebarOpen(o => !o)} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} />
+        <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} onMenuToggle={() => setSidebarOpen(o => !o)} />
 
         {mode === 'agregador' && (
           <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} />

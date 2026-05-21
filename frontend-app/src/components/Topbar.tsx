@@ -2,15 +2,37 @@ interface Props {
   title: string;
   mode: 'orquestrador' | 'agregador';
   onModeChange: (m: 'orquestrador' | 'agregador') => void;
+  onMenuToggle: () => void;
 }
 
-export function Topbar({ title, mode, onModeChange }: Props) {
+export function Topbar({ title, mode, onModeChange, onMenuToggle }: Props) {
   return (
     <header style={{
       height: 54, borderBottom: '1px solid var(--line2)',
       display: 'flex', alignItems: 'center', padding: '0 22px', gap: 14,
       flexShrink: 0,
     }}>
+      <>
+        <style>{`
+          .topbar-menu-btn { display: none !important; }
+          @media (max-width: 700px) {
+            .topbar-menu-btn { display: flex !important; }
+          }
+        `}</style>
+        <button
+          className="topbar-menu-btn"
+          onClick={onMenuToggle}
+          style={{
+            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
+            background: '#fff', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--pen)', flexShrink: 0,
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path d="M2 4 H14 M2 8 H14 M2 12 H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title}
