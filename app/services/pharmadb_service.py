@@ -37,6 +37,7 @@ class PharmaDBService:
         self.api_key = settings.pharmadb_api_key
         self._jwt_token: str | None = None
         self._redis: redis.Redis | None = None
+        logger.info(f"PharmaDBService init — api_key len={len(self.api_key)} empty={not self.api_key}")
 
     # ── Redis ────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ class PharmaDBService:
     # ── Autenticação PharmaDB ────────────────────────────────
 
     async def _get_token(self) -> str:
+        logger.info(f"PharmaDB _get_token called — cached={bool(self._jwt_token)} key_len={len(self.api_key)}")
         if self._jwt_token:
             return self._jwt_token
 
