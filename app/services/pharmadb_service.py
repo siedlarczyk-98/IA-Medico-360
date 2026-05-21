@@ -37,7 +37,7 @@ class PharmaDBService:
         self.api_key = settings.pharmadb_api_key
         self._jwt_token: str | None = None
         self._redis: redis.Redis | None = None
-        logger.info(f"PharmaDBService init — api_key len={len(self.api_key)} empty={not self.api_key}")
+        print(f"[PharmaDB] init — key_len={len(self.api_key)} empty={not self.api_key}", flush=True)
 
     # ── Redis ────────────────────────────────────────────────
 
@@ -66,10 +66,11 @@ class PharmaDBService:
     # ── Autenticação PharmaDB ────────────────────────────────
 
     async def _get_token(self) -> str:
-        logger.info(f"PharmaDB _get_token called — cached={bool(self._jwt_token)} key_len={len(self.api_key)}")
+        print(f"[PharmaDB] _get_token — cached={bool(self._jwt_token)} key_len={len(self.api_key)}", flush=True)
         if self._jwt_token:
             return self._jwt_token
 
+        print(f"[PharmaDB] auth POST — key='{self.api_key[:12]}...'", flush=True)
         logger.info(f"PharmaDB auth — chave usada: '{self.api_key[:8]}...' len={len(self.api_key)}")
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
