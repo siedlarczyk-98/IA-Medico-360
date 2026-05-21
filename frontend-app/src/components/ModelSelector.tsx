@@ -4,9 +4,10 @@ import { fetchModels, type AIModel } from '../api/agregador';
 interface Props {
   selected: string[];
   onChange: (ids: string[]) => void;
+  max?: number;
 }
 
-export function ModelSelector({ selected, onChange }: Props) {
+export function ModelSelector({ selected, onChange, max = 4 }: Props) {
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,7 +21,7 @@ export function ModelSelector({ selected, onChange }: Props) {
   function toggle(id: string) {
     if (selected.includes(id)) {
       onChange(selected.filter(s => s !== id));
-    } else if (selected.length < 4) {
+    } else if (selected.length < max) {
       onChange([...selected, id]);
     }
   }
@@ -48,14 +49,14 @@ export function ModelSelector({ selected, onChange }: Props) {
           <button
             key={m.model_id}
             onClick={() => toggle(m.model_id)}
-            title={selected.length >= 4 && !active ? 'Máximo 4 modelos' : undefined}
+            title={selected.length >= max && !active ? `Máximo ${max} modelo${max > 1 ? 's' : ''}` : undefined}
             style={{
               padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
               border: `1px solid ${active ? 'transparent' : 'var(--line2)'}`,
               background: active ? 'var(--mint)' : '#fff',
               color: active ? 'var(--petrol)' : 'var(--pen2)',
-              cursor: selected.length >= 4 && !active ? 'not-allowed' : 'pointer',
-              opacity: selected.length >= 4 && !active ? 0.45 : 1,
+              cursor: selected.length >= max && !active ? 'not-allowed' : 'pointer',
+              opacity: selected.length >= max && !active ? 0.45 : 1,
               transition: 'background 0.12s, color 0.12s',
             }}
           >

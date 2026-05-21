@@ -1,4 +1,4 @@
-const BASE  = import.meta.env.VITE_API_URL   ?? 'http://localhost:8000';
+const BASE  = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const TOKEN = import.meta.env.VITE_API_TOKEN ?? '';
 
 function authHeaders(): HeadersInit {
@@ -28,6 +28,29 @@ export interface StreamParams {
   conversation_id?: string;
   clarification_answers?: string;
   force?: boolean;
+}
+
+export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
+  const res = await fetch(`${BASE}/api/v1/orquestrador/query`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      prompt: params.prompt,
+      ...(params.conversation_id       ? { conversation_id: params.conversation_id }           : {}),
+      ...(params.clarification_answers ? { clarification_answers: params.clarification_answers } : {}),
+      ...(params.force                 ? { force: params.force }                               : {}),
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`API error ${res.status}: ${detail}`);
+  }
+  const data = await res.json();
+  return {
+    response: data.response ?? data.response_text ?? JSON.stringify(data),
+    mode: data.mode ?? 'PHARMA_CHECK',
+    conversation_id: data.conversation_id ?? '',
+  };
 }
 
 export async function* streamQuery(

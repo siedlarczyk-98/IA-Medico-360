@@ -6,7 +6,7 @@ import { ChatView } from './components/ChatView';
 import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import { ModelSelector } from './components/ModelSelector';
-import { streamQuery, type Message } from './api/orquestrador';
+import { streamQuery, queryOrquestrador, type Message } from './api/orquestrador';
 import { streamAgregador } from './api/agregador';
 
 type AppMode = 'orquestrador' | 'agregador';
@@ -65,8 +65,17 @@ function App() {
           return;
         }
         if (event.type === 'token')  appendAssistant(event.text, acc, added);
-        if (event.type === 'done')   setActiveConvId(event.conversation_id);
-        if (event.type === 'error')  setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${event.message}` }]);
+        if (event.type === 'done')  setActiveConvId(event.conversation_id);
+        if (event.type === 'error') {
+          if (event.status === 'unsupported_mode') {
+            // PHARMA_CHECK não suporta streaming — fallback para /query
+            const result = await queryOrquestrador(params);
+            setMessages(prev => [...prev, { role: 'assistant', content: result.response, mode: result.mode }]);
+            if (result.conversation_id) setActiveConvId(result.conversation_id);
+          } else {
+            setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${event.message}` }]);
+          }
+        }
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -157,7 +166,7 @@ function App() {
         <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} />
 
         {mode === 'agregador' && (
-          <ModelSelector selected={selectedModels} onChange={setSelectedModels} />
+          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} />
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
