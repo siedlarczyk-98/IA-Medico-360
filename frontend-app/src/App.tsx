@@ -161,11 +161,6 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <style>{`
-        @media (max-width: 700px) {
-          .sidebar { width: 0 !important; border: none !important; }
-        }
-      `}</style>
       <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={setActiveConvId} open={sidebarOpen} onToggle={() => setSidebarOpen(o => !o)} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

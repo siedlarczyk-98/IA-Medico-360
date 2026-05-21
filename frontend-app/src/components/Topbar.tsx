@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 interface Props {
   title: string;
   mode: 'orquestrador' | 'agregador';
@@ -5,34 +7,40 @@ interface Props {
   onMenuToggle: () => void;
 }
 
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth <= 700);
+  useEffect(() => {
+    const handler = () => setMobile(window.innerWidth <= 700);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return mobile;
+}
+
 export function Topbar({ title, mode, onModeChange, onMenuToggle }: Props) {
+  const isMobile = useIsMobile();
+
   return (
     <header style={{
       height: 54, borderBottom: '1px solid var(--line2)',
-      display: 'flex', alignItems: 'center', padding: '0 22px', gap: 14,
+      display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10,
       flexShrink: 0,
     }}>
-      <>
-        <style>{`
-          .topbar-menu-btn { display: none !important; }
-          @media (max-width: 700px) {
-            .topbar-menu-btn { display: flex !important; }
-          }
-        `}</style>
+      {isMobile && (
         <button
-          className="topbar-menu-btn"
           onClick={onMenuToggle}
           style={{
-            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
-            background: '#fff', alignItems: 'center', justifyContent: 'center',
-            color: 'var(--pen)', flexShrink: 0,
+            width: 34, height: 34, borderRadius: 8, border: '1px solid var(--line2)',
+            background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--pen)', flexShrink: 0, cursor: 'pointer',
           }}
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <path d="M2 4 H14 M2 8 H14 M2 12 H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
-      </>
+      )}
+
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title}
@@ -44,50 +52,55 @@ export function Topbar({ title, mode, onModeChange, onMenuToggle }: Props) {
 
       <div style={{
         display: 'flex', background: 'var(--fill2)', padding: 3,
-        borderRadius: 8, fontSize: 11, fontWeight: 600,
+        borderRadius: 8, fontSize: 11, fontWeight: 600, flexShrink: 0,
       }}>
         {(['orquestrador', 'agregador'] as const).map(m => (
           <button
             key={m}
             onClick={() => onModeChange(m)}
             style={{
-              padding: '5px 12px', border: 'none',
+              padding: isMobile ? '5px 8px' : '5px 12px', border: 'none',
               borderRadius: 6,
               background: mode === m ? 'var(--paper)' : 'transparent',
               color: mode === m ? 'var(--ink)' : 'var(--pen2)',
               boxShadow: mode === m ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
               display: 'flex', alignItems: 'center', gap: 5,
-              transition: 'background 0.15s',
+              transition: 'background 0.15s', cursor: 'pointer',
+              fontSize: isMobile ? 10 : 11,
             }}
           >
             {m === 'orquestrador' && mode === 'orquestrador' && (
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)' }} />
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', flexShrink: 0 }} />
             )}
             {m === 'orquestrador' ? 'Orquestrador' : 'Agregador'}
           </button>
         ))}
       </div>
 
-      <button style={{
-        width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
-        background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--pen)',
-      }} title="Exportar">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2 V10 M5 7 L8 10 L11 7 M3 12 V13 H13 V12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      <button style={{
-        width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
-        background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--pen)',
-      }} title="Mais opções">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <circle cx="3.5" cy="8" r="1.3" fill="currentColor" />
-          <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-          <circle cx="12.5" cy="8" r="1.3" fill="currentColor" />
-        </svg>
-      </button>
+      {!isMobile && (
+        <>
+          <button style={{
+            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
+            background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--pen)', cursor: 'pointer',
+          }} title="Exportar">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2 V10 M5 7 L8 10 L11 7 M3 12 V13 H13 V12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button style={{
+            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
+            background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--pen)', cursor: 'pointer',
+          }} title="Mais opções">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <circle cx="3.5" cy="8" r="1.3" fill="currentColor" />
+              <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+              <circle cx="12.5" cy="8" r="1.3" fill="currentColor" />
+            </svg>
+          </button>
+        </>
+      )}
     </header>
   );
 }
