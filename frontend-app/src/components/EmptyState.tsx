@@ -5,7 +5,9 @@ const suggestions = [
   { icon: 'produtividade', title: 'Produtividade', q: 'Escrever laudo de USG transvaginal: útero em AVF, sem alterações.' },
 ];
 
-const icons: Record<string, JSX.Element> = {
+import type { ReactElement } from 'react';
+
+const icons: Record<string, ReactElement> = {
   raciocinio: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
       <path d="M8 1.5 C5 1.5 3.5 3.5 3.5 5.5 C3.5 7 2 7.5 2 9 C2 10.5 3.5 11 3.5 12.5 L3.5 14 L12.5 14 L12.5 12.5 C12.5 11 14 10.5 14 9 C14 7.5 12.5 7 12.5 5.5 C12.5 3.5 11 1.5 8 1.5 Z"
