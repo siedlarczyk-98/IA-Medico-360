@@ -68,6 +68,7 @@ class PharmaDBService:
         if self._jwt_token:
             return self._jwt_token
 
+        logger.info(f"PharmaDB auth — chave usada: '{self.api_key[:8]}...' len={len(self.api_key)}")
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{self.base_url}/auth/token",
