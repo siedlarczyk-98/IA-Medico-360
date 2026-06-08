@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { fetchModels, type AIModel } from '../api/agregador';
+import { MODEL_DESCRIPTIONS } from '../lib/modelDescriptions';
 
 interface Props {
   selected: string[];
   onChange: (ids: string[]) => void;
   max?: number;
+  locked?: boolean;
 }
 
-export function ModelSelector({ selected, onChange, max = 4 }: Props) {
+export function ModelSelector({ selected, onChange, max = 4, locked = false }: Props) {
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,6 +21,7 @@ export function ModelSelector({ selected, onChange, max = 4 }: Props) {
   }, []);
 
   function toggle(id: string) {
+    if (locked) return;
     if (selected.includes(id)) {
       onChange(selected.filter(s => s !== id));
     } else if (selected.length < max) {
@@ -45,18 +48,24 @@ export function ModelSelector({ selected, onChange, max = 4 }: Props) {
       </span>
       {available.map(m => {
         const active = selected.includes(m.model_id);
+        const desc = MODEL_DESCRIPTIONS[m.model_id];
+        const atMax = selected.length >= max && !active;
+        let tooltipText: string | undefined;
+        if (locked) tooltipText = 'Para trocar de modelo, inicie uma nova consulta';
+        else if (atMax) tooltipText = `Máximo ${max} modelo${max > 1 ? 's' : ''}`;
+        else if (desc) tooltipText = desc;
         return (
           <button
             key={m.model_id}
             onClick={() => toggle(m.model_id)}
-            title={selected.length >= max && !active ? `Máximo ${max} modelo${max > 1 ? 's' : ''}` : undefined}
+            title={tooltipText}
             style={{
               padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
               border: `1px solid ${active ? 'transparent' : 'var(--line2)'}`,
               background: active ? 'var(--mint)' : '#fff',
               color: active ? 'var(--petrol)' : 'var(--pen2)',
-              cursor: selected.length >= max && !active ? 'not-allowed' : 'pointer',
-              opacity: selected.length >= max && !active ? 0.45 : 1,
+              cursor: locked || atMax ? 'not-allowed' : 'pointer',
+              opacity: !locked && atMax ? 0.45 : 1,
               transition: 'background 0.12s, color 0.12s',
             }}
           >
@@ -64,7 +73,11 @@ export function ModelSelector({ selected, onChange, max = 4 }: Props) {
           </button>
         );
       })}
-      {selected.length > 0 && (
+      {locked ? (
+        <span style={{ fontSize: 10.5, color: 'var(--pen3)', marginLeft: 4, fontStyle: 'italic' }}>
+          Para trocar de modelo, inicie uma nova consulta
+        </span>
+      ) : selected.length > 0 && (
         <span style={{ fontSize: 10.5, color: 'var(--pen3)', marginLeft: 4 }}>
           {selected.length}/4 selecionados
         </span>

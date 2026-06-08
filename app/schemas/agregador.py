@@ -22,6 +22,11 @@ class AIModelDisplay(BaseModel):
 
 # ── Request ──────────────────────────────────────────────────
 
+class ConversationMessage(BaseModel):
+    role: str   # 'user' | 'assistant'
+    content: str
+
+
 class AgregadorRequest(BaseModel):
     """
     RN-AGR-001: ao menos 1 modelo, até 4.
@@ -42,6 +47,14 @@ class AgregadorRequest(BaseModel):
     conversation_id: UUID | None = Field(
         default=None,
         description="ID da conversa existente (ou None para criar nova)",
+    )
+    history: list[ConversationMessage] = Field(
+        default_factory=list,
+        description="Histórico de mensagens anteriores da conversa",
+    )
+    effort: str = Field(
+        default="detalhado",
+        description="Nível de esforço da resposta: 'rápido' (conciso) ou 'detalhado' (padrão).",
     )
 
     @field_validator("models")

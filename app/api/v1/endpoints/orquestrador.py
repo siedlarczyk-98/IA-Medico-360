@@ -9,6 +9,7 @@ from app.core.database import get_db, async_session_factory
 from app.models.models import User
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
+from app.services.usage_service import check_limit
 
 router = APIRouter(prefix="/orquestrador", tags=["Orquestrador Multi-Agente"])
 
@@ -32,6 +33,10 @@ class OrquestradorRequest(BaseModel):
         default=None,
         description="Respostas do médico às perguntas de clarificação. Quando presente, o backend busca o prompt original e monta o contexto completo.",
     )
+    effort: str = Field(
+        default="detalhado",
+        description="Nível de esforço da resposta: 'rápido' (conciso) ou 'detalhado' (padrão).",
+    )
 
 
 @router.post("/query")
@@ -48,6 +53,9 @@ async def orquestrador_query(
     - PHARMA_CHECK → PharmaDB (interações medicamentosas)
     - PRODUCTIVITY → GPT-5.4 Nano (tarefas não clínicas)
     """
+    await check_limit(db, user)
+    await db.commit()
+
     service = OrquestradorService(
         db=db,
         user_id=user.id,
@@ -65,6 +73,7 @@ async def orquestrador_query(
 async def orquestrador_stream(
     request: OrquestradorRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Orquestrador Multi-Agente com streaming SSE (Server-Sent Events).
@@ -79,6 +88,9 @@ async def orquestrador_stream(
 
     Não suporta PHARMA_CHECK — use /query para interações medicamentosas.
     """
+    await check_limit(db, user)
+    await db.commit()
+
     service = OrquestradorStreamService(
         session_factory=async_session_factory,
         user_id=user.id,
@@ -90,6 +102,7 @@ async def orquestrador_stream(
             conversation_id=request.conversation_id,
             force=request.force,
             clarification_answers=request.clarification_answers,
+            effort=request.effort,
         ),
         media_type="text/event-stream",
         headers={

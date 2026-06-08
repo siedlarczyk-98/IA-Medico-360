@@ -1,0 +1,71 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { acceptInvite } from '../api/auth';
+import { setToken } from '../lib/auth';
+
+export function InvitePage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const token = searchParams.get('token');
+    if (!token) {
+      setError('Link de convite inválido.');
+      return;
+    }
+    acceptInvite(token)
+      .then(res => {
+        setToken(res.access_token);
+        navigate(res.onboarding_complete ? '/' : '/onboarding', { replace: true });
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Link inválido ou expirado.');
+      });
+  }, []);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--fill2)',
+    }}>
+      {error ? (
+        <div style={{
+          maxWidth: 360,
+          textAlign: 'center',
+          padding: 32,
+          background: '#fff',
+          border: '1px solid var(--line)',
+          borderRadius: 16,
+          boxShadow: '0 4px 24px rgba(14,37,45,0.07)',
+        }}>
+          <p style={{ fontSize: 14, color: 'var(--red)', marginBottom: 16 }}>{error}</p>
+          <button
+            onClick={() => navigate('/login')}
+            style={{
+              fontSize: 13, color: 'var(--petrol)', background: 'none',
+              border: '1px solid var(--line)', borderRadius: 8,
+              padding: '8px 16px', cursor: 'pointer',
+            }}
+          >
+            Ir para o login
+          </button>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            border: '3px solid var(--mint)', borderTopColor: 'var(--green)',
+            animation: 'spin 0.8s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ fontSize: 13, color: 'var(--pen2)' }}>Validando convite…</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+    </div>
+  );
+}

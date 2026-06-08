@@ -1,10 +1,12 @@
-const BASE  = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const TOKEN = import.meta.env.VITE_API_TOKEN ?? '';
+import { getToken } from '../lib/auth';
+
+const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
 function authHeaders(): HeadersInit {
+  const token = getToken();
   return {
     'Content-Type': 'application/json',
-    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -28,6 +30,7 @@ export interface StreamParams {
   conversation_id?: string;
   clarification_answers?: string;
   force?: boolean;
+  effort?: 'rápido' | 'detalhado';
 }
 
 export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
@@ -39,6 +42,7 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.conversation_id       ? { conversation_id: params.conversation_id }           : {}),
       ...(params.clarification_answers ? { clarification_answers: params.clarification_answers } : {}),
       ...(params.force                 ? { force: params.force }                               : {}),
+      effort: params.effort ?? 'detalhado',
     }),
   });
   if (!res.ok) {
@@ -65,6 +69,7 @@ export async function* streamQuery(
       ...(params.conversation_id     ? { conversation_id: params.conversation_id }         : {}),
       ...(params.clarification_answers ? { clarification_answers: params.clarification_answers } : {}),
       ...(params.force               ? { force: params.force }                             : {}),
+      effort: params.effort ?? 'detalhado',
     }),
     signal,
   });

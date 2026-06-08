@@ -1,13 +1,16 @@
 import { useRef, useState } from 'react';
 
+export type Effort = 'rápido' | 'detalhado';
+
 interface Props {
-  onSend: (text: string) => void;
+  onSend: (text: string, effort: Effort) => void;
   disabled?: boolean;
   placeholder?: string;
 }
 
 export function InputBar({ onSend, disabled, placeholder }: Props) {
   const [value, setValue] = useState('');
+  const [effort, setEffort] = useState<Effort>('detalhado');
   const ref = useRef<HTMLTextAreaElement>(null);
   const filled = value.trim().length > 0;
 
@@ -25,7 +28,7 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
 
   function submit() {
     if (!filled || disabled) return;
-    onSend(value.trim());
+    onSend(value.trim(), effort);
     setValue('');
     if (ref.current) ref.current.style.height = 'auto';
   }
@@ -45,7 +48,7 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
           value={value}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? 'Pergunte algo clínico — o modo será roteado automaticamente.'}
+          placeholder={placeholder ?? 'Pergunte algo — o modo será roteado automaticamente.'}
           disabled={disabled}
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
@@ -54,14 +57,30 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
           }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <button style={{
-            width: 28, height: 28, borderRadius: 8,
-            border: '1px solid var(--line2)', background: '#fff',
-            color: 'var(--pen2)', fontSize: 18, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-          }}>+</button>
-          <Chip icon={<UploadIcon />}>Anexar exame</Chip>
-          <Chip icon={<MicIcon />}>Ditar</Chip>
+          {/* Segmented control de esforço */}
+          <div style={{
+            display: 'flex', borderRadius: 8, overflow: 'hidden',
+            border: '1px solid var(--line2)', background: 'var(--fill)',
+          }}>
+            {(['rápido', 'detalhado'] as Effort[]).map(opt => (
+              <button
+                key={opt}
+                onClick={() => setEffort(opt)}
+                title={opt === 'rápido'
+                  ? 'Resposta direta e objetiva — ideal para dúvidas rápidas do dia a dia'
+                  : 'Resposta completa com raciocínio clínico detalhado — ideal para casos complexos'}
+                style={{
+                  padding: '3px 10px', fontSize: 10.5, fontWeight: 600, border: 'none',
+                  background: effort === opt ? 'var(--petrol)' : 'transparent',
+                  color: effort === opt ? '#fff' : 'var(--pen3)',
+                  cursor: 'pointer', textTransform: 'capitalize',
+                  transition: 'background 0.12s, color 0.12s',
+                }}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>
           <button
@@ -87,32 +106,3 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
   );
 }
 
-function Chip({ children, icon }: { children: React.ReactNode; icon: React.ReactNode }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '3px 8px', fontSize: 10.5, fontWeight: 500,
-      color: 'var(--pen)', background: 'var(--fill2)',
-      border: '1px solid var(--line)', borderRadius: 999, cursor: 'pointer',
-    }}>
-      {icon}{children}
-    </span>
-  );
-}
-
-function UploadIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-      <path d="M8 3 V13 M5 6 L8 3 L11 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function MicIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-      <rect x="6" y="2" width="4" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M4 9 V10 Q4 12 8 12 Q12 12 12 10 V9 M8 12 V14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}

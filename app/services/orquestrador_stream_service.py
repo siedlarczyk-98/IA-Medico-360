@@ -39,6 +39,7 @@ from app.models.models import (
 from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost
+from app.services.usage_service import record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
@@ -112,6 +113,7 @@ class OrquestradorStreamService:
         conversation_id: UUID | None = None,
         force: bool = False,
         clarification_answers: str | None = None,
+        effort: str = "detalhado",
     ) -> AsyncIterator[str]:
         """
         Gerador SSE. Yields strings no formato 'event: ...\ndata: ...\n\n'.
@@ -219,6 +221,8 @@ class OrquestradorStreamService:
                 # 5. Streaming do modelo
                 model_id = MODE_MODEL_MAP.get(mode)
                 system_prompt = MODE_PROMPT_MAP.get(mode)
+                if effort == "rápido" and system_prompt:
+                    system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
                 temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
 
                 result = await db.execute(
@@ -388,6 +392,8 @@ class OrquestradorStreamService:
                         "disclaimer": DISCLAIMER_RESPOSTA,
                     }
                     await store_response(db, mode, _cache_normalized, _cache_embedding, done_payload)
+
+                await record_cost(db, self.user_id, cost)
 
                 # Commit explícito — sessão gerenciada aqui, não pelo get_db
                 await db.commit()

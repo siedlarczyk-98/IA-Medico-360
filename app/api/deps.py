@@ -29,11 +29,7 @@ async def get_current_user(
             detail="Token não fornecido",
         )
 
-    # Limpeza do token para evitar o erro de 'Illegal Header'
     token = credentials.credentials.strip().replace("\n", "").replace("\r", "")
-    
-    print(f"--- DEBUG RAILWAY ---")
-    print(f"Token limpo recebido (10 chars): {token[:10]}...")
 
     try:
         payload = jwt.decode(
@@ -47,25 +43,18 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token inválido: campo 'sub' ausente",
             )
-    except JWTError as e:
-        print(f"Erro JWT: {str(e)}")
+    except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido ou expirado",
         )
 
-    # Busca no banco de dados
-    try:
-        result = await db.execute(
-            select(User).where(User.id == UUID(user_id), User.status == True)
-        )
-        user = result.scalar_one_or_none()
-    except Exception as e:
-        print(f"Erro ao buscar no banco: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erro interno ao acessar banco")
+    result = await db.execute(
+        select(User).where(User.id == UUID(user_id), User.status == True)
+    )
+    user = result.scalar_one_or_none()
 
     if not user:
-        print(f"Usuário {user_id} não encontrado no banco do Railway!")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário não encontrado ou inativo",

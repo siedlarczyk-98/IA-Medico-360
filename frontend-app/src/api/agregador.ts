@@ -1,10 +1,12 @@
-const BASE  = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const TOKEN = import.meta.env.VITE_API_TOKEN ?? '';
+import { getToken } from '../lib/auth';
+
+const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
 function authHeaders(): HeadersInit {
+  const token = getToken();
   return {
     'Content-Type': 'application/json',
-    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -24,17 +26,26 @@ export async function fetchModels(): Promise<AIModel[]> {
 export type AgregadorStreamEvent =
   | { type: 'delta';    model_id: string; delta: string }
   | { type: 'complete'; model_id: string; response_time_ms: number; tokens_in?: number; tokens_out?: number }
+  | { type: 'done';     conversation_id: string }
   | { type: 'error';    model_id?: string; error?: string; message?: string };
+
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export async function* streamAgregador(
   prompt: string,
   models: string[],
   signal?: AbortSignal,
+  conversation_id?: string,
+  history?: HistoryMessage[],
+  effort: 'rápido' | 'detalhado' = 'detalhado',
 ): AsyncGenerator<AgregadorStreamEvent> {
   const res = await fetch(`${BASE}/api/v1/agregador/stream`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ prompt, models }),
+    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort }),
     signal,
   });
 

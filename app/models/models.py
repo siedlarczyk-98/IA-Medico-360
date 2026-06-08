@@ -84,10 +84,12 @@ class User(Base):
     phone_number: Mapped[str | None] = mapped_column(String(20))
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("company.id"))
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    crm: Mapped[str] = mapped_column(String(20), nullable=False)
-    crm_state: Mapped[str] = mapped_column(String(2), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), default="free_user")
+    name: Mapped[str | None] = mapped_column(String(255))
+    crm: Mapped[str | None] = mapped_column(String(20))
+    crm_state: Mapped[str | None] = mapped_column(String(2))
+    role: Mapped[str] = mapped_column(String(50), default="beta_user")
+    med_status: Mapped[str | None] = mapped_column(String(50))
+    onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy_user_id: Mapped[str | None] = mapped_column(String(255))
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -97,6 +99,7 @@ class User(Base):
     company: Mapped["Company | None"] = relationship(back_populates="users")
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
     preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False)
+    weekly_usage: Mapped["UserWeeklyUsage | None"] = relationship(back_populates="user", uselist=False)
 
 
 # ── User Preferences - ok ─────────────────────────────────────
@@ -113,6 +116,22 @@ class UserPreference(Base):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="preferences")
+
+
+# ── User Weekly Usage ─────────────────────────────────────────────
+
+class UserWeeklyUsage(Base):
+    __tablename__ = "user_weekly_usage"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    week_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    total_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False, default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=utcnow)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="weekly_usage")
 
 
 # ── Conversation - ok ────────────────────────────────────────────
@@ -305,3 +324,30 @@ class SemanticCache(Base):
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# ── OTP Codes ─────────────────────────────────────────────────
+
+class OtpCode(Base):
+    __tablename__ = "otp_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(6), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+# ── Invite Tokens ─────────────────────────────────────────────
+
+class InviteToken(Base):
+    __tablename__ = "invite_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=new_uuid, unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)

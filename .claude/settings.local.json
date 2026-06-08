@@ -11,7 +11,12 @@
       "PowerShell(Set-Location \"c:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\"; $env:PYTHONPATH = \".\"; alembic upgrade head 2>&1)",
       "PowerShell(Set-Location \"c:\\\\Users\\\\Active\\\\Desktop\\\\IA-Medico-360\"; $env:PYTHONPATH = \".\"; python check_table.py 2>&1)",
       "Bash(npm create *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(pkill -f \"uvicorn app.main\")",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

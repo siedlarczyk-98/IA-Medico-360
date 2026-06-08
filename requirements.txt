@@ -27,6 +27,9 @@ redis==5.2.1
 # pgvector (cache semântico)
 pgvector==0.3.6
 
+# Email
+sendgrid==6.11.0
+
 # Utilities
 orjson==3.10.12
 tenacity==9.0.0

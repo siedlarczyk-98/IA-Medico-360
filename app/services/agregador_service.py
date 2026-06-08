@@ -34,6 +34,7 @@ from app.schemas.agregador import (
 from app.services.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost
+from app.services.usage_service import record_cost
 from app.services.specialty_detector import detect_specialty_and_topic
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,8 @@ class AgregadorService:
                             error=error_msg,
                         )
                     )
+
+            await record_cost(self.db, self.user_id, total_cost)
 
             # 7. Finalizar interaction
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -274,6 +277,38 @@ class AgregadorService:
         self.db.add(conv)
         await self.db.flush()
         return conv.id
+
+    # ── Contexto de conversa para streaming ─────────────────
+
+    async def get_conversation_context(self, conversation_id: UUID, limit: int = 5) -> str:
+        """
+        Retorna as últimas N interações da conversa formatadas como contexto.
+        Inclui prompt do médico e primeira resposta de cada interação.
+        """
+        stmt = (
+            select(Interaction)
+            .options(selectinload(Interaction.responses))
+            .where(
+                Interaction.conversation_id == conversation_id,
+                Interaction.feature == "AGREGADOR",
+            )
+            .order_by(Interaction.createdat.desc())
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        interactions = list(reversed(result.scalars().all()))
+
+        if not interactions:
+            return ""
+
+        parts = ["[Conversa anterior]"]
+        for inter in interactions:
+            parts.append(f"Médico: {inter.prompt_text}")
+            for resp in inter.responses[:1]:  # primeira resposta disponível
+                if resp.response_text:
+                    parts.append(f"Assistente ({resp.model_used}): {resp.response_text[:800]}")
+        parts.append("[Pergunta atual]")
+        return "\n".join(parts) + "\n"
 
     # ── Histórico (RN-AGR-004) ───────────────────────────────
 

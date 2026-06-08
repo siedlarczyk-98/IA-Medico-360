@@ -77,30 +77,6 @@ export function Topbar({ title, mode, onModeChange, onMenuToggle }: Props) {
         ))}
       </div>
 
-      {!isMobile && (
-        <>
-          <button style={{
-            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
-            background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'var(--pen)', cursor: 'pointer',
-          }} title="Exportar">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M8 2 V10 M5 7 L8 10 L11 7 M3 12 V13 H13 V12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <button style={{
-            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line2)',
-            background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'var(--pen)', cursor: 'pointer',
-          }} title="Mais opções">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <circle cx="3.5" cy="8" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-              <circle cx="12.5" cy="8" r="1.3" fill="currentColor" />
-            </svg>
-          </button>
-        </>
-      )}
     </header>
   );
 }

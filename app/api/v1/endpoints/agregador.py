@@ -30,6 +30,7 @@ from app.schemas.agregador import (
 )
 from app.services.agregador_service import AgregadorService
 from app.services.ai_providers import get_provider_by_type
+from app.services.usage_service import check_limit
 
 router = APIRouter(prefix="/agregador", tags=["Agregador de IA"])
 
@@ -90,6 +91,8 @@ async def agregador_query(
     Envia consulta ao Agregador de IA.
     Chama os modelos selecionados em paralelo e retorna todas as respostas.
     """
+    await check_limit(db, user)
+
     service = AgregadorService(
         db=db,
         user_id=user.id,
@@ -111,6 +114,25 @@ async def agregador_stream(
     Retorna Server-Sent Events com chunks de cada modelo.
     """
 
+    await check_limit(db, user)
+
+    service = AgregadorService(db=db, user_id=user.id, company_id=user.company_id)
+
+    # Criar/recuperar conversa para manter contexto
+    conversation_id = await service._ensure_conversation(request.conversation_id, request.prompt)
+    await db.commit()
+
+    # Montar prompt enriquecido com histórico recebido do frontend
+    if request.history:
+        parts = ["[Conversa anterior]"]
+        for msg in request.history[-10:]:  # últimas 10 mensagens
+            role_label = "Médico" if msg.role == "user" else "Assistente"
+            parts.append(f"{role_label}: {msg.content[:800]}")
+        parts.append("[Pergunta atual]")
+        enriched_prompt = "\n".join(parts) + f"\nMédico: {request.prompt}"
+    else:
+        enriched_prompt = request.prompt
+
     # Buscar modelos no banco
     result = await db.execute(
         select(ModelPricing).where(
@@ -120,11 +142,14 @@ async def agregador_stream(
     )
     models_info = {m.model_id: m for m in result.scalars().all()}
 
+    effort_prefix = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" if request.effort == "rápido" else ""
+    effort_system = effort_prefix.strip() or None
+
     async def event_generator():
         tasks = {}
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            tasks[model_id] = provider.stream(model_id, request.prompt)
+            tasks[model_id] = provider.stream(model_id, enriched_prompt, system_prompt=effort_system)
 
         async def stream_model(model_id, provider_stream):
             start = time.monotonic()
@@ -182,7 +207,7 @@ async def agregador_stream(
             await asyncio.sleep(0.01)
 
         yield {"event": "disclaimer", "data": json.dumps({"text": DISCLAIMER_RESPOSTA})}
-        yield {"event": "done", "data": "{}"}
+        yield {"event": "done", "data": json.dumps({"conversation_id": str(conversation_id)})}
 
     return EventSourceResponse(event_generator())
 

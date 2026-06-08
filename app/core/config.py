@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     perplexity_api_key: str = ""
     pharmadb_api_key: str = ""
     
+    # --- SendGrid ---
+    sendgrid_api_key: str = ""
+    sendgrid_from_email: str = "noreply@medico360.com.br"
+
+    # --- Auth ---
+    frontend_url: str = "http://localhost:5173"
+    invite_token_expire_hours: int = 72
+    otp_expire_minutes: int = 10
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 

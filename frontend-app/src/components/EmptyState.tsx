@@ -34,16 +34,23 @@ const icons: Record<string, ReactElement> = {
   ),
 };
 
-interface Props {
-  onSuggestion: (text: string) => void;
+function greeting(name: string | null): string {
+  const hour = new Date().getHours();
+  const period = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
+  return name ? `${period}, ${name}.` : `${period}.`;
 }
 
-export function EmptyState({ onSuggestion }: Props) {
+interface Props {
+  onSuggestion: (text: string) => void;
+  userName?: string | null;
+}
+
+export function EmptyState({ onSuggestion, userName }: Props) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 40px' }}>
       <div style={{ width: 720, maxWidth: '100%' }}>
         <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.5 }}>
-          Boa tarde, Dra. Helena.
+          {greeting(userName ?? null)}
         </div>
         <div style={{ fontSize: 15, color: 'var(--pen2)', marginTop: 6, marginBottom: 28 }}>
           O que você quer pensar agora? Pergunte em texto livre — eu encaminho para o modo certo.
