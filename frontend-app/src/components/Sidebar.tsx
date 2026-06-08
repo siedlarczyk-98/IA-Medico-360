@@ -56,7 +56,7 @@ export function Sidebar({ activeId, onNew, onSelect, open, onToggle, usageTick =
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [profileTick, setProfileTick] = useState(0);
+  const [, setProfileTick] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
