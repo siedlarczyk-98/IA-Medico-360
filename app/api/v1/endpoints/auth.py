@@ -67,21 +67,24 @@ async def verify_otp(body: OTPVerify, db: AsyncSession = Depends(get_db)):
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
-@router.post("/onboarding", response_model=UserResponse)
+@router.post("/onboarding", response_model=TokenResponse)
 async def complete_onboarding(
     body: OnboardingRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     current_user.name = body.name
+    current_user.phone_number = f"+55{body.phone_number}"
+    current_user.med_status = body.med_status
     current_user.crm = body.crm
     current_user.crm_state = body.crm_state
-    current_user.phone_number = body.phone_number
-    current_user.med_status = body.med_status
+    current_user.enrollment_date = body.enrollment_date
     current_user.onboarding_complete = True
     await db.commit()
     await db.refresh(current_user)
-    return current_user
+    from app.services.auth_service import create_access_token
+    token = create_access_token(current_user)
+    return TokenResponse(access_token=token, onboarding_complete=True)
 
 
 @router.get("/me", response_model=UserResponse)

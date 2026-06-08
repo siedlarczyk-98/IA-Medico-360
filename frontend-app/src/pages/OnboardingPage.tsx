@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { completeOnboarding } from '../api/auth';
-import { isAuthenticated } from '../lib/auth';
+import { isAuthenticated, setToken } from '../lib/auth';
 
 const BRAZIL_STATES = [
   'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA',
@@ -46,9 +46,20 @@ export function OnboardingPage() {
     return null;
   }
 
-  const [form, setForm] = useState({ name: '', crm: '', crm_state: '', phone_number: '', med_status: '' });
+  const [form, setForm] = useState({
+    name: '',
+    med_status: '',
+    crm: '',
+    crm_state: '',
+    enrollment_date: '',
+    phone_number: '',
+  });
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const isGraduando = form.med_status === 'graduando';
+  const isMedico = ['generalista', 'residente', 'especialista'].includes(form.med_status);
 
   function update(field: string, value: string) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -61,18 +72,28 @@ export function OnboardingPage() {
     e.target.style.borderColor = 'var(--line)';
   }
 
+  const canSubmit =
+    form.name.trim() &&
+    form.med_status &&
+    form.phone_number.trim() &&
+    termsAccepted &&
+    (isGraduando ? !!form.enrollment_date : isMedico ? (!!form.crm && !!form.crm_state) : false);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!canSubmit) return;
     setError('');
     setLoading(true);
     try {
-      await completeOnboarding({
-        name: form.name,
-        crm: form.crm,
-        crm_state: form.crm_state,
-        phone_number: form.phone_number ? `+55${form.phone_number}` : undefined,
+      const res = await completeOnboarding({
+        name: form.name.trim(),
+        phone_number: form.phone_number.replace(/\D/g, ''),
         med_status: form.med_status,
+        crm: isMedico ? form.crm : undefined,
+        crm_state: isMedico ? form.crm_state : undefined,
+        enrollment_date: isGraduando ? form.enrollment_date : undefined,
       });
+      setToken(res.access_token);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao salvar dados');
@@ -122,6 +143,8 @@ export function OnboardingPage() {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Nome */}
           <div>
             <label style={labelStyle}>Nome completo</label>
             <input
@@ -137,42 +160,83 @@ export function OnboardingPage() {
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>CRM</label>
+          {/* Você é */}
+          <div>
+            <label style={labelStyle}>Você é</label>
+            <select
+              required
+              value={form.med_status}
+              onChange={e => {
+                update('med_status', e.target.value);
+                update('crm', '');
+                update('crm_state', '');
+                update('enrollment_date', '');
+              }}
+              style={{ ...inputStyle, cursor: 'pointer' }}
+              onFocus={focusBorder}
+              onBlur={blurBorder}
+            >
+              <option value="" disabled>Selecione…</option>
+              {MED_STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Condicional — Graduando */}
+          {isGraduando && (
+            <div style={{ animation: 'fadeIn 0.2s ease' }}>
+              <label style={labelStyle}>Data de ingresso na faculdade</label>
               <input
-                type="text"
+                type="date"
                 required
-                inputMode="numeric"
-                placeholder="123456"
-                value={form.crm}
-                onChange={e => update('crm', e.target.value.replace(/\D/g, ''))}
+                value={form.enrollment_date}
+                onChange={e => update('enrollment_date', e.target.value)}
                 style={inputStyle}
                 onFocus={focusBorder}
                 onBlur={blurBorder}
               />
             </div>
-            <div style={{ width: 100 }}>
-              <label style={labelStyle}>UF</label>
-              <select
-                required
-                value={form.crm_state}
-                onChange={e => update('crm_state', e.target.value)}
-                style={{ ...inputStyle, cursor: 'pointer' }}
-                onFocus={focusBorder}
-                onBlur={blurBorder}
-              >
-                <option value="" disabled>UF</option>
-                {BRAZIL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
+          )}
 
+          {/* Condicional — Médico formado */}
+          {isMedico && (
+            <div style={{ display: 'flex', gap: 12, animation: 'fadeIn 0.2s ease' }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>CRM</label>
+                <input
+                  type="text"
+                  required
+                  inputMode="numeric"
+                  placeholder="123456"
+                  value={form.crm}
+                  onChange={e => update('crm', e.target.value.replace(/\D/g, ''))}
+                  style={inputStyle}
+                  onFocus={focusBorder}
+                  onBlur={blurBorder}
+                />
+              </div>
+              <div style={{ width: 100 }}>
+                <label style={labelStyle}>UF</label>
+                <select
+                  required
+                  value={form.crm_state}
+                  onChange={e => update('crm_state', e.target.value)}
+                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  onFocus={focusBorder}
+                  onBlur={blurBorder}
+                >
+                  <option value="" disabled>UF</option>
+                  {BRAZIL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Telefone */}
           <div>
-            <label style={labelStyle}>
-              Telefone <span style={{ color: 'var(--pen3)', fontWeight: 400 }}>(opcional)</span>
-            </label>
-            <div style={{ display: 'flex', gap: 0 }}>
+            <label style={labelStyle}>Telefone</label>
+            <div style={{ display: 'flex' }}>
               <span style={{
                 padding: '10px 10px',
                 border: '1px solid var(--line)',
@@ -188,6 +252,7 @@ export function OnboardingPage() {
               </span>
               <input
                 type="tel"
+                required
                 inputMode="numeric"
                 placeholder="11 99999-9999"
                 value={form.phone_number}
@@ -199,22 +264,35 @@ export function OnboardingPage() {
             </div>
           </div>
 
-          <div>
-            <label style={labelStyle}>Você é</label>
-            <select
-              required
-              value={form.med_status}
-              onChange={e => update('med_status', e.target.value)}
-              style={{ ...inputStyle, cursor: 'pointer' }}
-              onFocus={focusBorder}
-              onBlur={blurBorder}
-            >
-              <option value="" disabled>Selecione…</option>
-              {MED_STATUS_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
+          {/* Termos */}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={e => setTermsAccepted(e.target.checked)}
+              style={{ marginTop: 2, accentColor: 'var(--petrol)', flexShrink: 0, width: 15, height: 15 }}
+            />
+            <span style={{ fontSize: 12.5, color: 'var(--pen2)', lineHeight: 1.5 }}>
+              Li e aceito os{' '}
+              <a
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--petrol)', textDecoration: 'underline' }}
+              >
+                Termos de Uso
+              </a>
+              {' '}e a{' '}
+              <a
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--petrol)', textDecoration: 'underline' }}
+              >
+                Política de Privacidade
+              </a>
+            </span>
+          </label>
 
           {error && (
             <p style={{ fontSize: 12, color: 'var(--red)', background: 'var(--red-bg)', padding: '8px 10px', borderRadius: 6 }}>
@@ -224,16 +302,16 @@ export function OnboardingPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !canSubmit}
             style={{
               padding: '12px 16px',
-              background: loading ? 'var(--fill)' : 'var(--petrol)',
-              color: loading ? 'var(--pen3)' : '#fff',
+              background: loading || !canSubmit ? 'var(--fill)' : 'var(--petrol)',
+              color: loading || !canSubmit ? 'var(--pen3)' : '#fff',
               border: 'none',
               borderRadius: 8,
               fontSize: 14,
               fontWeight: 600,
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: loading || !canSubmit ? 'not-allowed' : 'pointer',
               transition: 'background 0.15s',
               marginTop: 4,
             }}
@@ -242,6 +320,13 @@ export function OnboardingPage() {
           </button>
         </form>
       </div>
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

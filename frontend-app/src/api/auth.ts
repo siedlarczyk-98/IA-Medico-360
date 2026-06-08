@@ -22,10 +22,11 @@ export interface UserResponse {
 
 export interface OnboardingData {
   name: string;
-  crm: string;
-  crm_state: string;
-  phone_number?: string;
+  phone_number: string;
   med_status: string;
+  crm?: string;
+  crm_state?: string;
+  enrollment_date?: string;
 }
 
 async function post<T>(path: string, body: unknown, auth = false): Promise<T> {
@@ -111,8 +112,8 @@ export function acceptInvite(token: string, email?: string): Promise<TokenRespon
   return post<TokenResponse>('/auth/invite/accept', { token, email });
 }
 
-export function completeOnboarding(data: OnboardingData): Promise<UserResponse> {
-  return post<UserResponse>('/auth/onboarding', data, true);
+export function completeOnboarding(data: OnboardingData): Promise<TokenResponse> {
+  return post<TokenResponse>('/auth/onboarding', data, true);
 }
 
 export function getMe(): Promise<UserResponse> {

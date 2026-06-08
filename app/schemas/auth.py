@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 MED_STATUS_VALUES = {"graduando", "generalista", "residente", "especialista"}
@@ -43,18 +43,11 @@ class OTPVerify(BaseModel):
 
 class OnboardingRequest(BaseModel):
     name: str
-    crm: str
-    crm_state: str
-    phone_number: str | None = None
+    phone_number: str
     med_status: str
-
-    @field_validator("crm_state")
-    @classmethod
-    def validate_crm_state(cls, v: str) -> str:
-        v = v.upper().strip()
-        if v not in BRAZIL_STATES:
-            raise ValueError(f"CRM_UF inválido: {v}")
-        return v
+    crm: str | None = None
+    crm_state: str | None = None
+    enrollment_date: date | None = None
 
     @field_validator("med_status")
     @classmethod
@@ -63,13 +56,35 @@ class OnboardingRequest(BaseModel):
             raise ValueError(f"med_status deve ser um de: {', '.join(sorted(MED_STATUS_VALUES))}")
         return v
 
+    @field_validator("crm_state")
+    @classmethod
+    def validate_crm_state(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.upper().strip()
+        if v not in BRAZIL_STATES:
+            raise ValueError(f"CRM_UF inválido: {v}")
+        return v
+
     @field_validator("crm")
     @classmethod
-    def validate_crm(cls, v: str) -> str:
+    def validate_crm(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         v = v.strip()
         if not v.isdigit():
             raise ValueError("CRM deve conter apenas números")
         return v
+
+    @model_validator(mode="after")
+    def validate_conditional_fields(self) -> "OnboardingRequest":
+        if self.med_status == "graduando":
+            if not self.enrollment_date:
+                raise ValueError("Data de ingresso é obrigatória para alunos de graduação")
+        else:
+            if not self.crm or not self.crm_state:
+                raise ValueError("CRM e UF são obrigatórios para médicos formados")
+        return self
 
 
 class UpdateProfileRequest(BaseModel):

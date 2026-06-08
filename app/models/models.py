@@ -4,12 +4,13 @@ Cobre todas as entidades necessárias para o Agregador + auditoria.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Enum as SAEnum,
     Float,
@@ -89,6 +90,7 @@ class User(Base):
     crm_state: Mapped[str | None] = mapped_column(String(2))
     role: Mapped[str] = mapped_column(String(50), default="beta_user")
     med_status: Mapped[str | None] = mapped_column(String(50))
+    enrollment_date: Mapped[date | None] = mapped_column(Date)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy_user_id: Mapped[str | None] = mapped_column(String(255))
@@ -97,9 +99,9 @@ class User(Base):
 
     # Relationships
     company: Mapped["Company | None"] = relationship(back_populates="users")
-    conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
-    preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False)
-    weekly_usage: Mapped["UserWeeklyUsage | None"] = relationship(back_populates="user", uselist=False)
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    weekly_usage: Mapped["UserWeeklyUsage | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 # ── User Preferences - ok ─────────────────────────────────────
