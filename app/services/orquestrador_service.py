@@ -37,7 +37,7 @@ from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage
+from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,12 @@ class OrquestradorService:
                     "message": "Preciso de um pouco mais de aprofundamento para te indicar o agente correto. Pode reformular com mais detalhes?",
                     "disclaimer": DISCLAIMER_RESPOSTA,
                 }
+
+            # PHARMA_CHECK requer alta confiança (≥0.90) para acionar o serviço externo.
+            # Confiança abaixo disso indica que a pergunta provavelmente não é uma comparação
+            # explícita de interação medicamentosa e deve ir para raciocínio clínico.
+            if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
+                mode = "CLINICAL_REASONING"
 
             # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
             if mode == "CLINICAL_REASONING" and not force and not clarification_answers:

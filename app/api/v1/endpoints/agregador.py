@@ -38,7 +38,10 @@ router = APIRouter(prefix="/agregador", tags=["Agregador de IA"])
 # ── Modelos Disponíveis (do banco) ───────────────────────────
 
 @router.get("/models", response_model=list[AIModelDisplay])
-async def list_models(db: AsyncSession = Depends(get_db)):
+async def list_models(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Retorna todos os modelos ativos do banco, indicando disponibilidade."""
     settings = get_settings()
 

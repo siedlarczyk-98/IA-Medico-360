@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     invite_token_expire_hours: int = 72
     otp_expire_minutes: int = 10
+    allow_public_registration: bool = False
 
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"

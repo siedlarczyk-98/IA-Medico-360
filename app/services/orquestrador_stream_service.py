@@ -43,7 +43,7 @@ from app.services.usage_service import record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage
+from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +150,11 @@ class OrquestradorStreamService:
                         "message": "Preciso de um pouco mais de aprofundamento. Pode reformular com mais detalhes?",
                     })
                     return
+
+                # PHARMA_CHECK requer alta confiança para acionar o serviço externo;
+                # rebaixa para CLINICAL_REASONING se a pergunta for ambígua.
+                if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
+                    mode = "CLINICAL_REASONING"
 
                 if mode == "PHARMA_CHECK":
                     yield _sse("error", {

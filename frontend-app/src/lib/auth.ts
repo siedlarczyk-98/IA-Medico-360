@@ -19,10 +19,6 @@ export function isAuthenticated(): boolean {
 interface TokenPayload {
   sub: string;
   role: string;
-  name: string | null;
-  crm: string | null;
-  crm_state: string | null;
-  med_status: string | null;
   exp: number;
 }
 

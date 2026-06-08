@@ -23,10 +23,6 @@ def create_access_token(user: "User") -> str:
     payload = {
         "sub": str(user.id),
         "role": user.role,
-        "name": user.name,
-        "crm": user.crm,
-        "crm_state": user.crm_state,
-        "med_status": user.med_status,
         "exp": expire,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -78,6 +74,15 @@ async def accept_invite(
 
     result = await db.execute(select(User).where(User.email == resolved_email))
     user = result.scalar_one_or_none()
+
+    # Open invites (no pre-bound email) must never grant access to existing accounts —
+    # that would allow any token holder to take over arbitrary accounts by supplying their email.
+    if user is not None and invite.email is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email já cadastrado. Faça login pelo código OTP.",
+        )
+
     if not user:
         user = User(email=resolved_email, role="beta_user", status=True, onboarding_complete=False)
         db.add(user)
@@ -139,18 +144,32 @@ async def request_otp(db: AsyncSession, email: str) -> None:
     await email_service.send_otp(email, code)
 
 
+_OTP_MAX_ATTEMPTS = 5
+
+
 async def verify_otp(db: AsyncSession, email: str, code: str) -> tuple[User, str]:
     now = _utcnow()
     result = await db.execute(
         select(OtpCode).where(
             OtpCode.email == email,
-            OtpCode.code == code,
             OtpCode.used == False,
             OtpCode.expires_at > now,
         )
     )
     otp = result.scalar_one_or_none()
     if not otp:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
+
+    if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
+        otp.used = True
+        await db.commit()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
+
+    if otp.code != code:
+        otp.failed_attempts += 1
+        if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
+            otp.used = True
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
 
     otp.used = True

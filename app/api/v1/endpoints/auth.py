@@ -27,6 +27,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", status_code=status.HTTP_204_NO_CONTENT)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Cadastro público: cria usuário e envia link de acesso por email."""
+    settings = get_settings()
+    if not settings.allow_public_registration:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cadastro por convite apenas")
     await auth_service.register_and_send_invite(db, body.email)
 
 
@@ -118,7 +121,9 @@ async def delete_me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if body.confirm_name != current_user.name:
+    if not current_user.name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Complete o onboarding antes de excluir a conta")
+    if not body.confirm_name or body.confirm_name != current_user.name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nome de confirmação não confere")
     await db.delete(current_user)
     await db.commit()
