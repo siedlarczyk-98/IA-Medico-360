@@ -1,8 +1,8 @@
 const suggestions = [
-  { icon: 'raciocinio', title: 'Raciocínio clínico', q: 'Mulher 34a, cefaleia thunderclap + fotofobia. Diferenciais e conduta?' },
-  { icon: 'farmaco',    title: 'Checagem farmacológica', q: 'Paciente em varfarina iniciando amiodarona. Como ajustar?' },
-  { icon: 'busca',      title: 'Busca rápida', q: 'Posologia de amoxicilina 50mg/kg/dia em pediatria — divisão por tomada?' },
-  { icon: 'produtividade', title: 'Produtividade', q: 'Escrever laudo de USG transvaginal: útero em AVF, sem alterações.' },
+  { icon: 'raciocinio', title: 'Raciocínio clínico', desc: 'Descreva o caso e receba diferenciais, hipóteses e sugestão de conduta — o modo é ativado automaticamente.' },
+  { icon: 'farmaco',    title: 'Checagem farmacológica', desc: 'Informe os medicamentos do paciente e tire dúvidas de interações, ajustes de dose e contraindicações.' },
+  { icon: 'busca',      title: 'Busca rápida', desc: 'Pergunte posologias, critérios diagnósticos ou referências — resposta direta, sem elaboração.' },
+  { icon: 'produtividade', title: 'Produtividade', desc: 'Peça laudos, receitas, encaminhamentos ou resumos de consulta e receba o texto pronto para usar.' },
 ];
 
 import type { ReactElement } from 'react';
@@ -41,11 +41,10 @@ function greeting(name: string | null): string {
 }
 
 interface Props {
-  onSuggestion: (text: string) => void;
   userName?: string | null;
 }
 
-export function EmptyState({ onSuggestion, userName }: Props) {
+export function EmptyState({ userName }: Props) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 40px' }}>
       <div style={{ width: 720, maxWidth: '100%' }}>
@@ -53,25 +52,15 @@ export function EmptyState({ onSuggestion, userName }: Props) {
           {greeting(userName ?? null)}
         </div>
         <div style={{ fontSize: 15, color: 'var(--pen2)', marginTop: 6, marginBottom: 28 }}>
-          O que você quer pensar agora? Pergunte em texto livre — eu encaminho para o modo certo.
+          Os cards abaixo mostram o que cada modo faz — basta perguntar em texto livre que eu identifico o modo certo.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           {suggestions.map(s => (
-            <button
+            <div
               key={s.icon}
-              onClick={() => onSuggestion(s.q)}
               style={{
                 border: '1px solid var(--line2)', borderRadius: 10, padding: '12px 14px',
-                background: '#fff', cursor: 'pointer', textAlign: 'left',
-                transition: 'border-color 0.15s, box-shadow 0.15s',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.borderColor = 'var(--mint)';
-                (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 8px rgba(0,209,125,0.1)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.borderColor = 'var(--line2)';
-                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+                background: '#fff', textAlign: 'left',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--petrol)', marginBottom: 6 }}>
@@ -80,8 +69,8 @@ export function EmptyState({ onSuggestion, userName }: Props) {
                   {s.title}
                 </span>
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--pen)', lineHeight: 1.45 }}>{s.q}</div>
-            </button>
+              <div style={{ fontSize: 12.5, color: 'var(--pen)', lineHeight: 1.45 }}>{s.desc}</div>
+            </div>
           ))}
         </div>
       </div>

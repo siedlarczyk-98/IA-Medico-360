@@ -280,7 +280,7 @@ function MainApp() {
               </>
             ) : (
               <>
-                <EmptyState onSuggestion={sendMessage} userName={currentUser?.firstName} />
+                <EmptyState userName={currentUser?.firstName} />
                 <InputBar onSend={sendMessage} disabled={streaming} />
               </>
             )
