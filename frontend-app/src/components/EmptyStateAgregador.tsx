@@ -39,8 +39,12 @@ export function EmptyStateAgregador({ selected, onChange }: Props) {
 
   return (
     <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: isMobile ? '0 20px' : '0 40px',
+      flex: 1,
+      overflowY: 'auto',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: isMobile ? 'flex-start' : 'center',
+      padding: isMobile ? '24px 20px 40px' : '0 40px',
     }}>
       <div style={{ width: 900, maxWidth: '100%' }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.4 }}>
