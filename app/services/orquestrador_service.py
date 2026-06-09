@@ -3,6 +3,7 @@ Médico 360 — Serviço do Orquestrador Multi-Agente.
 Pipeline: Triagem → Roteamento → Agente Especializado → Resposta.
 """
 
+import asyncio
 import logging
 import time
 import traceback
@@ -201,14 +202,23 @@ class OrquestradorService:
             interaction.token_cost_usd = cost
             interaction.completed_at = datetime.now(timezone.utc)
 
-            # 8. Especialidade + tema
-            classification = await detect_specialty_and_topic(sanitized_prompt)
+            # 8-10. Pós-processamento independente em paralelo: especialidade/tema,
+            # medicamentos e validação PubMed (apenas modos clínicos; timeout 15s com
+            # fallback). O PubMed usa o próprio texto da resposta como fallback de tópico.
+            response_texts = [agent_response.get("text", "")]
+            classification, medications, pubmed = await asyncio.gather(
+                detect_specialty_and_topic(sanitized_prompt),
+                extract_from_interaction(sanitized_prompt, response_texts),
+                validate_with_pubmed(
+                    agent_response=agent_response.get("text", ""),
+                    mode=mode,
+                    topic="",
+                ),
+            )
+
             interaction.specialty_detected = classification["specialty"]
             interaction.topic_detected = classification["topic"]
 
-            # 9. Medicamentos
-            response_texts = [agent_response.get("text", "")]
-            medications = await extract_from_interaction(sanitized_prompt, response_texts)
             for med in medications:
                 self.db.add(InteractionMedication(
                     interaction_id=interaction.id,
@@ -217,12 +227,6 @@ class OrquestradorService:
                     source=med["source"],
                 ))
 
-            # 10. Validação PubMed (apenas modos clínicos; timeout 15s com fallback)
-            pubmed = await validate_with_pubmed(
-                agent_response=agent_response.get("text", ""),
-                mode=mode,
-                topic=classification.get("topic", ""),
-            )
             interaction.confidence_score = pubmed.confidence_score
             # persiste citações verificadas
             for c in pubmed.cited_guidelines_verified:
@@ -317,7 +321,10 @@ class OrquestradorService:
                 and _cache_embedding
                 and _cache_normalized
             ):
-                await store_response(self.db, mode, _cache_normalized, _cache_embedding, return_dict)
+                await store_response(
+                    self.db, mode, _cache_normalized, _cache_embedding, return_dict,
+                    raw_prompt=sanitized_prompt,
+                )
 
             return return_dict
 

@@ -8,6 +8,7 @@ Pipeline:
            → ao final, roda PubMed + specialty + meds + audit em background
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -295,11 +296,19 @@ class OrquestradorStreamService:
                 interaction.token_cost_usd = cost
                 interaction.completed_at = datetime.now(timezone.utc)
 
-                classification = await detect_specialty_and_topic(sanitized_prompt)
+                # Pós-processamento independente roda em paralelo (specialty, meds, PubMed)
+                # — cortando segundos da latência até o evento `done`. O PubMed usa o
+                # próprio texto da resposta como fallback de tópico (topic=""), evitando
+                # depender da detecção de especialidade para iniciar.
+                classification, medications, pubmed = await asyncio.gather(
+                    detect_specialty_and_topic(sanitized_prompt),
+                    extract_from_interaction(sanitized_prompt, [full_text]),
+                    validate_with_pubmed(agent_response=full_text, mode=mode, topic=""),
+                )
+
                 interaction.specialty_detected = classification["specialty"]
                 interaction.topic_detected = classification["topic"]
 
-                medications = await extract_from_interaction(sanitized_prompt, [full_text])
                 for med in medications:
                     db.add(InteractionMedication(
                         interaction_id=interaction.id,
@@ -308,11 +317,6 @@ class OrquestradorStreamService:
                         source=med["source"],
                     ))
 
-                pubmed = await validate_with_pubmed(
-                    agent_response=full_text,
-                    mode=mode,
-                    topic=classification.get("topic", ""),
-                )
                 interaction.confidence_score = pubmed.confidence_score
 
                 for c in pubmed.cited_guidelines_verified:
@@ -396,7 +400,10 @@ class OrquestradorStreamService:
                         "total_response_time_ms": elapsed_ms,
                         "disclaimer": DISCLAIMER_RESPOSTA,
                     }
-                    await store_response(db, mode, _cache_normalized, _cache_embedding, done_payload)
+                    await store_response(
+                        db, mode, _cache_normalized, _cache_embedding, done_payload,
+                        raw_prompt=sanitized_prompt,
+                    )
 
                 await record_cost(db, self.user_id, cost)
 

@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.core.config import get_settings
+from app.core.http_client import get_client
+from app.services import cache_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -143,6 +145,17 @@ async def _verify_citation(
     2. Fallback com 3-4 termos-chave + filtro de guideline/consensus
     """
     clean = re.sub(r"[\"']", "", citation)[:200]
+
+    # Cache: a verificação de uma mesma citação é determinística por ~30 dias.
+    cache_key = cache_service.make_key("pubmed_cite", clean)
+    cached = await cache_service.get_json(cache_key)
+    if cached is not None:
+        return VerifiedCitation(
+            title=cached.get("title", citation),
+            pmid=cached.get("pmid"),
+            verified=bool(cached.get("verified")),
+        )
+
     base_params = {"db": "pubmed", "retmax": "1", "retmode": "json", "sort": "relevance"}
     if PUBMED_API_KEY:
         base_params["api_key"] = PUBMED_API_KEY
@@ -171,10 +184,24 @@ async def _verify_citation(
             res.raise_for_status()
             pmids = res.json().get("esearchresult", {}).get("idlist", [])
             if pmids:
-                return VerifiedCitation(title=citation, pmid=pmids[0], verified=True)
+                result = VerifiedCitation(title=citation, pmid=pmids[0], verified=True)
+                await cache_service.set_json(
+                    cache_key,
+                    {"title": citation, "pmid": pmids[0], "verified": True},
+                    cache_service.TTL_PUBMED,
+                )
+                return result
     except Exception as exc:
         logger.debug("[PubMed] Erro verificando citação '%s': %s", citation[:60], exc)
+        # não cacheia falhas de rede (podem ser transitórias)
+        return VerifiedCitation(title=citation, pmid=None, verified=False)
 
+    # citação genuinamente não encontrada → cacheia o resultado negativo
+    await cache_service.set_json(
+        cache_key,
+        {"title": citation, "pmid": None, "verified": False},
+        cache_service.TTL_PUBMED,
+    )
     return VerifiedCitation(title=citation, pmid=None, verified=False)
 
 
@@ -299,31 +326,31 @@ def _calculate_score(
 # ── Pipeline interno ──────────────────────────────────────────────────────────
 
 async def _run_validation(agent_response: str, topic: str) -> ValidationResult:
-    async with httpx.AsyncClient(timeout=12.0) as client:
+    client = get_client()
 
-        # Passo 1: extrai citações da resposta
-        citations = await _extract_citations(client, agent_response)
-        logger.debug("[PubMed] Citações extraídas: %s", citations)
+    # Passo 1: extrai citações da resposta
+    citations = await _extract_citations(client, agent_response)
+    logger.debug("[PubMed] Citações extraídas: %s", citations)
 
-        if not citations:
-            return ValidationResult(
-                confidence_score=0.10,
-                low_evidence_alert=True,
-            )
-
-        # Trilha A + Trilha B em paralelo
-        verified, newer = await asyncio.gather(
-            _verify_all_citations(client, citations),
-            _fetch_recent_guidelines(
-                client,
-                topic or agent_response[:100],
-                verified_pmids=set(),  # placeholder — preenchido abaixo
-            ),
+    if not citations:
+        return ValidationResult(
+            confidence_score=0.10,
+            low_evidence_alert=True,
         )
 
-        # remove das novidades os PMIDs que já foram verificados
-        verified_pmids = {c.pmid for c in verified if c.pmid}
-        newer = [a for a in newer if a.pmid not in verified_pmids]
+    # Trilha A + Trilha B em paralelo
+    verified, newer = await asyncio.gather(
+        _verify_all_citations(client, citations),
+        _fetch_recent_guidelines(
+            client,
+            topic or agent_response[:100],
+            verified_pmids=set(),  # placeholder — preenchido abaixo
+        ),
+    )
+
+    # remove das novidades os PMIDs que já foram verificados
+    verified_pmids = {c.pmid for c in verified if c.pmid}
+    newer = [a for a in newer if a.pmid not in verified_pmids]
 
     confidence = _calculate_score(verified, newer)
 

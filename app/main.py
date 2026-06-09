@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
 from app.core.config import get_settings
+from app.core import http_client
 
 settings = get_settings()
 
@@ -18,8 +19,10 @@ async def lifespan(app: FastAPI):
     """Startup e shutdown hooks."""
     # Startup
     print(f"🚀 Médico 360 iniciando [{settings.app_env}]")
+    await http_client.startup()
     yield
     # Shutdown
+    await http_client.shutdown()
     print("🛑 Médico 360 encerrando")
 
 

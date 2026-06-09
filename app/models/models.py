@@ -15,6 +15,7 @@ from sqlalchemy import (
     Enum as SAEnum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -140,6 +141,9 @@ class UserWeeklyUsage(Base):
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_user_status_updatedat", "user_id", "status", "updatedat"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
@@ -158,6 +162,12 @@ class Conversation(Base):
 
 class Interaction(Base):
     __tablename__ = "interactions"
+    __table_args__ = (
+        Index("ix_interactions_user_feature", "user_id", "feature"),
+        Index("ix_interactions_conversation_feature", "conversation_id", "feature"),
+        Index("ix_interactions_conversation_user_status", "conversation_id", "user_id", "status"),
+        Index("ix_interactions_user_createdat", "user_id", "createdat"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"), nullable=False)
@@ -196,7 +206,7 @@ class InteractionResponse(Base):
     __tablename__ = "interaction_responses"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
-    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False)
+    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False, index=True)
     model_used: Mapped[str] = mapped_column(String(100), nullable=False)
     response_text: Mapped[str] = mapped_column(Text, nullable=False)
     response_time_ms: Mapped[int | None] = mapped_column(Integer)
@@ -217,7 +227,7 @@ class PharmaAlert(Base):
     __tablename__ = "pharma_alerts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
-    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False)
+    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False, index=True)
     alert_level: Mapped[int] = mapped_column(Integer, nullable=False)
     alert_color: Mapped[str] = mapped_column(String(20), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -236,7 +246,7 @@ class InteractionMedication(Base):
     __tablename__ = "interaction_medications"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
-    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False)
+    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False, index=True)
     medication_raw: Mapped[str] = mapped_column(String(255), nullable=False)
     medication_normalized: Mapped[str | None] = mapped_column(String(255))
     atc_code: Mapped[str | None] = mapped_column(String(50))
@@ -253,7 +263,7 @@ class PubmedValidation(Base):
     __tablename__ = "pubmed_validations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
-    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False)
+    interaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interactions.id"), nullable=False, index=True)
     pmid: Mapped[str] = mapped_column(String(20), nullable=False)
     article_title: Mapped[str | None] = mapped_column(Text)
     abstract_snippet: Mapped[str | None] = mapped_column(Text)
@@ -325,7 +335,7 @@ class SemanticCache(Base):
     response_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 # ── OTP Codes ─────────────────────────────────────────────────

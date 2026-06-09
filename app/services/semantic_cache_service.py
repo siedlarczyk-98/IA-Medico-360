@@ -22,14 +22,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.http_client import get_client
+from app.services import cache_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 SIMILARITY_THRESHOLD = 0.92
 TTL_DAYS = 30
+TTL_EXACT_SECONDS = 30 * 24 * 3600  # fast-path exato no Redis: 30 dias
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMS = 1536
+
+
+def _exact_key(mode: str, raw_prompt: str) -> str:
+    return cache_service.make_key("semcache_exact", mode, raw_prompt.strip())
 
 
 # ── Guardrail + Normalização ──────────────────────────────────
@@ -59,6 +66,7 @@ async def _normalize_prompt(
             "Authorization": f"Bearer {settings.openai_api_key}",
             "Content-Type": "application/json",
         },
+        timeout=10,
         json={
             "model": "gpt-4o-mini",
             "max_tokens": 200,
@@ -107,6 +115,7 @@ async def _embed(client: httpx.AsyncClient, text_: str) -> list[float]:
             "Content-Type": "application/json",
         },
         json={"model": EMBEDDING_MODEL, "input": text_[:8000]},
+        timeout=10,
     )
     resp.raise_for_status()
     return resp.json()["data"][0]["embedding"]
@@ -124,27 +133,30 @@ async def _lookup(
     now = datetime.now(timezone.utc)
 
     try:
-        async with db.begin_nested():
-            result = await db.execute(
-                text(
-                    "SELECT id, response_json, "
-                    "1 - (prompt_embedding <=> CAST(:emb AS vector)) AS sim "
-                    "FROM semantic_cache "
-                    "WHERE mode = :mode AND expires_at > :now "
-                    "ORDER BY prompt_embedding <=> CAST(:emb AS vector) "
-                    "LIMIT 1"
-                ),
-                {"emb": vector_str, "mode": mode, "now": now},
+        result = await db.execute(
+            text(
+                "SELECT id, response_json, "
+                "1 - (prompt_embedding <=> CAST(:emb AS vector)) AS sim "
+                "FROM semantic_cache "
+                "WHERE mode = :mode AND expires_at > :now "
+                "ORDER BY prompt_embedding <=> CAST(:emb AS vector) "
+                "LIMIT 1"
+            ),
+            {"emb": vector_str, "mode": mode, "now": now},
+        )
+        row = result.fetchone()
+        if row and row.sim >= SIMILARITY_THRESHOLD:
+            # Incrementa o contador de hits e persiste imediatamente — o caller
+            # pode retornar (cache HIT) antes do commit final do pipeline.
+            await db.execute(
+                text("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = :id"),
+                {"id": row.id},
             )
-            row = result.fetchone()
-            if row and row.sim >= SIMILARITY_THRESHOLD:
-                await db.execute(
-                    text("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = :id"),
-                    {"id": row.id},
-                )
-                return row.response_json
+            await db.commit()
+            return row.response_json
     except Exception as exc:
         logger.warning("[Cache] Erro no lookup pgvector: %s", exc)
+        await db.rollback()
     return None
 
 
@@ -167,18 +179,30 @@ async def get_cached_response(
       - hit=True: (response_dict, normalized_prompt, embedding)
       - hit=False: (None, normalized_prompt, embedding)
     """
+    # Fast-path: match exato do prompt cru no Redis evita 2 chamadas OpenAI
+    # (normalização + embedding) e a busca vetorial para prompts repetidos.
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            cacheable, normalized = await _normalize_prompt(client, mode, prompt)
-            if not cacheable:
-                logger.debug("[Cache] Prompt não cacheável (dados específicos de paciente)")
-                return None, normalized, []
+        exact = await cache_service.get_json(_exact_key(mode, prompt))
+        if exact is not None:
+            logger.debug("[Cache] HIT exato (Redis fast-path)")
+            return exact, "", []
+    except Exception:
+        pass
 
-            embedding = await _embed(client, normalized)
+    try:
+        client = get_client()
+        cacheable, normalized = await _normalize_prompt(client, mode, prompt)
+        if not cacheable:
+            logger.debug("[Cache] Prompt não cacheável (dados específicos de paciente)")
+            return None, normalized, []
+
+        embedding = await _embed(client, normalized)
 
         cached = await _lookup(db, mode, embedding)
         if cached is not None:
             logger.debug("[Cache] HIT — retornando resposta cacheada")
+            # popula o fast-path para o próximo prompt idêntico
+            await cache_service.set_json(_exact_key(mode, prompt), cached, TTL_EXACT_SECONDS)
             return cached, normalized, embedding
 
         logger.debug("[Cache] MISS — sem match acima do threshold")
@@ -195,10 +219,14 @@ async def store_response(
     normalized_prompt: str,
     embedding: list[float],
     response_dict: dict,
+    raw_prompt: str | None = None,
 ) -> None:
     """Persiste a resposta no cache com TTL de 30 dias."""
     if not embedding or not normalized_prompt:
         return
+    # popula o fast-path exato para o prompt cru desta interação
+    if raw_prompt:
+        await cache_service.set_json(_exact_key(mode, raw_prompt), response_dict, TTL_EXACT_SECONDS)
     try:
         vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
         now = datetime.now(timezone.utc)

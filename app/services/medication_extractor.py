@@ -6,13 +6,35 @@ Diferencia source: 'prompt' vs 'response'.
 
 import json
 
-import httpx
-
 from app.core.config import get_settings
+from app.core.http_client import get_client
 
 settings = get_settings()
 
+# Extração em UMA única chamada: o texto vem rotulado em duas seções
+# (PROMPT e RESPOSTA) e o modelo marca a origem de cada medicamento,
+# evitando duas chamadas LLM separadas por interação.
 EXTRACTION_PROMPT = """Extraia TODOS os medicamentos, fármacos e substâncias ativas mencionados no texto abaixo.
+
+O texto está dividido em duas seções rotuladas: [PROMPT] (o que o médico escreveu) e [RESPOSTA] (o que a IA respondeu).
+
+Para cada medicamento, retorne:
+- "raw": exatamente como aparece no texto (preservar siglas, nomes comerciais, abreviações)
+- "normalized": nome genérico por extenso em português, minúsculo
+- "source": "prompt" se apareceu na seção [PROMPT], senão "response"
+
+Regras de normalização:
+- Siglas devem ser expandidas: "HCTZ" vira "hidroclorotiazida", "AAS" vira "ácido acetilsalicílico", "MTX" vira "metotrexato"
+- Nomes comerciais devem virar genérico: "Novalgina" vira "dipirona", "Cozaar" vira "losartana", "Glifage" vira "metformina"
+- Sempre minúsculo no normalized
+- Sem duplicatas por "normalized": se o mesmo fármaco aparecer no PROMPT e na RESPOSTA, retorne só uma vez com source "prompt"
+
+Retorne APENAS um JSON array de objetos com campos "raw", "normalized" e "source". Se não houver medicamentos, retorne [].
+
+{text}"""
+
+
+SINGLE_EXTRACTION_PROMPT = """Extraia TODOS os medicamentos, fármacos e substâncias ativas mencionados no texto abaixo.
 
 Para cada medicamento, retorne:
 - "raw": exatamente como aparece no texto (preservar siglas, nomes comerciais, abreviações)
@@ -22,52 +44,52 @@ Regras de normalização:
 - Siglas devem ser expandidas: "HCTZ" vira "hidroclorotiazida", "AAS" vira "ácido acetilsalicílico", "MTX" vira "metotrexato"
 - Nomes comerciais devem virar genérico: "Novalgina" vira "dipirona", "Cozaar" vira "losartana", "Glifage" vira "metformina"
 - Sempre minúsculo no normalized
-- Sem duplicatas (se aparecer duas vezes, retornar só uma)
+- Sem duplicatas
 
 Retorne APENAS um JSON array de objetos com campos "raw" e "normalized". Se não houver medicamentos, retorne [].
 
 Texto: {text}"""
 
+
 async def extract_medications(text: str) -> list[dict]:
     """
-    Extrai lista de medicamentos com raw + normalized de um texto.
+    Extrai lista de medicamentos (raw + normalized) de um único texto.
+    Usado pelo fluxo PHARMA_CHECK, que só precisa dos fármacos do prompt.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gpt-5.4-mini",
-                    "messages": [
-                        {"role": "user", "content": EXTRACTION_PROMPT.format(text=text)},
-                    ],
-                    "max_completion_tokens": 300,
-                    "temperature": 0,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            print(f"DEBUG NANO RAW RESPONSE: {content}")
-            content = content.replace("```json", "").replace("```", "").strip()
+        client = get_client()
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5.4-mini",
+                "messages": [
+                    {"role": "user", "content": SINGLE_EXTRACTION_PROMPT.format(text=text)},
+                ],
+                "max_completion_tokens": 300,
+                "temperature": 0,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        content = content.replace("```json", "").replace("```", "").strip()
 
-            medications = json.loads(content)
-            if isinstance(medications, list):
-                return [
-                    {
-                        "raw": m.get("raw", "").strip(),
-                        "normalized": m.get("normalized", "").strip().lower(),
-                    }
-                    for m in medications
-                    if isinstance(m, dict) and m.get("raw")
-                ]
-
-            return []
-
+        medications = json.loads(content)
+        if isinstance(medications, list):
+            return [
+                {
+                    "raw": m.get("raw", "").strip(),
+                    "normalized": m.get("normalized", "").strip().lower(),
+                }
+                for m in medications
+                if isinstance(m, dict) and m.get("raw")
+            ]
+        return []
     except Exception as e:
         print(f"DEBUG EXTRACT ERROR: {e}")
         return []
@@ -78,33 +100,58 @@ async def extract_from_interaction(
     responses: list[str],
 ) -> list[dict]:
     """
-    Extrai medicamentos do prompt e das respostas separadamente.
+    Extrai medicamentos do prompt e das respostas em uma única chamada LLM.
     Retorna lista de dicts com 'medication_raw', 'medication_normalized' e 'source'.
     """
-    results = []
-    seen_normalized = set()
-
-    # Extrair do prompt (o que o médico citou)
-    prompt_meds = await extract_medications(prompt)
-    for med in prompt_meds:
-        if med["normalized"] not in seen_normalized:
-            results.append({
-                "medication_raw": med["raw"],
-                "medication_normalized": med["normalized"],
-                "source": "prompt",
-            })
-            seen_normalized.add(med["normalized"])
-
-    # Extrair das respostas (o que a IA sugeriu)
     all_responses = "\n".join(responses)
-    response_meds = await extract_medications(all_responses)
-    for med in response_meds:
-        if med["normalized"] not in seen_normalized:
-            results.append({
-                "medication_raw": med["raw"],
-                "medication_normalized": med["normalized"],
-                "source": "response",
-            })
-            seen_normalized.add(med["normalized"])
+    text = f"[PROMPT]\n{prompt}\n\n[RESPOSTA]\n{all_responses}"
 
-    return results
+    try:
+        client = get_client()
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5.4-mini",
+                "messages": [
+                    {"role": "user", "content": EXTRACTION_PROMPT.format(text=text)},
+                ],
+                "max_completion_tokens": 400,
+                "temperature": 0,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        content = content.replace("```json", "").replace("```", "").strip()
+
+        medications = json.loads(content)
+        if not isinstance(medications, list):
+            return []
+
+        results = []
+        seen_normalized = set()
+        for m in medications:
+            if not isinstance(m, dict) or not m.get("raw"):
+                continue
+            normalized = m.get("normalized", "").strip().lower()
+            if normalized in seen_normalized:
+                continue
+            seen_normalized.add(normalized)
+            source = m.get("source", "response").strip().lower()
+            if source not in {"prompt", "response"}:
+                source = "response"
+            results.append({
+                "medication_raw": m["raw"].strip(),
+                "medication_normalized": normalized,
+                "source": source,
+            })
+        return results
+
+    except Exception as e:
+        print(f"DEBUG EXTRACT ERROR: {e}")
+        return []

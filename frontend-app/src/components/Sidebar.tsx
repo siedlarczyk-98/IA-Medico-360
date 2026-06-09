@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Logo } from './Logo';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
@@ -18,9 +19,16 @@ interface Props {
 function useIsMobile() {
   const [mobile, setMobile] = useState(() => window.innerWidth <= 700);
   useEffect(() => {
-    const handler = () => setMobile(window.innerWidth <= 700);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => setMobile(window.innerWidth <= 700), 150);
+    };
     window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
+    return () => {
+      window.removeEventListener('resize', handler);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, []);
   return mobile;
 }
@@ -48,22 +56,29 @@ function groupByDate(conversations: ConversationSummary[]) {
   return groups.filter(g => g.items.length > 0);
 }
 
-export function Sidebar({ activeId, onNew, onSelect, open, onToggle, usageTick = 0 }: Props) {
+function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick = 0 }: Props) {
   const isMobile = useIsMobile();
   const user = useCurrentUser();
   const usage = useUserUsage(usageTick);
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const queryClient = useQueryClient();
+  const { data: conversations = [] } = useQuery<ConversationSummary[]>({
+    queryKey: ['conversations'],
+    queryFn: listConversations,
+    staleTime: 60_000,
+  });
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [, setProfileTick] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Revalida a lista apenas quando aparece uma conversa nova (activeId ainda
+  // não presente) — evita refetch a cada seleção de conversa já existente.
   useEffect(() => {
-    listConversations()
-      .then(setConversations)
-      .catch(() => {});
-  }, [activeId]); // refetch when a new conversation is created
+    if (activeId && !conversations.some(c => c.id === activeId)) {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    }
+  }, [activeId, conversations, queryClient]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -76,10 +91,13 @@ export function Sidebar({ activeId, onNew, onSelect, open, onToggle, usageTick =
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
 
-  if (isMobile && !open) return null;
+  const closeAfter = useCallback(
+    (fn: () => void) => () => { fn(); if (isMobile) onToggle(); },
+    [isMobile, onToggle],
+  );
+  const groups = useMemo(() => groupByDate(conversations), [conversations]);
 
-  const closeAfter = (fn: () => void) => () => { fn(); if (isMobile) onToggle(); };
-  const groups = groupByDate(conversations);
+  if (isMobile && !open) return null;
 
   const aside = (
     <aside style={{
@@ -309,6 +327,8 @@ export function Sidebar({ activeId, onNew, onSelect, open, onToggle, usageTick =
     </>
   );
 }
+
+export const Sidebar = memo(SidebarComponent);
 
 const menuItemStyle: React.CSSProperties = {
   width: '100%', display: 'flex', alignItems: 'center', gap: 9,

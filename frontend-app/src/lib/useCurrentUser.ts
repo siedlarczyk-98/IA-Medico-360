@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getTokenPayload } from './auth';
 import { getMe, type UserResponse } from '../api/auth';
 
@@ -10,13 +10,12 @@ const MED_STATUS_LABEL: Record<string, string> = {
 };
 
 export function useCurrentUser() {
-  const [user, setUser] = useState<UserResponse | null>(null);
-
-  useEffect(() => {
-    const payload = getTokenPayload();
-    if (!payload) return;
-    getMe().then(setUser).catch(() => {});
-  }, []);
+  const { data: user } = useQuery<UserResponse | null>({
+    queryKey: ['currentUser'],
+    queryFn: getMe,
+    enabled: getTokenPayload() != null,
+    staleTime: 5 * 60 * 1000,
+  });
 
   if (!user) return null;
 

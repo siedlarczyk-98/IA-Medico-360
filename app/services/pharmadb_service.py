@@ -8,10 +8,10 @@ import json
 import logging
 from datetime import timedelta
 
-import httpx
 import redis.asyncio as redis
 
 from app.core.config import get_settings
+from app.core.http_client import get_client
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -43,7 +43,9 @@ class PharmaDBService:
 
     async def _get_redis(self) -> redis.Redis:
         if self._redis is None:
-            self._redis = redis.from_url(settings.redis_url, decode_responses=True)
+            self._redis = redis.from_url(
+                settings.redis_url, decode_responses=True, max_connections=20
+            )
         return self._redis
 
     async def _cache_get(self, key: str) -> dict | list | None:
@@ -70,40 +72,55 @@ class PharmaDBService:
             return self._jwt_token
 
         logger.info("PharmaDB auth POST — obtendo token")
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{self.base_url}/auth/token",
-                headers={"x-api-key": self.api_key},
-            )
-            logger.info(f"PharmaDB auth status: {resp.status_code} — {resp.text[:200]}")
-            resp.raise_for_status()
-            data = resp.json()
-            self._jwt_token = data["access_token"]
-            logger.info(f"PharmaDB token obtido: {self._jwt_token[:20]}...")
-            return self._jwt_token
+        client = get_client()
+        resp = await client.post(
+            f"{self.base_url}/auth/token",
+            headers={"x-api-key": self.api_key},
+            timeout=10,
+        )
+        logger.info(f"PharmaDB auth status: {resp.status_code} — {resp.text[:200]}")
+        resp.raise_for_status()
+        data = resp.json()
+        self._jwt_token = data["access_token"]
+        logger.info(f"PharmaDB token obtido: {self._jwt_token[:20]}...")
+        return self._jwt_token
 
     async def _api_get(self, path: str, params: dict | None = None) -> dict:
         token = await self._get_token()
-        async with httpx.AsyncClient(timeout=15) as client:
+        client = get_client()
+        resp = await client.get(
+            f"{self.base_url}{path}",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=15,
+        )
+        if resp.status_code == 401:
+            self._jwt_token = None
+            token = await self._get_token()
             resp = await client.get(
                 f"{self.base_url}{path}",
                 headers={"Authorization": f"Bearer {token}"},
                 params=params,
+                timeout=15,
             )
-            if resp.status_code == 401:
-                self._jwt_token = None
-                token = await self._get_token()
-                resp = await client.get(
-                    f"{self.base_url}{path}",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params=params,
-                )
-            resp.raise_for_status()
-            return resp.json()
+        resp.raise_for_status()
+        return resp.json()
 
     async def _api_post(self, path: str, body: dict) -> dict:
         token = await self._get_token()
-        async with httpx.AsyncClient(timeout=15) as client:
+        client = get_client()
+        resp = await client.post(
+            f"{self.base_url}{path}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=15,
+        )
+        if resp.status_code == 401:
+            self._jwt_token = None
+            token = await self._get_token()
             resp = await client.post(
                 f"{self.base_url}{path}",
                 headers={
@@ -111,20 +128,10 @@ class PharmaDBService:
                     "Content-Type": "application/json",
                 },
                 json=body,
+                timeout=15,
             )
-            if resp.status_code == 401:
-                self._jwt_token = None
-                token = await self._get_token()
-                resp = await client.post(
-                    f"{self.base_url}{path}",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-            resp.raise_for_status()
-            return resp.json()
+        resp.raise_for_status()
+        return resp.json()
 
     # ── Busca de Princípios Ativos ───────────────────────────
 

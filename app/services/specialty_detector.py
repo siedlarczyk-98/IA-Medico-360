@@ -1,6 +1,7 @@
 import json
-import httpx
 from app.core.config import get_settings
+from app.core.http_client import get_client
+from app.services import cache_service
 
 settings = get_settings()
 
@@ -26,41 +27,50 @@ async def detect_specialty_and_topic(prompt: str) -> dict:
     """
     Detecta especialidade e tema da pergunta via GPT-5.4 Nano.
     Retorna dict com 'specialty' e 'topic', ou valores None.
+    Determinístico (temp=0) → cacheado no Redis por 1h.
     """
+    cache_key = cache_service.make_key("specialty", prompt)
+    cached = await cache_service.get_json(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gpt-5.4-nano",
-                    "messages": [
-                        {"role": "user", "content": CLASSIFICATION_PROMPT.format(prompt=prompt)},
-                    ],
-                    "max_completion_tokens": 60,
-                    "temperature": 0,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            content = content.replace("```json", "").replace("```", "").strip()
+        client = get_client()
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5.4-nano",
+                "messages": [
+                    {"role": "user", "content": CLASSIFICATION_PROMPT.format(prompt=prompt)},
+                ],
+                "max_completion_tokens": 60,
+                "temperature": 0,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        content = content.replace("```json", "").replace("```", "").strip()
 
-            result = json.loads(content)
+        result = json.loads(content)
 
-            specialty = result.get("specialty", "").strip()
-            topic = result.get("topic", "").strip().lower()
+        specialty = result.get("specialty", "").strip()
+        topic = result.get("topic", "").strip().lower()
 
-            if specialty == "NAO_CLINICO":
-                specialty = "Cotidiano/Não clínico"
+        if specialty == "NAO_CLINICO":
+            specialty = "Cotidiano/Não clínico"
 
-            return {
-                "specialty": specialty or None,
-                "topic": topic or None,
-            }
+        out = {
+            "specialty": specialty or None,
+            "topic": topic or None,
+        }
+        await cache_service.set_json(cache_key, out, cache_service.TTL_SPECIALTY)
+        return out
 
     except Exception:
         return {"specialty": None, "topic": None}

@@ -1,8 +1,9 @@
 
 
 import json
-import httpx
 from app.core.config import get_settings
+from app.core.http_client import get_client
+from app.services import cache_service
 
 settings = get_settings()
 
@@ -46,42 +47,47 @@ async def triage(prompt: str) -> dict:
     """
     Classifica a pergunta do médico via GPT-5.4 Nano.
     Retorna dict com 'mode' e 'confidence'.
-    Timeout: 3 segundos. Fallback: QUICK_SEARCH.
+    Determinístico (temp=0) → cacheado no Redis por 2h. Fallback: QUICK_SEARCH.
     """
+    cache_key = cache_service.make_key("triage", prompt)
+    cached = await cache_service.get_json(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        async with httpx.AsyncClient(timeout=6) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gpt-5.4-nano",
-                    "messages": [
-                        {"role": "user", "content": TRIAGE_PROMPT.format(prompt=prompt)},
-                    ],
-                    "max_completion_tokens": 30,
-                    "temperature": 0,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            content = content.replace("```json", "").replace("```", "").strip()
+        client = get_client()
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5.4-nano",
+                "messages": [
+                    {"role": "user", "content": TRIAGE_PROMPT.format(prompt=prompt)},
+                ],
+                "max_completion_tokens": 30,
+                "temperature": 0,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        content = content.replace("```json", "").replace("```", "").strip()
 
-            result = json.loads(content)
-            mode = result.get("mode", "").strip().upper()
-            confidence = float(result.get("confidence", 0))
+        result = json.loads(content)
+        mode = result.get("mode", "").strip().upper()
+        confidence = float(result.get("confidence", 0))
 
-            if mode not in VALID_MODES:
-                mode = "QUICK_SEARCH"
-                confidence = 0.5
+        if mode not in VALID_MODES:
+            mode = "QUICK_SEARCH"
+            confidence = 0.5
 
-            return {
-                "mode": mode,
-                "confidence": confidence,
-            }
+        out = {"mode": mode, "confidence": confidence}
+        await cache_service.set_json(cache_key, out, cache_service.TTL_TRIAGE)
+        return out
 
     except Exception as e:
         print(f"Error occurred while triaging: {e}")

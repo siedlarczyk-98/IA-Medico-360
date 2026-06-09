@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useRef, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -14,10 +14,12 @@ import { streamAgregador } from './api/agregador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
-import { LoginPage } from './pages/LoginPage';
-import { InvitePage } from './pages/InvitePage';
-import { OnboardingPage } from './pages/OnboardingPage';
-import { RegisterPage } from './pages/RegisterPage';
+
+// Páginas de auth são carregadas sob demanda (não fazem parte da rota principal).
+const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const InvitePage = lazy(() => import('./pages/InvitePage').then(m => ({ default: m.InvitePage })));
+const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then(m => ({ default: m.OnboardingPage })));
+const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
 
 type AppMode = 'orquestrador' | 'agregador';
 
@@ -45,34 +47,49 @@ function MainApp() {
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [usageTick, setUsageTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
+  // state uma vez por frame (requestAnimationFrame), evitando re-render por token.
+  const rafRef = useRef<number | null>(null);
+
+  const cancelFlush = useCallback(() => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  const scheduleFlush = useCallback((flush: () => void) => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      flush();
+    });
+  }, []);
 
   const topbarTitle = messages.length === 0
     ? 'Nova consulta'
     : (messages.find(m => m.role === 'user')?.content.slice(0, 60) ?? '') + '…';
 
-  function appendAssistant(token: string, accumulated: { current: string }, added: { current: boolean }) {
-    accumulated.current += token;
-    if (!added.current) {
-      setMessages(prev => [...prev, { role: 'assistant', content: accumulated.current }]);
-      added.current = true;
-    } else {
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content: accumulated.current };
-        return next;
-      });
-    }
-  }
-
   const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort }) => {
     abortRef.current?.abort();
+    cancelFlush();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);
     setClarification(null);
 
     const acc = { current: '' };
-    const added = { current: false };
+    let assistantIndex = -1;
+
+    const flushAssistant = () => {
+      if (assistantIndex === -1) return;
+      setMessages(prev => {
+        if (assistantIndex >= prev.length) return prev;
+        const next = [...prev];
+        next[assistantIndex] = { ...next[assistantIndex], content: acc.current };
+        return next;
+      });
+    };
 
     try {
       for await (const event of streamQuery(params, ctrl.signal)) {
@@ -85,7 +102,17 @@ function MainApp() {
           setClarification({ conversationId: event.conversation_id, questions: event.questions });
           return;
         }
-        if (event.type === 'token')  appendAssistant(event.text, acc, added);
+        if (event.type === 'token') {
+          acc.current += event.text;
+          if (assistantIndex === -1) {
+            setMessages(prev => {
+              assistantIndex = prev.length;
+              return [...prev, { role: 'assistant', content: acc.current }];
+            });
+          } else {
+            scheduleFlush(flushAssistant);
+          }
+        }
         if (event.type === 'done')  setActiveConvId(event.conversation_id);
         if (event.type === 'error') {
           if (event.status === 'unsupported_mode') {
@@ -102,14 +129,17 @@ function MainApp() {
       if (err instanceof Error && err.name === 'AbortError') return;
       setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Erro ao conectar com o servidor.' }]);
     } finally {
+      cancelFlush();
+      flushAssistant();
       setStreaming(false);
       setUsageTick(t => t + 1);
     }
-  }, []);
+  }, [cancelFlush, scheduleFlush]);
 
   const runAgregador = useCallback(async (prompt: string, priorMessages: Message[], effort: Effort = 'detalhado') => {
     if (selectedModels.length === 0) return;
     abortRef.current?.abort();
+    cancelFlush();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);
@@ -119,6 +149,20 @@ function MainApp() {
     // baseIndex garante que buscamos/atualizamos apenas mensagens desta sessão de streaming,
     // evitando sobrescrever respostas de perguntas anteriores com o mesmo model_id
     let baseIndex = -1;
+    // Conjunto de model_ids já materializados como mensagem (criação é síncrona;
+    // atualizações subsequentes são agrupadas via requestAnimationFrame).
+    const created = new Set<string>();
+
+    const flushBuffers = () => {
+      setMessages(prev => {
+        const next = [...prev];
+        for (const mid of created) {
+          const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
+          if (idx !== -1) next[idx] = { ...next[idx], content: buffers[mid] };
+        }
+        return next;
+      });
+    };
 
     try {
       const history = priorMessages.map(m => ({ role: m.role, content: m.content }));
@@ -126,17 +170,15 @@ function MainApp() {
         if (event.type === 'delta') {
           const mid = event.model_id;
           buffers[mid] = (buffers[mid] ?? '') + event.delta;
-          setMessages(prev => {
-            if (baseIndex === -1) baseIndex = prev.length;
-            const next = [...prev];
-            const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
-            if (idx === -1) {
-              next.push({ role: 'assistant', content: buffers[mid], mode: mid });
-            } else {
-              next[idx] = { ...next[idx], content: buffers[mid] };
-            }
-            return next;
-          });
+          if (!created.has(mid)) {
+            created.add(mid);
+            setMessages(prev => {
+              if (baseIndex === -1) baseIndex = prev.length;
+              return [...prev, { role: 'assistant', content: buffers[mid], mode: mid }];
+            });
+          } else {
+            scheduleFlush(flushBuffers);
+          }
         }
         if (event.type === 'done') setActiveConvId(event.conversation_id);
         if (event.type === 'error') {
@@ -147,10 +189,12 @@ function MainApp() {
       if (err instanceof Error && err.name === 'AbortError') return;
       setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Erro ao conectar com o servidor.' }]);
     } finally {
+      cancelFlush();
+      flushBuffers();
       setStreaming(false);
       setUsageTick(t => t + 1);
     }
-  }, [selectedModels, activeConvId]);
+  }, [selectedModels, activeConvId, cancelFlush, scheduleFlush]);
 
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado') => {
     // Capturar histórico ANTES de adicionar a nova mensagem do usuário
@@ -264,18 +308,20 @@ function MainApp() {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/cadastro" element={<RegisterPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/invite" element={<InvitePage />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
-      <Route path="/" element={
-        <RequireAuth>
-          <MainApp />
-        </RequireAuth>
-      } />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={null}>
+      <Routes>
+        <Route path="/cadastro" element={<RegisterPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/invite" element={<InvitePage />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/" element={
+          <RequireAuth>
+            <MainApp />
+          </RequireAuth>
+        } />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
