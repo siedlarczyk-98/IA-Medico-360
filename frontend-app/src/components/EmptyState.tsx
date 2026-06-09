@@ -6,6 +6,7 @@ const suggestions = [
 ];
 
 import type { ReactElement } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const icons: Record<string, ReactElement> = {
   raciocinio: (
@@ -45,16 +46,17 @@ interface Props {
 }
 
 export function EmptyState({ userName }: Props) {
+  const isMobile = useIsMobile();
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 40px' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '0 20px' : '0 40px' }}>
       <div style={{ width: 720, maxWidth: '100%' }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.5 }}>
+        <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.5 }}>
           {greeting(userName ?? null)}
         </div>
-        <div style={{ fontSize: 15, color: 'var(--pen2)', marginTop: 6, marginBottom: 28 }}>
+        <div style={{ fontSize: 14, color: 'var(--pen2)', marginTop: 6, marginBottom: 28 }}>
           Os cards abaixo mostram o que cada modo faz — basta perguntar em texto livre que eu identifico o modo certo.
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
           {suggestions.map(s => (
             <div
               key={s.icon}

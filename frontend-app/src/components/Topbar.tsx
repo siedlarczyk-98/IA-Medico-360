@@ -1,20 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   title: string;
   mode: 'orquestrador' | 'agregador';
   onModeChange: (m: 'orquestrador' | 'agregador') => void;
   onMenuToggle: () => void;
-}
-
-function useIsMobile() {
-  const [mobile, setMobile] = useState(() => window.innerWidth <= 700);
-  useEffect(() => {
-    const handler = () => setMobile(window.innerWidth <= 700);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, []);
-  return mobile;
 }
 
 export function Topbar({ title, mode, onModeChange, onMenuToggle }: Props) {

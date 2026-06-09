@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getMe, updateProfile, deleteAccount } from '../api/auth';
 import { setToken, logout } from '../lib/auth';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   onClose: () => void;
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function ProfileModal({ onClose, onSuccess }: Props) {
+  const isMobile = useIsMobile();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(true);
@@ -63,7 +65,9 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 400, background: 'var(--paper)', borderRadius: 14,
+          width: isMobile ? 'calc(100vw - 32px)' : 400,
+          maxWidth: 400,
+          background: 'var(--paper)', borderRadius: 14,
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           overflow: 'hidden',
         }}

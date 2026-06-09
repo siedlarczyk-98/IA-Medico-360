@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export type Effort = 'rápido' | 'detalhado';
 
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function InputBar({ onSend, disabled, placeholder }: Props) {
+  const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const [effort, setEffort] = useState<Effort>('detalhado');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -82,7 +84,7 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
             ))}
           </div>
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>
+          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>}
           <button
             onClick={submit}
             disabled={!filled || disabled}

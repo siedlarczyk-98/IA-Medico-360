@@ -6,6 +6,7 @@ import { useUserUsage } from '../lib/useUserUsage';
 import { listConversations, type ConversationSummary } from '../api/conversations';
 import { logout } from '../lib/auth';
 import { ProfileModal } from './ProfileModal';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   activeId?: string;
@@ -16,22 +17,6 @@ interface Props {
   usageTick?: number;
 }
 
-function useIsMobile() {
-  const [mobile, setMobile] = useState(() => window.innerWidth <= 700);
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => setMobile(window.innerWidth <= 700), 150);
-    };
-    window.addEventListener('resize', handler);
-    return () => {
-      window.removeEventListener('resize', handler);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, []);
-  return mobile;
-}
 
 function groupByDate(conversations: ConversationSummary[]) {
   const today = new Date();

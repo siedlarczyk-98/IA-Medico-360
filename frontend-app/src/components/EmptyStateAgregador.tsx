@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchModels, type AIModel } from '../api/agregador';
 import { MODEL_DESCRIPTIONS, type AIModelInfo } from '../lib/modelDescriptions';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   selected: string[];
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function EmptyStateAgregador({ selected, onChange }: Props) {
+  const isMobile = useIsMobile();
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,7 +40,7 @@ export function EmptyStateAgregador({ selected, onChange }: Props) {
   return (
     <div style={{
       flex: 1, display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: '0 40px',
+      alignItems: 'center', justifyContent: 'center', padding: isMobile ? '0 20px' : '0 40px',
     }}>
       <div style={{ width: 900, maxWidth: '100%' }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.4 }}>
@@ -53,7 +55,7 @@ export function EmptyStateAgregador({ selected, onChange }: Props) {
         ) : (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))',
             gap: 14,
           }}>
             {models.map(m => {

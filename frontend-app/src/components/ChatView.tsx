@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ModeChip } from './ModeChip';
 import type { Message } from '../api/orquestrador';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de responsabilidade exclusiva do médico assistente.';
 
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function ChatView({ messages, streaming, scrollToBottomTrigger }: Props) {
+  const isMobile = useIsMobile();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Só rola quando o usuário envia uma nova mensagem (scrollToBottomTrigger muda)
@@ -22,7 +24,7 @@ export function ChatView({ messages, streaming, scrollToBottomTrigger }: Props) 
   }, [scrollToBottomTrigger]);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 40px 0', display: 'flex', justifyContent: 'center' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 20px 0' : '24px 40px 0', display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: 720, maxWidth: '100%', paddingBottom: 16 }}>
         {messages.map((msg, i) => (
           msg.role === 'user'

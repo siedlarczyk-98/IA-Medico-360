@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchModels, type AIModel } from '../api/agregador';
 import { MODEL_DESCRIPTIONS } from '../lib/modelDescriptions';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   selected: string[];
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function ModelSelector({ selected, onChange, max = 4, locked = false }: Props) {
+  const isMobile = useIsMobile();
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,7 +32,7 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false }: P
   }
 
   if (loading) return (
-    <div style={{ padding: '12px 40px', fontSize: 12, color: 'var(--pen3)' }}>
+    <div style={{ padding: isMobile ? '12px 20px' : '12px 40px', fontSize: 12, color: 'var(--pen3)' }}>
       Carregando modelos…
     </div>
   );
@@ -39,7 +41,7 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false }: P
 
   return (
     <div style={{
-      padding: '10px 40px 4px',
+      padding: isMobile ? '10px 20px 4px' : '10px 40px 4px',
       borderBottom: '1px solid var(--line2)',
       display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
     }}>
