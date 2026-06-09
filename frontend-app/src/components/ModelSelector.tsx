@@ -48,12 +48,12 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false }: P
       </span>
       {available.map(m => {
         const active = selected.includes(m.model_id);
-        const desc = MODEL_DESCRIPTIONS[m.model_id];
+        const info = MODEL_DESCRIPTIONS[m.model_id];
         const atMax = selected.length >= max && !active;
         let tooltipText: string | undefined;
         if (locked) tooltipText = 'Para trocar de modelo, inicie uma nova consulta';
         else if (atMax) tooltipText = `Máximo ${max} modelo${max > 1 ? 's' : ''}`;
-        else if (desc) tooltipText = desc;
+        else if (info) tooltipText = info.shortDescription;
         return (
           <button
             key={m.model_id}
