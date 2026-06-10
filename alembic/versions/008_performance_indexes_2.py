@@ -20,20 +20,11 @@ INDEXES = [
     ("ix_users_company_id", "users", "(company_id)"),
 ]
 
-# Partial indexes — only index active rows (status = TRUE)
-PARTIAL_INDEXES = [
-    ("ix_interactions_active_user_createdat", "interactions", "(user_id, createdat DESC) WHERE status = TRUE"),
-    ("ix_conversations_active_user_updatedat", "conversations", "(user_id, updatedat DESC) WHERE status = TRUE"),
-]
-
-
 def upgrade() -> None:
     for name, table, cols in INDEXES:
-        op.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} {cols}")
-    for name, table, cols in PARTIAL_INDEXES:
         op.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} {cols}")
 
 
 def downgrade() -> None:
-    for name, _table, _cols in INDEXES + PARTIAL_INDEXES:
+    for name, _table, _cols in INDEXES:
         op.execute(f"DROP INDEX IF EXISTS {name}")
