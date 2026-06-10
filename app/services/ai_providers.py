@@ -8,6 +8,7 @@ Todos os providers reutilizam o httpx.AsyncClient compartilhado
 continua sendo aplicado por-requisição.
 """
 
+import asyncio
 import json as json_lib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ class ProviderResponse:
     tokens_out: int | None = None
     model_id: str = ""
     provider: str = ""
+    citations: list[str] | None = None
 
 
 @dataclass
@@ -91,6 +93,7 @@ class AnthropicProvider(BaseProvider):
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
+        tokens_in: int | None = None
         async with client.stream(
             "POST",
             "https://api.anthropic.com/v1/messages",
@@ -118,13 +121,15 @@ class AnthropicProvider(BaseProvider):
                     break
                 event = json_lib.loads(payload)
                 event_type = event.get("type", "")
-                if event_type == "content_block_delta":
+                if event_type == "message_start":
+                    tokens_in = event.get("message", {}).get("usage", {}).get("input_tokens")
+                elif event_type == "content_block_delta":
                     delta = event.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield StreamToken(delta=delta.get("text", ""))
                 elif event_type == "message_delta":
                     usage = event.get("usage", {})
-                    yield StreamToken(delta="", done=True, tokens_out=usage.get("output_tokens"))
+                    yield StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=usage.get("output_tokens"))
 
 
 # ── OpenAI ───────────────────────────────────────────────────
@@ -182,22 +187,32 @@ class OpenAIProvider(BaseProvider):
                 "max_completion_tokens": 4096,
                 "temperature": temperature,
                 "stream": True,
+                "stream_options": {"include_usage": True},
             },
             timeout=timeout,
         ) as response:
             response.raise_for_status()
+            tokens_in: int | None = None
+            tokens_out: int | None = None
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
                 payload = line[6:]
                 if payload == "[DONE]":
-                    yield StreamToken(delta="", done=True)
+                    yield StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out)
                     break
                 event = json_lib.loads(payload)
-                delta = event["choices"][0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    yield StreamToken(delta=content)
+                # chunk de usage vem com choices=[] antes do [DONE]
+                usage = event.get("usage")
+                if usage:
+                    tokens_in = usage.get("prompt_tokens")
+                    tokens_out = usage.get("completion_tokens")
+                choices = event.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield StreamToken(delta=content)
 
 
 # ── Google (Gemini) ──────────────────────────────────────────
@@ -298,48 +313,26 @@ class PerplexityProvider(BaseProvider):
         data = resp.json()
         choice = data["choices"][0]
         usage = data.get("usage", {})
+        citations = data.get("citations") or None
         return ProviderResponse(
             text=choice["message"]["content"],
             tokens_in=usage.get("prompt_tokens"),
             tokens_out=usage.get("completion_tokens"),
             model_id=model_id,
             provider="Perplexity",
+            citations=citations,
         )
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
-        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
-        client = get_client()
-        async with client.stream(
-            "POST",
-            "https://api.perplexity.ai/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.perplexity_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": 4096,
-                "stream": True,
-            },
-            timeout=timeout,
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload == "[DONE]":
-                    yield StreamToken(delta="", done=True)
-                    break
-                event = json_lib.loads(payload)
-                delta = event["choices"][0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    yield StreamToken(delta=content)
+        # Perplexity não retorna usage no modo streaming — usamos complete() para
+        # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
+        response = await self.complete(model_id, prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature)
+        chunk_size = 20
+        text = response.text
+        for i in range(0, len(text), chunk_size):
+            yield StreamToken(delta=text[i:i + chunk_size])
+            await asyncio.sleep(0.015)
+        yield StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out)
 
 
 # ── Registry por tipo ────────────────────────────────────────

@@ -58,117 +58,117 @@ class AgregadorService:
         3. Registra interação
         4. Busca modelos no banco
         5. Chama providers em paralelo
-        6. Salva respostas + auditoria
-        7. Detecta especialidade + tema
-        8. Extrai medicamentos
+        6. Salva respostas + custo  → commit (dados essenciais garantidos)
+        7. Detecta especialidade + tema  (best-effort)
+        8. Extrai medicamentos  (best-effort)
         9. Audit log
         """
-        try:
-            start_time = time.monotonic()
+        start_time = time.monotonic()
 
-            # 1. DLP: sanitizar prompt antes de enviar para APIs externas
-            dlp_result = sanitize_prompt(request.prompt)
-            sanitized_prompt = dlp_result.sanitized_text
+        # 1. DLP
+        dlp_result = sanitize_prompt(request.prompt)
+        sanitized_prompt = dlp_result.sanitized_text
 
-            # 2. Conversation
-            conversation_id = await self._ensure_conversation(
-                request.conversation_id, request.prompt
-            )
+        # 2. Conversation (usa prompt sanitizado no título)
+        conversation_id = await self._ensure_conversation(
+            request.conversation_id, sanitized_prompt
+        )
 
-            # 3. Interaction (salva prompt SANITIZADO no banco)
-            interaction = Interaction(
-                conversation_id=conversation_id,
-                user_id=self.user_id,
-                company_id=self.company_id,
-                feature="AGREGADOR",
-                mode=None,
-                prompt_text=sanitized_prompt,
-                prompt_sanitized=dlp_result.was_sanitized,
-                cache_hit=False,
-                started_at=datetime.now(timezone.utc),
-            )
-            self.db.add(interaction)
-            await self.db.flush()
+        # 3. Interaction
+        interaction = Interaction(
+            conversation_id=conversation_id,
+            user_id=self.user_id,
+            company_id=self.company_id,
+            feature="AGREGADOR",
+            mode=None,
+            prompt_text=sanitized_prompt,
+            prompt_sanitized=dlp_result.was_sanitized,
+            cache_hit=False,
+            started_at=datetime.now(timezone.utc),
+        )
+        self.db.add(interaction)
+        await self.db.flush()
 
-            # 4. Buscar modelos no banco pra saber o provider_type
-            models_info = await self._get_models_info(request.models)
+        # 4. Modelos
+        models_info = await self._get_models_info(request.models)
 
-            # 5. Chamadas concorrentes aos providers
-            model_responses = await self._call_providers(
-                prompt=sanitized_prompt,
-                models_info=models_info,
-            )
+        # 5. Providers em paralelo
+        model_responses = await self._call_providers(
+            prompt=sanitized_prompt,
+            models_info=models_info,
+        )
 
-            # 6. Salvar respostas no banco
-            total_cost = Decimal("0")
-            response_models: list[ModelResponse] = []
+        # 6. Respostas + custo
+        total_cost = Decimal("0")
+        response_models: list[ModelResponse] = []
 
-            for model_id, result in model_responses.items():
-                if isinstance(result, ProviderResponse):
-                    cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
-
-                    ir = InteractionResponse(
-                        interaction_id=interaction.id,
-                        model_used=model_id,
+        for model_id, result in model_responses.items():
+            if isinstance(result, ProviderResponse):
+                cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
+                ir = InteractionResponse(
+                    interaction_id=interaction.id,
+                    model_used=model_id,
+                    response_text=result.text,
+                    tokens_in=result.tokens_in,
+                    tokens_out=result.tokens_out,
+                    cost_usd=cost,
+                    extra_metadata={"citations": result.citations} if result.citations else None,
+                    is_fallback=False,
+                )
+                self.db.add(ir)
+                total_cost += cost
+                response_models.append(
+                    ModelResponse(
+                        model_id=model_id,
+                        provider=result.provider,
                         response_text=result.text,
-                        response_time_ms=None,
+                        response_time_ms=0,
                         tokens_in=result.tokens_in,
                         tokens_out=result.tokens_out,
-                        cost_usd=cost,
-                        is_fallback=False,
+                        cost_usd=float(cost),
                     )
-                    self.db.add(ir)
-                    total_cost += cost
-
-                    response_models.append(
-                        ModelResponse(
-                            model_id=model_id,
-                            provider=result.provider,
-                            response_text=result.text,
-                            response_time_ms=0,
-                            tokens_in=result.tokens_in,
-                            tokens_out=result.tokens_out,
-                            cost_usd=float(cost),
-                        )
-                    )
-                else:
-                    error_msg = str(result)
-                    ir = InteractionResponse(
-                        interaction_id=interaction.id,
-                        model_used=model_id,
+                )
+            else:
+                error_msg = str(result)
+                ir = InteractionResponse(
+                    interaction_id=interaction.id,
+                    model_used=model_id,
+                    response_text="",
+                    error_message=error_msg,
+                    is_fallback=False,
+                )
+                self.db.add(ir)
+                response_models.append(
+                    ModelResponse(
+                        model_id=model_id,
+                        provider="",
                         response_text="",
-                        error_message=error_msg,
-                        is_fallback=False,
+                        response_time_ms=0,
+                        error=error_msg,
                     )
-                    self.db.add(ir)
+                )
 
-                    response_models.append(
-                        ModelResponse(
-                            model_id=model_id,
-                            provider="",
-                            response_text="",
-                            response_time_ms=0,
-                            error=error_msg,
-                        )
-                    )
+        await record_cost(self.db, self.user_id, total_cost)
 
-            await record_cost(self.db, self.user_id, total_cost)
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        interaction.response_time_ms = elapsed_ms
+        interaction.token_cost_usd = total_cost
+        interaction.completed_at = datetime.now(timezone.utc)
+        await self.db.flush()
 
-            # 7. Finalizar interaction
-            elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            interaction.response_time_ms = elapsed_ms
-            interaction.token_cost_usd = total_cost
-            interaction.completed_at = datetime.now(timezone.utc)
+        # Commit cedo — dados essenciais garantidos mesmo que enriquecimento falhe
+        await self.db.commit()
 
-            # 8. Detectar especialidade e tema via IA
+        # 7-9. Enriquecimento best-effort (falha aqui não perde a interação)
+        classification = {"specialty": None, "topic": None}
+        medications: list[dict] = []
+        try:
             classification = await detect_specialty_and_topic(sanitized_prompt)
             interaction.specialty_detected = classification["specialty"]
             interaction.topic_detected = classification["topic"]
 
-            # 9. Extrair medicamentos mencionados
             response_texts = [r.response_text for r in response_models if r.response_text]
             medications = await extract_from_interaction(sanitized_prompt, response_texts)
-            
             for med in medications:
                 self.db.add(InteractionMedication(
                     interaction_id=interaction.id,
@@ -177,7 +177,6 @@ class AgregadorService:
                     source=med["source"],
                 ))
 
-            # 10. Audit log
             audit = AuditLog(
                 user_id=self.user_id,
                 interaction_id=interaction.id,
@@ -198,22 +197,115 @@ class AgregadorService:
             )
             self.db.add(audit)
             await self.db.flush()
-
-            return AgregadorResponse(
-                interaction_id=interaction.id,
-                conversation_id=conversation_id,
-                responses=response_models,
-                disclaimer=DISCLAIMER_RESPOSTA,
-                total_response_time_ms=elapsed_ms,
-                created_at=interaction.createdat,
-                specialty_detected=classification["specialty"],
-                topic_detected=classification["topic"],
-            )
-
         except Exception as e:
-            logger.error(f"ERRO NO AGREGADOR QUERY: {e}")
-            traceback.print_exc()
-            raise
+            logger.warning(f"Enriquecimento pós-query falhou (interação já salva): {e}")
+
+        return AgregadorResponse(
+            interaction_id=interaction.id,
+            conversation_id=conversation_id,
+            responses=response_models,
+            disclaimer=DISCLAIMER_RESPOSTA,
+            total_response_time_ms=elapsed_ms,
+            created_at=interaction.createdat,
+            specialty_detected=classification["specialty"],
+            topic_detected=classification["topic"],
+        )
+
+    # ── Salvar interação após streaming ─────────────────────
+
+    async def save_stream_interaction(
+        self,
+        conversation_id: UUID,
+        sanitized_prompt: str,
+        prompt_sanitized: bool,
+        collected: dict[str, dict],
+        elapsed_ms: int,
+    ) -> UUID:
+        """Persiste interação + respostas coletadas durante o stream."""
+        interaction = Interaction(
+            conversation_id=conversation_id,
+            user_id=self.user_id,
+            company_id=self.company_id,
+            feature="AGREGADOR",
+            mode=None,
+            prompt_text=sanitized_prompt,
+            prompt_sanitized=prompt_sanitized,
+            cache_hit=False,
+            response_time_ms=elapsed_ms,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        self.db.add(interaction)
+        await self.db.flush()
+
+        total_cost = Decimal("0")
+        for model_id, data in collected.items():
+            if data.get("error"):
+                ir = InteractionResponse(
+                    interaction_id=interaction.id,
+                    model_used=model_id,
+                    response_text="",
+                    error_message=data["error"],
+                    is_fallback=False,
+                )
+            else:
+                cost = await calculate_cost(
+                    self.db, model_id, data.get("tokens_in"), data.get("tokens_out")
+                )
+                total_cost += cost
+                ir = InteractionResponse(
+                    interaction_id=interaction.id,
+                    model_used=model_id,
+                    response_text=data.get("text", ""),
+                    tokens_in=data.get("tokens_in"),
+                    tokens_out=data.get("tokens_out"),
+                    cost_usd=cost,
+                    is_fallback=False,
+                )
+            self.db.add(ir)
+
+        interaction.token_cost_usd = total_cost
+        await record_cost(self.db, self.user_id, total_cost)
+        await self.db.flush()
+
+        # Commit cedo — dados essenciais garantidos
+        await self.db.commit()
+
+        # Enriquecimento best-effort
+        try:
+            classification = await detect_specialty_and_topic(sanitized_prompt)
+            interaction.specialty_detected = classification["specialty"]
+            interaction.topic_detected = classification["topic"]
+
+            response_texts = [d.get("text", "") for d in collected.values() if d.get("text")]
+            medications = await extract_from_interaction(sanitized_prompt, response_texts)
+            for med in medications:
+                self.db.add(InteractionMedication(
+                    interaction_id=interaction.id,
+                    medication_raw=med["medication_raw"],
+                    medication_normalized=med["medication_normalized"],
+                    source=med["source"],
+                ))
+
+            audit = AuditLog(
+                user_id=self.user_id,
+                interaction_id=interaction.id,
+                action="agregador_stream",
+                entity_type="interaction",
+                entity_id=interaction.id,
+                metadata_={
+                    "models": list(collected.keys()),
+                    "prompt_length": len(sanitized_prompt),
+                    "response_count": len([d for d in collected.values() if not d.get("error")]),
+                    "total_cost_usd": str(total_cost),
+                },
+            )
+            self.db.add(audit)
+            await self.db.flush()
+        except Exception as e:
+            logger.warning(f"Enriquecimento pós-stream falhou (interação já salva): {e}")
+
+        return interaction.id
 
     # ── Buscar info dos modelos no banco ─────────────────────
 
@@ -222,7 +314,11 @@ class AgregadorService:
         results = await asyncio.gather(
             *[get_model_pricing(self.db, mid) for mid in model_ids]
         )
-        return {mid: info for mid, info in zip(model_ids, results) if info is not None}
+        found = {mid: info for mid, info in zip(model_ids, results) if info is not None}
+        missing = [mid for mid, info in zip(model_ids, results) if info is None]
+        if missing:
+            logger.warning(f"Modelos não encontrados em model_pricing (serão ignorados): {missing}")
+        return found
 
     # ── Chamadas paralelas aos providers ─────────────────────
 
@@ -250,9 +346,9 @@ class AgregadorService:
     # ── Conversation management ──────────────────────────────
 
     async def _ensure_conversation(
-        self, conversation_id: UUID | None, prompt: str
+        self, conversation_id: UUID | None, sanitized_prompt: str
     ) -> UUID:
-        """Cria nova conversa ou valida existente."""
+        """Cria nova conversa ou valida existente. Usa prompt já sanitizado no título."""
         if conversation_id:
             result = await self.db.execute(
                 select(Conversation).where(
@@ -264,7 +360,7 @@ class AgregadorService:
             if conv:
                 return conv.id
 
-        title = prompt[:100] + ("..." if len(prompt) > 100 else "")
+        title = sanitized_prompt[:100] + ("..." if len(sanitized_prompt) > 100 else "")
         conv = Conversation(
             user_id=self.user_id,
             title=title,

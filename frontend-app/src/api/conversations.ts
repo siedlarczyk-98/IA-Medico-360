@@ -15,6 +15,7 @@ export interface ConversationSummary {
   id: string;
   title: string | null;
   feature: 'ORQUESTRADOR' | 'AGREGADOR';
+  folder_id: string | null;
   updatedat: string;
   createdat: string;
 }

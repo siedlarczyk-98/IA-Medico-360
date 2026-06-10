@@ -4,12 +4,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class FolderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    createdat: datetime
+    updatedat: datetime
+
+
 class ConversationSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     title: str | None
     feature: str  # "ORQUESTRADOR" | "AGREGADOR"
+    folder_id: UUID | None = None
     updatedat: datetime
     createdat: datetime
 

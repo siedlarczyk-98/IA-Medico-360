@@ -1,7 +1,11 @@
 import json
+import logging
+
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.services import cache_service
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -72,5 +76,6 @@ async def detect_specialty_and_topic(prompt: str) -> dict:
         await cache_service.set_json(cache_key, out, cache_service.TTL_SPECIALTY)
         return out
 
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Specialty detection failed: {e}")
         return {"specialty": None, "topic": None}

@@ -49,11 +49,9 @@ async def check_limit(db: AsyncSession, user: User) -> None:
 async def record_cost(db: AsyncSession, user_id, cost_usd: Decimal) -> None:
     if cost_usd <= Decimal("0"):
         return
-    await db.execute(
-        update(UserWeeklyUsage)
-        .where(UserWeeklyUsage.user_id == user_id)
-        .values(total_cost_usd=UserWeeklyUsage.total_cost_usd + cost_usd)
-    )
+    usage = await _get_or_create_usage(db, user_id)
+    await _reset_if_expired(db, usage)
+    usage.total_cost_usd += cost_usd
     await db.flush()
 
 

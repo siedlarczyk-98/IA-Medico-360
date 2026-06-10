@@ -8,6 +8,7 @@ GET  /history     → Histórico de consultas
 
 import asyncio
 import json
+import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,6 +20,7 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.prompts import DISCLAIMER_RESPOSTA
+from app.middleware.dlp import sanitize_prompt
 from app.models.models import ModelPricing, User
 from app.schemas.agregador import (
     AgregadorRequest,
@@ -32,6 +34,8 @@ from app.services.agregador_service import AgregadorService
 from app.services.ai_providers import get_provider_by_type
 from app.services.usage_service import check_limit
 from app.core.limiter import limiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agregador", tags=["Agregador de IA"])
 
@@ -88,8 +92,8 @@ def _get_cost_tier(input_per_million) -> str:
 @router.post("/query", response_model=AgregadorResponse)
 @limiter.limit("30/minute")
 async def agregador_query(
-    http_request: Request,
-    request: AgregadorRequest,
+    request: Request,
+    body: AgregadorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -104,7 +108,7 @@ async def agregador_query(
         user_id=user.id,
         company_id=user.company_id,
     )
-    return await service.query(request)
+    return await service.query(body)
 
 
 # ── Consulta com Streaming (SSE) ────────────────────────────
@@ -112,8 +116,8 @@ async def agregador_query(
 @router.post("/stream")
 @limiter.limit("30/minute")
 async def agregador_stream(
-    http_request: Request,
-    request: AgregadorRequest,
+    request: Request,
+    body: AgregadorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -126,84 +130,95 @@ async def agregador_stream(
 
     service = AgregadorService(db=db, user_id=user.id, company_id=user.company_id)
 
-    # Criar/recuperar conversa para manter contexto
-    conversation_id = await service._ensure_conversation(request.conversation_id, request.prompt)
+    # DLP antes de qualquer coisa
+    dlp_result = sanitize_prompt(body.prompt)
+    sanitized_prompt = dlp_result.sanitized_text
+
+    # Criar/recuperar conversa (já usa prompt sanitizado no título)
+    conversation_id = await service._ensure_conversation(body.conversation_id, sanitized_prompt)
     await db.commit()
 
     # Montar prompt enriquecido com histórico recebido do frontend
-    if request.history:
+    if body.history:
         parts = ["[Conversa anterior]"]
-        for msg in request.history[-10:]:  # últimas 10 mensagens
+        for msg in body.history[-10:]:
             role_label = "Médico" if msg.role == "user" else "Assistente"
             parts.append(f"{role_label}: {msg.content[:800]}")
         parts.append("[Pergunta atual]")
-        enriched_prompt = "\n".join(parts) + f"\nMédico: {request.prompt}"
+        enriched_prompt = "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
     else:
-        enriched_prompt = request.prompt
+        enriched_prompt = sanitized_prompt
 
     # Buscar modelos no banco
     result = await db.execute(
         select(ModelPricing).where(
-            ModelPricing.model_id.in_(request.models),
+            ModelPricing.model_id.in_(body.models),
             ModelPricing.status == True,
         )
     )
     models_info = {m.model_id: m for m in result.scalars().all()}
 
-    effort_prefix = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" if request.effort == "rápido" else ""
+    effort_prefix = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" if body.effort == "rápido" else ""
     effort_system = effort_prefix.strip() or None
 
+    stream_start = time.monotonic()
+
     async def event_generator():
+        # Acumula texto + tokens por modelo para salvar após stream
+        collected: dict[str, dict] = {
+            mid: {"text": "", "tokens_in": None, "tokens_out": None, "error": None}
+            for mid in models_info
+        }
+
         tasks = {}
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
             tasks[model_id] = provider.stream(model_id, enriched_prompt, system_prompt=effort_system)
 
-        async def stream_model(model_id, provider_stream):
-            start = time.monotonic()
-            try:
-                async for token in provider_stream:
-                    if token.delta:
-                        yield {
-                            "event": "delta",
-                            "data": json.dumps({"model_id": model_id, "delta": token.delta}),
-                        }
-                    if token.done:
-                        elapsed = int((time.monotonic() - start) * 1000)
-                        yield {
-                            "event": "complete",
-                            "data": json.dumps({
-                                "model_id": model_id,
-                                "response_time_ms": elapsed,
-                                "tokens_in": token.tokens_in,
-                                "tokens_out": token.tokens_out,
-                            }),
-                        }
-            except Exception as e:
-                yield {
-                    "event": "error",
-                    "data": json.dumps({"model_id": model_id, "error": str(e)}),
-                }
-
-        queues = {}
-        active_tasks = set()
+        queues: dict[str, asyncio.Queue] = {}
 
         for model_id, provider_stream in tasks.items():
-            q = asyncio.Queue()
+            q: asyncio.Queue = asyncio.Queue()
             queues[model_id] = q
+            model_start = time.monotonic()
 
-            async def _run(mid=model_id, ps=provider_stream, queue=q):
-                async for event in stream_model(mid, ps):
-                    await queue.put(event)
-                await queue.put(None)
+            async def _run(mid=model_id, ps=provider_stream, queue=q, mstart=model_start):
+                try:
+                    async for token in ps:
+                        if token.delta:
+                            collected[mid]["text"] += token.delta
+                            await queue.put({
+                                "event": "delta",
+                                "data": json.dumps({"model_id": mid, "delta": token.delta}),
+                            })
+                        if token.done:
+                            collected[mid]["tokens_in"] = token.tokens_in
+                            collected[mid]["tokens_out"] = token.tokens_out
+                            elapsed = int((time.monotonic() - mstart) * 1000)
+                            await queue.put({
+                                "event": "complete",
+                                "data": json.dumps({
+                                    "model_id": mid,
+                                    "response_time_ms": elapsed,
+                                    "tokens_in": token.tokens_in,
+                                    "tokens_out": token.tokens_out,
+                                }),
+                            })
+                except Exception as e:
+                    collected[mid]["error"] = str(e)
+                    await queue.put({
+                        "event": "error",
+                        "data": json.dumps({"model_id": mid, "error": str(e)}),
+                    })
+                finally:
+                    await queue.put(None)
 
-            task = asyncio.create_task(_run())
-            active_tasks.add(task)
+            asyncio.create_task(_run())
 
         done_count = 0
         total = len(queues)
         while done_count < total:
-            for model_id, q in queues.items():
+            for q in queues.values():
                 try:
                     event = q.get_nowait()
                     if event is None:
@@ -213,6 +228,19 @@ async def agregador_stream(
                 except asyncio.QueueEmpty:
                     pass
             await asyncio.sleep(0.01)
+
+        # Salvar interação no banco após stream completo
+        elapsed_ms = int((time.monotonic() - stream_start) * 1000)
+        try:
+            await service.save_stream_interaction(
+                conversation_id=conversation_id,
+                sanitized_prompt=sanitized_prompt,
+                prompt_sanitized=dlp_result.was_sanitized,
+                collected=collected,
+                elapsed_ms=elapsed_ms,
+            )
+        except Exception as e:
+            logger.error(f"Erro ao salvar interação stream: {e}")
 
         yield {"event": "disclaimer", "data": json.dumps({"text": DISCLAIMER_RESPOSTA})}
         yield {"event": "done", "data": json.dumps({"conversation_id": str(conversation_id)})}

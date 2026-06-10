@@ -137,6 +137,24 @@ class UserWeeklyUsage(Base):
     user: Mapped["User"] = relationship(back_populates="weekly_usage")
 
 
+# ── Folder ───────────────────────────────────────────────────────
+
+class Folder(Base):
+    __tablename__ = "folders"
+    __table_args__ = (
+        Index("ix_folders_user_createdat", "user_id", "createdat"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="folder")
+
+
 # ── Conversation - ok ────────────────────────────────────────────
 
 class Conversation(Base):
@@ -147,6 +165,7 @@ class Conversation(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str | None] = mapped_column(String(500))
     feature: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -155,6 +174,7 @@ class Conversation(Base):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="conversations")
+    folder: Mapped["Folder | None"] = relationship(back_populates="conversations")
     interactions: Mapped[list["Interaction"]] = relationship(back_populates="conversation")
 
 
@@ -215,6 +235,7 @@ class InteractionResponse(Base):
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0"))
     is_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
     error_message: Mapped[str | None] = mapped_column(Text)
+    extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Relationships
