@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -66,9 +66,12 @@ function MainApp() {
     });
   }, []);
 
-  const topbarTitle = messages.length === 0
-    ? 'Nova consulta'
-    : (messages.find(m => m.role === 'user')?.content.slice(0, 60) ?? '') + '…';
+  const topbarTitle = useMemo(() =>
+    messages.length === 0
+      ? 'Nova consulta'
+      : (messages.find(m => m.role === 'user')?.content.slice(0, 60) ?? '') + '…',
+    [messages]
+  );
 
   const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort }) => {
     abortRef.current?.abort();

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import { ModeChip } from './ModeChip';
@@ -6,6 +6,27 @@ import type { Message } from '../api/orquestrador';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de responsabilidade exclusiva do médico assistente.';
+
+// Defined outside component to keep reference stable across renders
+const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
+  strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
+  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+  ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ol>,
+  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+  h1: ({ children }) => <h1 style={{ fontSize: 15, fontWeight: 700, margin: '12px 0 6px' }}>{children}</h1>,
+  h2: ({ children }) => <h2 style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px' }}>{children}</h2>,
+  h3: ({ children }) => <h3 style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>{children}</h3>,
+  code: ({ children, className }) =>
+    className
+      ? <code style={{ display: 'block', background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', margin: '4px 0' }}>{children}</code>
+      : <code style={{ background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 4, padding: '1px 5px', fontSize: 12, fontFamily: 'monospace' }}>{children}</code>,
+  pre: ({ children }) => <>{children}</>,
+  blockquote: ({ children }) => <blockquote style={{ borderLeft: '3px solid var(--line2)', paddingLeft: 12, margin: '4px 0', color: 'var(--pen2)' }}>{children}</blockquote>,
+};
+
+const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [rehypeSanitize];
 
 interface Props {
   messages: Message[];
@@ -39,7 +60,7 @@ export function ChatView({ messages, streaming, scrollToBottomTrigger }: Props) 
   );
 }
 
-function UserMessage({ content }: { content: string }) {
+const UserMessage = memo(function UserMessage({ content }: { content: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
       <div style={{
@@ -49,9 +70,15 @@ function UserMessage({ content }: { content: string }) {
       }}>{content}</div>
     </div>
   );
-}
+});
 
-function AssistantMessage({ content, mode, confidence }: { content: string; mode?: string; confidence?: number }) {
+const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence }: { content: string; mode?: string; confidence?: number }) {
+  const rendered = useMemo(() => (
+    <ReactMarkdown rehypePlugins={rehypePlugins} components={mdComponents}>
+      {content}
+    </ReactMarkdown>
+  ), [content]);
+
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 24 }}>
       <AssistantAvatar />
@@ -70,28 +97,7 @@ function AssistantMessage({ content, mode, confidence }: { content: string; mode
           </div>
         )}
         <div style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.55, wordBreak: 'break-word' }}>
-          <ReactMarkdown
-            rehypePlugins={[rehypeSanitize]}
-            components={{
-              p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
-              strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
-              em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
-              ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ul>,
-              ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ol>,
-              li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
-              h1: ({ children }) => <h1 style={{ fontSize: 15, fontWeight: 700, margin: '12px 0 6px' }}>{children}</h1>,
-              h2: ({ children }) => <h2 style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px' }}>{children}</h2>,
-              h3: ({ children }) => <h3 style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>{children}</h3>,
-              code: ({ children, className }) =>
-                className
-                  ? <code style={{ display: 'block', background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', margin: '4px 0' }}>{children}</code>
-                  : <code style={{ background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 4, padding: '1px 5px', fontSize: 12, fontFamily: 'monospace' }}>{children}</code>,
-              pre: ({ children }) => <>{children}</>,
-              blockquote: ({ children }) => <blockquote style={{ borderLeft: '3px solid var(--line2)', paddingLeft: 12, margin: '4px 0', color: 'var(--pen2)' }}>{children}</blockquote>,
-            }}
-          >
-            {content}
-          </ReactMarkdown>
+          {rendered}
         </div>
         <div style={{
           marginTop: 14, fontSize: 11, color: 'var(--pen3)',
@@ -112,7 +118,7 @@ function AssistantMessage({ content, mode, confidence }: { content: string; mode
       </div>
     </div>
   );
-}
+});
 
 function ThinkingIndicator() {
   return (

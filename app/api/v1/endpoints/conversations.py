@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.models.models import Conversation, Interaction, User
 from app.schemas.conversations import ConversationDetail, ConversationMessage, ConversationSummary
 
@@ -14,21 +15,28 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 @router.get("", response_model=list[ConversationSummary])
+@limiter.limit("60/minute")
 async def list_conversations(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
 ):
     result = await db.execute(
         select(Conversation)
         .where(Conversation.user_id == current_user.id, Conversation.status == True)
         .order_by(Conversation.updatedat.desc())
-        .limit(100)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return result.scalars().all()
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
+@limiter.limit("60/minute")
 async def get_conversation(
+    request: Request,
     conversation_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

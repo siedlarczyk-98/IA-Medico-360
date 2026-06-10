@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.models.models import Conversation, Folder, User
 from app.schemas.conversations import FolderOut
 
@@ -26,7 +27,9 @@ class ConversationMoveBody(BaseModel):
 
 
 @router.get("", response_model=list[FolderOut])
+@limiter.limit("60/minute")
 async def list_folders(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

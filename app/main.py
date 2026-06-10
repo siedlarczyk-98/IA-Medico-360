@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -52,6 +53,8 @@ if not settings.is_production:
         settings.frontend_url.replace("127.0.0.1", "localhost"),
     ]
     _cors_origins = list(dict.fromkeys(_cors_origins))  # dedup
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,

@@ -12,6 +12,10 @@ BETA_ROLE = "beta_user"
 
 
 async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:
+    # Cache within the same db session to avoid double-SELECT per request
+    cache_key = f"_usage_{user_id}"
+    if cache_key in db.info:
+        return db.info[cache_key]
     result = await db.execute(select(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user_id))
     usage = result.scalar_one_or_none()
     if usage is None:
@@ -22,6 +26,7 @@ async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:
         )
         db.add(usage)
         await db.flush()
+    db.info[cache_key] = usage
     return usage
 
 

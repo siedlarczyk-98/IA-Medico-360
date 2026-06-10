@@ -27,7 +27,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", status_code=status.HTTP_204_NO_CONTENT)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Cadastro público: cria usuário e envia link de acesso por email."""
     settings = get_settings()
     if not settings.allow_public_registration:
@@ -56,7 +57,8 @@ async def generate_invite(
 
 
 @router.post("/invite/accept", response_model=TokenResponse)
-async def accept_invite(body: InviteAcceptRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def accept_invite(request: Request, body: InviteAcceptRequest, db: AsyncSession = Depends(get_db)):
     user, token = await auth_service.accept_invite(db, body.token, body.email)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
