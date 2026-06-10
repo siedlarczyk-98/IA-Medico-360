@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import { ModeChip } from './ModeChip';
 import type { Message } from '../api/orquestrador';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -9,6 +10,19 @@ const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de respons
 
 // Defined outside component to keep reference stable across renders
 const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  table: ({ children }) => (
+    <div style={{ overflowX: 'auto', margin: '8px 0' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead style={{ background: 'var(--fill2)' }}>{children}</thead>,
+  th: ({ children }) => (
+    <th style={{ border: '1px solid var(--line2)', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</th>
+  ),
+  td: ({ children }) => (
+    <td style={{ border: '1px solid var(--line2)', padding: '6px 10px', verticalAlign: 'top' }}>{children}</td>
+  ),
+  tr: ({ children }) => <tr style={{ borderBottom: '1px solid var(--line2)' }}>{children}</tr>,
   p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
   strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
   em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
@@ -27,14 +41,23 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
 };
 
 const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [rehypeSanitize];
+const remarkPlugins: React.ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [remarkGfm];
+
+const STREAMING_LABELS: Record<string, string> = {
+  QUICK_SEARCH:       'Buscando em fontes médicas…',
+  CLINICAL_REASONING: 'Analisando o caso clínico…',
+  PHARMA_CHECK:       'Checando interações…',
+  PRODUCTIVITY:       'Preparando resposta…',
+};
 
 interface Props {
   messages: Message[];
   streaming?: boolean;
+  streamingMode?: string;
   scrollToBottomTrigger?: number;
 }
 
-export function ChatView({ messages, streaming, scrollToBottomTrigger }: Props) {
+export function ChatView({ messages, streaming, streamingMode, scrollToBottomTrigger }: Props) {
   const isMobile = useIsMobile();
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +76,7 @@ export function ChatView({ messages, streaming, scrollToBottomTrigger }: Props) 
             ? <UserMessage key={i} content={msg.content} />
             : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} />
         ))}
-        {streaming && <ThinkingIndicator />}
+        {streaming && <ThinkingIndicator mode={streamingMode} />}
         <div ref={bottomRef} />
       </div>
     </div>
@@ -74,7 +97,7 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
 
 const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence }: { content: string; mode?: string; confidence?: number }) {
   const rendered = useMemo(() => (
-    <ReactMarkdown rehypePlugins={rehypePlugins} components={mdComponents}>
+    <ReactMarkdown rehypePlugins={rehypePlugins} remarkPlugins={remarkPlugins} components={mdComponents}>
       {content}
     </ReactMarkdown>
   ), [content]);
@@ -120,7 +143,8 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
   );
 });
 
-function ThinkingIndicator() {
+function ThinkingIndicator({ mode }: { mode?: string }) {
+  const label = (mode && STREAMING_LABELS[mode]) ?? 'Processando…';
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
       <AssistantAvatar />
@@ -133,7 +157,7 @@ function ThinkingIndicator() {
           }} />
         ))}
         <span style={{ fontSize: 12, color: 'var(--pen2)', fontWeight: 500 }}>
-          Roteando para o modo mais adequado…
+          {label}
         </span>
       </div>
     </div>

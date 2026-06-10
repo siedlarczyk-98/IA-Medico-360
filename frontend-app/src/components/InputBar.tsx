@@ -2,14 +2,24 @@ import { useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 export type Effort = 'rápido' | 'detalhado';
+export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY';
+
+const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }[] = [
+  { key: 'QUICK_SEARCH',       label: 'Busca Rápida',         shortLabel: 'Busca' },
+  { key: 'CLINICAL_REASONING', label: 'Raciocínio Clínico',   shortLabel: 'Clínico' },
+  { key: 'PHARMA_CHECK',       label: 'Farmacológico',        shortLabel: 'Farmácia' },
+  { key: 'PRODUCTIVITY',       label: 'Produtividade',        shortLabel: 'Produt.' },
+];
 
 interface Props {
   onSend: (text: string, effort: Effort) => void;
   disabled?: boolean;
   placeholder?: string;
+  mode?: OrchestratorMode;
+  onModeChange?: (mode: OrchestratorMode) => void;
 }
 
-export function InputBar({ onSend, disabled, placeholder }: Props) {
+export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH', onModeChange }: Props) {
   const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const [effort, setEffort] = useState<Effort>('detalhado');
@@ -44,13 +54,38 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
         padding: 14, boxShadow: '0 4px 18px rgba(14,37,45,0.05)',
         transition: 'border-color 0.15s',
       }}>
+        {/* Seletor de modo — apenas no Orquestrador */}
+        {onModeChange && <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {MODE_OPTIONS.map(opt => {
+            const active = mode === opt.key;
+            return (
+              <button
+                key={opt.key}
+                onClick={() => onModeChange?.(opt.key)}
+                title={opt.label}
+                style={{
+                  padding: '4px 11px', fontSize: 11, fontWeight: 600, borderRadius: 8,
+                  border: `1px solid ${active ? 'var(--petrol)' : 'var(--line2)'}`,
+                  background: active ? 'var(--petrol)' : 'transparent',
+                  color: active ? '#fff' : 'var(--pen2)',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {isMobile ? opt.shortLabel : opt.label}
+              </button>
+            );
+          })}
+        </div>}
+
         <textarea
           ref={ref}
           rows={2}
           value={value}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? 'Pergunte algo — o modo será roteado automaticamente.'}
+          placeholder={placeholder ?? 'Digite sua pergunta…'}
           disabled={disabled}
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
@@ -107,4 +142,3 @@ export function InputBar({ onSend, disabled, placeholder }: Props) {
     </div>
   );
 }
-

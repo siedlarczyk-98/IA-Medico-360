@@ -1,12 +1,13 @@
-const suggestions = [
-  { icon: 'raciocinio', title: 'Raciocínio clínico', desc: 'Descreva o caso e receba diferenciais, hipóteses e sugestão de conduta — o modo é ativado automaticamente.' },
-  { icon: 'farmaco',    title: 'Checagem farmacológica', desc: 'Informe os medicamentos do paciente e tire dúvidas de interações, ajustes de dose e contraindicações.' },
-  { icon: 'busca',      title: 'Busca rápida', desc: 'Pergunte posologias, critérios diagnósticos ou referências — resposta direta, sem elaboração.' },
-  { icon: 'produtividade', title: 'Produtividade', desc: 'Peça laudos, receitas, encaminhamentos ou resumos de consulta e receba o texto pronto para usar.' },
-];
-
 import type { ReactElement } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import type { OrchestratorMode } from './InputBar';
+
+const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: string }[] = [
+  { icon: 'busca',         key: 'QUICK_SEARCH',       title: 'Busca rápida',            desc: 'Pergunte qualquer coisa — posologia, protocolo, critério diagnóstico. Resposta direta, sem elaboração.' },
+  { icon: 'raciocinio',   key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
+  { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Informe dois ou mais medicamentos e veja interações, ajustes de dose e contraindicações.' },
+  { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
+];
 
 const icons: Record<string, ReactElement> = {
   raciocinio: (
@@ -43,9 +44,11 @@ function greeting(name: string | null): string {
 
 interface Props {
   userName?: string | null;
+  selectedMode?: OrchestratorMode;
+  onModeSelect?: (mode: OrchestratorMode) => void;
 }
 
-export function EmptyState({ userName }: Props) {
+export function EmptyState({ userName, selectedMode, onModeSelect }: Props) {
   const isMobile = useIsMobile();
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '0 20px' : '0 40px' }}>
@@ -54,26 +57,39 @@ export function EmptyState({ userName }: Props) {
           {greeting(userName ?? null)}
         </div>
         <div style={{ fontSize: 14, color: 'var(--pen2)', marginTop: 6, marginBottom: 28 }}>
-          Os cards abaixo mostram o que cada modo faz — basta perguntar em texto livre que eu identifico o modo certo.
+          Selecione o modo abaixo e faça sua pergunta.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
-          {suggestions.map(s => (
-            <div
-              key={s.icon}
-              style={{
-                border: '1px solid var(--line2)', borderRadius: 10, padding: '12px 14px',
-                background: '#fff', textAlign: 'left',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--petrol)', marginBottom: 6 }}>
-                {icons[s.icon]}
-                <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  {s.title}
-                </span>
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--pen)', lineHeight: 1.45 }}>{s.desc}</div>
-            </div>
-          ))}
+          {suggestions.map(s => {
+            const active = selectedMode === s.key;
+            return (
+              <button
+                key={s.icon}
+                onClick={() => onModeSelect?.(s.key)}
+                style={{
+                  border: `1.5px solid ${active ? 'var(--petrol)' : 'var(--line2)'}`,
+                  borderRadius: 10, padding: '12px 14px',
+                  background: active ? 'var(--mint)' : '#fff',
+                  textAlign: 'left', cursor: 'pointer',
+                  transition: 'border-color 0.15s, background 0.15s',
+                  outline: 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--petrol)', marginBottom: 6 }}>
+                  {icons[s.icon]}
+                  <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                    {s.title}
+                  </span>
+                  {active && (
+                    <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--petrol)', background: 'rgba(1,71,81,0.1)', borderRadius: 4, padding: '2px 6px' }}>
+                      selecionado
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--pen)', lineHeight: 1.45 }}>{s.desc}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

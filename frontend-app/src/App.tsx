@@ -8,7 +8,7 @@ import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import { ModelSelector } from './components/ModelSelector';
 import { EmptyStateAgregador } from './components/EmptyStateAgregador';
-import type { Effort } from './components/InputBar';
+import type { Effort, OrchestratorMode } from './components/InputBar';
 import { streamQuery, queryOrquestrador, type Message } from './api/orquestrador';
 import { streamAgregador } from './api/agregador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
@@ -22,6 +22,13 @@ const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then(m => ({ 
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
 
 type AppMode = 'orquestrador' | 'agregador';
+
+const BACKEND_TO_CHIP: Record<string, string> = {
+  QUICK_SEARCH: 'busca',
+  CLINICAL_REASONING: 'raciocinio',
+  PHARMA_CHECK: 'farmaco',
+  PRODUCTIVITY: 'produtividade',
+};
 
 interface PendingClarification {
   conversationId: string;
@@ -43,6 +50,7 @@ function MainApp() {
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | undefined>();
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
+  const [selectedMode, setSelectedMode] = useState<OrchestratorMode>('QUICK_SEARCH');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [usageTick, setUsageTick] = useState(0);
@@ -116,7 +124,18 @@ function MainApp() {
             scheduleFlush(flushAssistant);
           }
         }
-        if (event.type === 'done')  setActiveConvId(event.conversation_id);
+        if (event.type === 'done') {
+          setActiveConvId(event.conversation_id);
+          const chipMode = BACKEND_TO_CHIP[event.mode] ?? event.mode;
+          if (assistantIndex !== -1) {
+            setMessages(prev => {
+              if (assistantIndex >= prev.length) return prev;
+              const next = [...prev];
+              next[assistantIndex] = { ...next[assistantIndex], mode: chipMode };
+              return next;
+            });
+          }
+        }
         if (event.type === 'error') {
           if (event.status === 'unsupported_mode') {
             // PHARMA_CHECK não suporta streaming — fallback para /query
@@ -204,7 +223,7 @@ function MainApp() {
     setMessages(prev => {
       const priorMessages = prev;
       if (mode === 'orquestrador') {
-        runOrquestrador({ prompt: text, conversation_id: activeConvId, effort });
+        runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode });
       } else {
         runAgregador(text, priorMessages, effort);
       }
@@ -229,6 +248,7 @@ function MainApp() {
     setStreaming(false);
     setActiveConvId(undefined);
     setClarification(null);
+    setSelectedMode('QUICK_SEARCH');
   }, []);
 
   const handleSelectConversation = useCallback(async (id: string) => {
@@ -283,16 +303,16 @@ function MainApp() {
               </>
             ) : (
               <>
-                <EmptyState userName={currentUser?.firstName} />
-                <InputBar onSend={sendMessage} disabled={streaming} />
+                <EmptyState userName={currentUser?.firstName} onModeSelect={setSelectedMode} selectedMode={selectedMode} />
+                <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
               </>
             )
           ) : (
             <>
-              <ChatView messages={messages} streaming={streaming} scrollToBottomTrigger={scrollTrigger} />
+              <ChatView messages={messages} streaming={streaming} streamingMode={mode === 'orquestrador' ? selectedMode : undefined} scrollToBottomTrigger={scrollTrigger} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
-                : <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked} />
+                : <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined} />
               }
             </>
           )}

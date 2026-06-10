@@ -38,13 +38,17 @@ class OrquestradorRequest(BaseModel):
         default="detalhado",
         description="Nível de esforço da resposta: 'rápido' (conciso) ou 'detalhado' (padrão).",
     )
+    mode: str | None = Field(
+        default=None,
+        description="Modo explícito selecionado pelo usuário (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PRODUCTIVITY). Se informado, pula a triagem automática.",
+    )
 
 
 @router.post("/query")
 @limiter.limit("30/minute")
 async def orquestrador_query(
-    http_request: Request,
-    request: OrquestradorRequest,
+    request: Request,
+    body: OrquestradorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -65,18 +69,19 @@ async def orquestrador_query(
         company_id=user.company_id,
     )
     return await service.query(
-        prompt=request.prompt,
-        conversation_id=request.conversation_id,
-        force=request.force,
-        clarification_answers=request.clarification_answers,
+        prompt=body.prompt,
+        conversation_id=body.conversation_id,
+        force=body.force,
+        clarification_answers=body.clarification_answers,
+        mode=body.mode,
     )
 
 
 @router.post("/stream")
 @limiter.limit("30/minute")
 async def orquestrador_stream(
-    http_request: Request,
-    request: OrquestradorRequest,
+    request: Request,
+    body: OrquestradorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -103,15 +108,17 @@ async def orquestrador_stream(
     )
     return StreamingResponse(
         service.stream(
-            prompt=request.prompt,
-            conversation_id=request.conversation_id,
-            force=request.force,
-            clarification_answers=request.clarification_answers,
-            effort=request.effort,
+            prompt=body.prompt,
+            conversation_id=body.conversation_id,
+            force=body.force,
+            clarification_answers=body.clarification_answers,
+            effort=body.effort,
+            mode=body.mode,
         ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",  # prevent GZipMiddleware from buffering SSE chunks
         },
     )

@@ -115,6 +115,7 @@ class OrquestradorStreamService:
         force: bool = False,
         clarification_answers: str | None = None,
         effort: str = "detalhado",
+        mode: str | None = None,
     ) -> AsyncIterator[str]:
         """
         Gerador SSE. Yields strings no formato 'event: ...\ndata: ...\n\n'.
@@ -140,22 +141,23 @@ class OrquestradorStreamService:
                 dlp_result = sanitize_prompt(prompt)
                 sanitized_prompt = dlp_result.sanitized_text
 
-                # 3. Triage
-                triage_result = await triage(sanitized_prompt)
-                mode = triage_result["mode"]
-                confidence = triage_result["confidence"]
+                # 3. Triage (pulada quando o modo vem explícito do frontend)
+                if mode:
+                    confidence = 1.0
+                else:
+                    triage_result = await triage(sanitized_prompt)
+                    mode = triage_result["mode"]
+                    confidence = triage_result["confidence"]
 
-                if confidence < 0.7:
-                    yield _sse("error", {
-                        "status": "needs_refinement",
-                        "message": "Preciso de um pouco mais de aprofundamento. Pode reformular com mais detalhes?",
-                    })
-                    return
+                    if confidence < 0.7:
+                        yield _sse("error", {
+                            "status": "needs_refinement",
+                            "message": "Preciso de um pouco mais de aprofundamento. Pode reformular com mais detalhes?",
+                        })
+                        return
 
-                # PHARMA_CHECK requer alta confiança para acionar o serviço externo;
-                # rebaixa para CLINICAL_REASONING se a pergunta for ambígua.
-                if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
-                    mode = "CLINICAL_REASONING"
+                    if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
+                        mode = "CLINICAL_REASONING"
 
                 if mode == "PHARMA_CHECK":
                     yield _sse("error", {

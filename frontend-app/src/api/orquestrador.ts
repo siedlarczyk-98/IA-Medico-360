@@ -31,6 +31,7 @@ export interface StreamParams {
   clarification_answers?: string;
   force?: boolean;
   effort?: 'rápido' | 'detalhado';
+  mode?: string;
 }
 
 export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
@@ -43,6 +44,7 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.clarification_answers ? { clarification_answers: params.clarification_answers } : {}),
       ...(params.force                 ? { force: params.force }                               : {}),
       effort: params.effort ?? 'detalhado',
+      ...(params.mode                  ? { mode: params.mode }                                 : {}),
     }),
   });
   if (!res.ok) {
@@ -70,6 +72,7 @@ export async function* streamQuery(
       ...(params.clarification_answers ? { clarification_answers: params.clarification_answers } : {}),
       ...(params.force               ? { force: params.force }                             : {}),
       effort: params.effort ?? 'detalhado',
+      ...(params.mode                ? { mode: params.mode }                               : {}),
     }),
     signal,
   });

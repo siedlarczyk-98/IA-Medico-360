@@ -245,7 +245,10 @@ async def agregador_stream(
         yield {"event": "disclaimer", "data": json.dumps({"text": DISCLAIMER_RESPOSTA})}
         yield {"event": "done", "data": json.dumps({"conversation_id": str(conversation_id)})}
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={"Content-Encoding": "identity"},  # prevent GZipMiddleware from buffering SSE chunks
+    )
 
 
 # ── Histórico ────────────────────────────────────────────────
