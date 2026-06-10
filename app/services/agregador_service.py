@@ -33,7 +33,7 @@ from app.schemas.agregador import (
 )
 from app.services.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
-from app.services.pricing import calculate_cost
+from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.usage_service import record_cost
 from app.services.specialty_detector import detect_specialty_and_topic
 
@@ -218,15 +218,11 @@ class AgregadorService:
     # ── Buscar info dos modelos no banco ─────────────────────
 
     async def _get_models_info(self, model_ids: list[str]) -> dict[str, ModelPricing]:
-        """Busca provider_type e info de cada modelo no banco."""
-        result = await self.db.execute(
-            select(ModelPricing).where(
-                ModelPricing.model_id.in_(model_ids),
-                ModelPricing.status == True,
-            )
+        """Busca provider_type e info de cada modelo (com cache em memória TTL 1h)."""
+        results = await asyncio.gather(
+            *[get_model_pricing(self.db, mid) for mid in model_ids]
         )
-        models = result.scalars().all()
-        return {m.model_id: m for m in models}
+        return {mid: info for mid, info in zip(model_ids, results) if info is not None}
 
     # ── Chamadas paralelas aos providers ─────────────────────
 

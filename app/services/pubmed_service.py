@@ -367,6 +367,44 @@ async def _run_validation(agent_response: str, topic: str) -> ValidationResult:
 
 # ── Entrada pública ───────────────────────────────────────────────────────────
 
+def _result_to_dict(r: ValidationResult) -> dict:
+    return {
+        "confidence_score": r.confidence_score,
+        "cited_guidelines_verified": [
+            {"title": c.title, "pmid": c.pmid, "verified": c.verified}
+            for c in r.cited_guidelines_verified
+        ],
+        "newer_guidelines_found": [
+            {"pmid": a.pmid, "article_title": a.article_title,
+             "abstract_snippet": a.abstract_snippet, "relevance_score": a.relevance_score}
+            for a in r.newer_guidelines_found
+        ],
+        "outdated_alert": r.outdated_alert,
+        "low_evidence_alert": r.low_evidence_alert,
+        "fallback": r.fallback,
+        "strict_filter_used": r.strict_filter_used,
+    }
+
+
+def _dict_to_result(d: dict) -> ValidationResult:
+    return ValidationResult(
+        confidence_score=d["confidence_score"],
+        cited_guidelines_verified=[
+            VerifiedCitation(title=c["title"], pmid=c["pmid"], verified=c["verified"])
+            for c in d.get("cited_guidelines_verified", [])
+        ],
+        newer_guidelines_found=[
+            PubMedArticle(pmid=a["pmid"], article_title=a["article_title"],
+                          abstract_snippet=a["abstract_snippet"], relevance_score=a["relevance_score"])
+            for a in d.get("newer_guidelines_found", [])
+        ],
+        outdated_alert=d.get("outdated_alert", False),
+        low_evidence_alert=d.get("low_evidence_alert", False),
+        fallback=d.get("fallback", False),
+        strict_filter_used=d.get("strict_filter_used", True),
+    )
+
+
 async def validate_with_pubmed(
     agent_response: str,
     mode: str = "",
@@ -380,11 +418,21 @@ async def validate_with_pubmed(
     if mode and mode not in CLINICAL_MODES:
         return ValidationResult(confidence_score=0.0, fallback=True)
 
+    cache_key = cache_service.make_key("pubmed_validate", agent_response, mode)
+    cached = await cache_service.get_json(cache_key)
+    if cached:
+        return _dict_to_result(cached)
+
     try:
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             _run_validation(agent_response, topic),
             timeout=timeout_s,
         )
     except (asyncio.TimeoutError, Exception) as exc:
         logger.warning("[PubMed] Fallback ativado: %s", exc)
         return ValidationResult(confidence_score=0.0, low_evidence_alert=True, fallback=True)
+
+    if not result.fallback:
+        await cache_service.set_json(cache_key, _result_to_dict(result), cache_service.TTL_PUBMED)
+
+    return result

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from jose import jwt
+import jwt as pyjwt
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ def create_access_token(user: "User") -> str:
         "role": user.role,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return pyjwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
 async def generate_invite_token(
@@ -122,7 +122,7 @@ async def request_otp(db: AsyncSession, email: str) -> None:
     result = await db.execute(select(User).where(User.email == email, User.status == True))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Email não cadastrado")
+        return  # silencioso — não revelar se email existe
 
     # Invalidate existing unused OTPs for this email
     await db.execute(

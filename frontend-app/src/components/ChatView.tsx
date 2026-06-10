@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
 import { ModeChip } from './ModeChip';
 import type { Message } from '../api/orquestrador';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -70,6 +71,7 @@ function AssistantMessage({ content, mode, confidence }: { content: string; mode
         )}
         <div style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.55, wordBreak: 'break-word' }}>
           <ReactMarkdown
+            rehypePlugins={[rehypeSanitize]}
             components={{
               p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
               strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,

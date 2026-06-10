@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -31,6 +31,7 @@ from app.schemas.agregador import (
 from app.services.agregador_service import AgregadorService
 from app.services.ai_providers import get_provider_by_type
 from app.services.usage_service import check_limit
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/agregador", tags=["Agregador de IA"])
 
@@ -85,7 +86,9 @@ def _get_cost_tier(input_per_million) -> str:
 # ── Consulta (Non-Streaming) ────────────────────────────────
 
 @router.post("/query", response_model=AgregadorResponse)
+@limiter.limit("30/minute")
 async def agregador_query(
+    http_request: Request,
     request: AgregadorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -107,7 +110,9 @@ async def agregador_query(
 # ── Consulta com Streaming (SSE) ────────────────────────────
 
 @router.post("/stream")
+@limiter.limit("30/minute")
 async def agregador_stream(
+    http_request: Request,
     request: AgregadorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

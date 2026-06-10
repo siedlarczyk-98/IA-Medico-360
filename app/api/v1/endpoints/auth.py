@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.limiter import limiter
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
@@ -60,12 +62,14 @@ async def accept_invite(body: InviteAcceptRequest, db: AsyncSession = Depends(ge
 
 
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
-async def request_otp(body: OTPRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/15minutes")
+async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Depends(get_db)):
     await auth_service.request_otp(db, body.email)
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
-async def verify_otp(body: OTPVerify, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def verify_otp(request: Request, body: OTPVerify, db: AsyncSession = Depends(get_db)):
     user, token = await auth_service.verify_otp(db, body.email, body.code)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 

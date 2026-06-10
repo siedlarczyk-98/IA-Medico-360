@@ -39,7 +39,7 @@ from app.models.models import (
 )
 from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
-from app.services.pricing import calculate_cost
+from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.usage_service import record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
@@ -231,13 +231,7 @@ class OrquestradorStreamService:
                     system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
                 temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
 
-                result = await db.execute(
-                    select(ModelPricing).where(
-                        ModelPricing.model_id == model_id,
-                        ModelPricing.status == True,
-                    )
-                )
-                model_info = result.scalar_one_or_none()
+                model_info = await get_model_pricing(db, model_id)
 
                 if not model_info:
                     yield _sse("error", {"message": f"Modelo {model_id} não disponível."})
@@ -449,13 +443,7 @@ class OrquestradorStreamService:
             "PRODUCTIVITY": ["gemini-2.5-flash"],
         }
         for fallback_model in fallbacks.get(mode, []):
-            result = await db.execute(
-                select(ModelPricing).where(
-                    ModelPricing.model_id == fallback_model,
-                    ModelPricing.status == True,
-                )
-            )
-            model_info = result.scalar_one_or_none()
+            model_info = await get_model_pricing(db, fallback_model)
             if not model_info:
                 continue
             try:

@@ -82,7 +82,7 @@ class PharmaDBService:
         resp.raise_for_status()
         data = resp.json()
         self._jwt_token = data["access_token"]
-        logger.info(f"PharmaDB token obtido: {self._jwt_token[:20]}...")
+        logger.info("PharmaDB token obtido com sucesso")
         return self._jwt_token
 
     async def _api_get(self, path: str, params: dict | None = None) -> dict:

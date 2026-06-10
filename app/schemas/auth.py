@@ -1,7 +1,8 @@
+import re
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 MED_STATUS_VALUES = {"graduando", "generalista", "residente", "especialista"}
@@ -13,12 +14,12 @@ BRAZIL_STATES = {
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class InviteGenerateRequest(BaseModel):
-    email: str | None = None
-    expires_hours: int = 72
+    email: EmailStr | None = None
+    expires_hours: int = Field(default=72, gt=0, le=720)
 
 
 class InviteGenerateResponse(BaseModel):
@@ -29,16 +30,23 @@ class InviteGenerateResponse(BaseModel):
 
 class InviteAcceptRequest(BaseModel):
     token: str
-    email: str | None = None
+    email: EmailStr | None = None
 
 
 class OTPRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class OTPVerify(BaseModel):
-    email: str
+    email: EmailStr
     code: str
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        if not re.match(r"^\d{6}$", v):
+            raise ValueError("Código deve ter exatamente 6 dígitos numéricos")
+        return v
 
 
 class OnboardingRequest(BaseModel):

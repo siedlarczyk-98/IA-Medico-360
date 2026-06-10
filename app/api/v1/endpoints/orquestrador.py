@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from app.models.models import User
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 from app.services.usage_service import check_limit
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/orquestrador", tags=["Orquestrador Multi-Agente"])
 
@@ -40,7 +41,9 @@ class OrquestradorRequest(BaseModel):
 
 
 @router.post("/query")
+@limiter.limit("30/minute")
 async def orquestrador_query(
+    http_request: Request,
     request: OrquestradorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -70,7 +73,9 @@ async def orquestrador_query(
 
 
 @router.post("/stream")
+@limiter.limit("30/minute")
 async def orquestrador_stream(
+    http_request: Request,
     request: OrquestradorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
