@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,7 +65,15 @@ async def accept_invite(request: Request, body: InviteAcceptRequest, db: AsyncSe
 
 
 class EmbedTokenRequest(BaseModel):
-    email: EmailStr
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or len(v) < 3:
+            raise ValueError("Email inválido")
+        return v
 
 
 @router.post("/embed/token", response_model=TokenResponse)
