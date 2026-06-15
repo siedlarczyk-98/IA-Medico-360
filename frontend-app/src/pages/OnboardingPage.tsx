@@ -9,6 +9,64 @@ const BRAZIL_STATES = [
   'RS','RO','RR','SC','SP','SE','TO',
 ];
 
+const ESPECIALIDADES = [
+  'Acupuntura',
+  'Alergia e Imunologia',
+  'Anestesiologia',
+  'Angiologia',
+  'Cardiologia',
+  'Cirurgia Cardiovascular',
+  'Cirurgia da Mão',
+  'Cirurgia de Cabeça e Pescoço',
+  'Cirurgia do Aparelho Digestivo',
+  'Cirurgia Geral',
+  'Cirurgia Oncológica',
+  'Cirurgia Pediátrica',
+  'Cirurgia Plástica',
+  'Cirurgia Torácica',
+  'Cirurgia Vascular',
+  'Clínica Médica',
+  'Coloproctologia',
+  'Dermatologia',
+  'Endocrinologia e Metabologia',
+  'Endoscopia',
+  'Gastroenterologia',
+  'Genética Médica',
+  'Geriatria',
+  'Ginecologia e Obstetrícia',
+  'Hematologia e Hemoterapia',
+  'Homeopatia',
+  'Infectologia',
+  'Mastologia',
+  'Medicina de Emergência',
+  'Medicina de Família e Comunidade',
+  'Medicina do Esporte',
+  'Medicina do Trabalho',
+  'Medicina do Tráfego',
+  'Medicina Física e Reabilitação',
+  'Medicina Intensiva',
+  'Medicina Legal e Perícia Médica',
+  'Medicina Nuclear',
+  'Medicina Preventiva e Social',
+  'Nefrologia',
+  'Neurocirurgia',
+  'Neurologia',
+  'Nutrologia',
+  'Oftalmologia',
+  'Oncologia Clínica',
+  'Ortopedia e Traumatologia',
+  'Otorrinolaringologia',
+  'Patologia',
+  'Patologia Clínica/Medicina Laboratorial',
+  'Pediatria',
+  'Pneumologia',
+  'Psiquiatria',
+  'Radiologia e Diagnóstico por Imagem',
+  'Radioterapia',
+  'Reumatologia',
+  'Urologia',
+];
+
 const MED_STATUS_OPTIONS = [
   { value: 'graduando', label: 'Aluno de graduação' },
   { value: 'generalista', label: 'Médico generalista' },
@@ -51,7 +109,8 @@ export function OnboardingPage() {
     med_status: '',
     crm: '',
     crm_state: '',
-    enrollment_date: '',
+    enrollment_year: '',
+    specialty: '',
     phone_number: '',
   });
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -60,6 +119,7 @@ export function OnboardingPage() {
 
   const isGraduando = form.med_status === 'graduando';
   const isMedico = ['generalista', 'residente', 'especialista'].includes(form.med_status);
+  const needsSpecialty = ['residente', 'especialista'].includes(form.med_status);
 
   function update(field: string, value: string) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -77,7 +137,11 @@ export function OnboardingPage() {
     form.med_status &&
     form.phone_number.trim() &&
     termsAccepted &&
-    (isGraduando ? !!form.enrollment_date : isMedico ? (!!form.crm && !!form.crm_state) : false);
+    (isGraduando
+      ? !!form.enrollment_year
+      : isMedico
+        ? !!form.crm && !!form.crm_state && (!needsSpecialty || !!form.specialty)
+        : false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -91,7 +155,8 @@ export function OnboardingPage() {
         med_status: form.med_status,
         crm: isMedico ? form.crm : undefined,
         crm_state: isMedico ? form.crm_state : undefined,
-        enrollment_date: isGraduando ? form.enrollment_date : undefined,
+        specialty: needsSpecialty ? form.specialty : undefined,
+        enrollment_year: isGraduando ? parseInt(form.enrollment_year) : undefined,
       });
       setToken(res.access_token);
       navigate('/', { replace: true });
@@ -170,7 +235,8 @@ export function OnboardingPage() {
                 update('med_status', e.target.value);
                 update('crm', '');
                 update('crm_state', '');
-                update('enrollment_date', '');
+                update('specialty', '');
+                update('enrollment_year', '');
               }}
               style={{ ...inputStyle, cursor: 'pointer' }}
               onFocus={focusBorder}
@@ -186,12 +252,15 @@ export function OnboardingPage() {
           {/* Condicional — Graduando */}
           {isGraduando && (
             <div style={{ animation: 'fadeIn 0.2s ease' }}>
-              <label style={labelStyle}>Data de ingresso na faculdade</label>
+              <label style={labelStyle}>Ano de ingresso na faculdade</label>
               <input
-                type="date"
+                type="text"
                 required
-                value={form.enrollment_date}
-                onChange={e => update('enrollment_date', e.target.value)}
+                inputMode="numeric"
+                maxLength={4}
+                placeholder={String(new Date().getFullYear())}
+                value={form.enrollment_year}
+                onChange={e => update('enrollment_year', e.target.value.replace(/\D/g, '').slice(0, 4))}
                 style={inputStyle}
                 onFocus={focusBorder}
                 onBlur={blurBorder}
@@ -230,6 +299,24 @@ export function OnboardingPage() {
                   {BRAZIL_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+            </div>
+          )}
+
+          {/* Condicional — Especialidade (residente/especialista) */}
+          {needsSpecialty && (
+            <div style={{ animation: 'fadeIn 0.2s ease' }}>
+              <label style={labelStyle}>Especialidade</label>
+              <select
+                required
+                value={form.specialty}
+                onChange={e => update('specialty', e.target.value)}
+                style={{ ...inputStyle, cursor: 'pointer' }}
+                onFocus={focusBorder}
+                onBlur={blurBorder}
+              >
+                <option value="" disabled>Selecione a especialidade…</option>
+                {ESPECIALIDADES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
           )}
 

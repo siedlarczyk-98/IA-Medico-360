@@ -55,7 +55,8 @@ class OnboardingRequest(BaseModel):
     med_status: str
     crm: str | None = None
     crm_state: str | None = None
-    enrollment_date: date | None = None
+    enrollment_year: int | None = None
+    specialty: str | None = None
 
     @field_validator("med_status")
     @classmethod
@@ -84,14 +85,26 @@ class OnboardingRequest(BaseModel):
             raise ValueError("CRM deve conter apenas números")
         return v
 
+    @field_validator("enrollment_year")
+    @classmethod
+    def validate_enrollment_year(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        current_year = date.today().year
+        if v < 1950 or v > current_year:
+            raise ValueError(f"Ano de ingresso deve estar entre 1950 e {current_year}")
+        return v
+
     @model_validator(mode="after")
     def validate_conditional_fields(self) -> "OnboardingRequest":
         if self.med_status == "graduando":
-            if not self.enrollment_date:
-                raise ValueError("Data de ingresso é obrigatória para alunos de graduação")
+            if not self.enrollment_year:
+                raise ValueError("Ano de ingresso é obrigatório para alunos de graduação")
         else:
             if not self.crm or not self.crm_state:
                 raise ValueError("CRM e UF são obrigatórios para médicos formados")
+            if self.med_status in ("residente", "especialista") and not self.specialty:
+                raise ValueError("Especialidade é obrigatória para residentes e especialistas")
         return self
 
 

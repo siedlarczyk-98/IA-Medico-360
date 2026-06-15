@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     otp_expire_minutes: int = 10
     allow_public_registration: bool = False
 
+    # --- Embed SSO ---
+    embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 

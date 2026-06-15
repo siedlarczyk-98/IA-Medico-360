@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +64,28 @@ async def accept_invite(request: Request, body: InviteAcceptRequest, db: AsyncSe
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
+class EmbedTokenRequest(BaseModel):
+    email: EmailStr
+
+
+@router.post("/embed/token", response_model=TokenResponse)
+@limiter.limit("20/minute")
+async def embed_token(
+    request: Request,
+    body: EmbedTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Autenticação para embeds externos (ex: Curseduca). Cria usuário se não existir."""
+    origin = request.headers.get("origin") or request.headers.get("referer", "")
+    settings = get_settings()
+    if not any(origin.startswith(o) for o in settings.embed_allowed_origins):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
+
+    user, _ = await auth_service.get_or_create_embed_user(body.email, db)
+    token = auth_service.create_access_token(user)
+    return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
+
+
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("3/15minutes")
 async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Depends(get_db)):
@@ -82,12 +105,14 @@ async def complete_onboarding(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from datetime import date as date_type
     current_user.name = body.name
     current_user.phone_number = f"+55{body.phone_number}"
     current_user.med_status = body.med_status
     current_user.crm = body.crm
     current_user.crm_state = body.crm_state
-    current_user.enrollment_date = body.enrollment_date
+    current_user.specialty = body.specialty
+    current_user.enrollment_date = date_type(body.enrollment_year, 1, 1) if body.enrollment_year else None
     current_user.onboarding_complete = True
     await db.commit()
     await db.refresh(current_user)

@@ -91,6 +91,7 @@ class User(Base):
     crm_state: Mapped[str | None] = mapped_column(String(2))
     role: Mapped[str] = mapped_column(String(50), default="beta_user")
     med_status: Mapped[str | None] = mapped_column(String(50))
+    specialty: Mapped[str | None] = mapped_column(String(100))
     enrollment_date: Mapped[date | None] = mapped_column(Date)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)

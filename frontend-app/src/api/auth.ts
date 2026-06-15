@@ -26,7 +26,8 @@ export interface OnboardingData {
   med_status: string;
   crm?: string;
   crm_state?: string;
-  enrollment_date?: string;
+  specialty?: string;
+  enrollment_year?: number;
 }
 
 async function post<T>(path: string, body: unknown, auth = false): Promise<T> {
@@ -126,4 +127,8 @@ export function updateProfile(data: { name?: string; email?: string }): Promise<
 
 export function deleteAccount(confirmName: string): Promise<void> {
   return del('/auth/me', { confirm_name: confirmName });
+}
+
+export function embedToken(email: string): Promise<TokenResponse> {
+  return post<TokenResponse>('/auth/embed/token', { email });
 }

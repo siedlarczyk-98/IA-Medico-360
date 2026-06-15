@@ -20,6 +20,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m
 const InvitePage = lazy(() => import('./pages/InvitePage').then(m => ({ default: m.InvitePage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then(m => ({ default: m.OnboardingPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
+const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
 
 type AppMode = 'orquestrador' | 'agregador';
 
@@ -337,6 +338,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/invite" element={<InvitePage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/embed-auth" element={<EmbedAuthPage />} />
         <Route path="/" element={
           <RequireAuth>
             <MainApp />

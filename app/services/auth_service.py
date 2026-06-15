@@ -118,6 +118,27 @@ async def register_and_send_invite(db: AsyncSession, email: str) -> None:
     await email_service.send_invite(email, invite_url)
 
 
+async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User", bool]:
+    """Retorna (user, created). created=True se o usuário foi criado agora."""
+    from sqlalchemy.exc import IntegrityError
+
+    result = await db.execute(select(User).where(User.email == email, User.status == True))
+    user = result.scalar_one_or_none()
+    if user:
+        return user, False
+    try:
+        user = User(email=email, role="beta_user", status=True, onboarding_complete=False)
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user, True
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(select(User).where(User.email == email, User.status == True))
+        user = result.scalar_one()
+        return user, False
+
+
 async def request_otp(db: AsyncSession, email: str) -> None:
     result = await db.execute(select(User).where(User.email == email, User.status == True))
     user = result.scalar_one_or_none()
