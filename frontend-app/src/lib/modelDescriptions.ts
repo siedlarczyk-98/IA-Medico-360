@@ -6,7 +6,7 @@ export interface AIModelInfo {
 }
 
 export const MODEL_DESCRIPTIONS: Record<string, AIModelInfo> = {
-  'claude-sonnet-4-20250514': {
+  'claude-sonnet-4-6': {
     icon: '🧠',
     shortDescription: 'Máximo desempenho em raciocínio complexo e criatividade',
     tags: ['Avançado', 'Preciso'],
