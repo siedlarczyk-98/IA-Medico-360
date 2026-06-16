@@ -58,8 +58,8 @@ function MainApp() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [usageTick, setUsageTick] = useState(0);
-  const pendingFolderIdRef = useRef<string | undefined>();
-  const pendingFolderNameRef = useRef<string | undefined>();
+  const pendingFolderIdRef = useRef<string | undefined>(undefined);
+  const pendingFolderNameRef = useRef<string | undefined>(undefined);
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
