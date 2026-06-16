@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 MODE_MODEL_MAP = {
     "QUICK_SEARCH": "sonar-pro",
-    "CLINICAL_REASONING": "claude-sonnet-4-20250514",
+    "CLINICAL_REASONING": "claude-sonnet-4-6",
     "PHARMA_CHECK": None,
     "PRODUCTIVITY": "gpt-5.4-nano",
 }
