@@ -28,7 +28,7 @@ from app.services import cache_service
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-SIMILARITY_THRESHOLD = 0.92
+SIMILARITY_THRESHOLD = 0.88
 TTL_DAYS = 30
 TTL_EXACT_SECONDS = 30 * 24 * 3600  # fast-path exato no Redis: 30 dias
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -68,7 +68,7 @@ async def _normalize_prompt(
         },
         timeout=10,
         json={
-            "model": "gpt-4o-mini",
+            "model": "gpt-5.4-nano",
             "max_tokens": 200,
             "temperature": 0,
             "messages": [

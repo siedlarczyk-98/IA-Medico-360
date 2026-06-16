@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-PUBMED_API_KEY = getattr(settings, "pubmed_api_key", "")
 
 CLINICAL_MODES = {"QUICK_SEARCH", "CLINICAL_REASONING"}
 
@@ -76,7 +75,7 @@ async def _extract_citations(client: httpx.AsyncClient, agent_response: str) -> 
             "Content-Type": "application/json",
         },
         json={
-            "model": "gpt-4o-mini",
+            "model": "gpt-5.4-nano",
             "max_tokens": 300,
             "temperature": 0,
             "messages": [
@@ -157,8 +156,8 @@ async def _verify_citation(
         )
 
     base_params = {"db": "pubmed", "retmax": "1", "retmode": "json", "sort": "relevance"}
-    if PUBMED_API_KEY:
-        base_params["api_key"] = PUBMED_API_KEY
+    if settings.pubmed_api_key:
+        base_params["api_key"] = settings.pubmed_api_key
 
     author_match = re.match(r"^([A-Za-z]+)", clean)
     year_match = re.search(r"\b(19|20)\d{2}\b", clean)
@@ -196,11 +195,11 @@ async def _verify_citation(
         # não cacheia falhas de rede (podem ser transitórias)
         return VerifiedCitation(title=citation, pmid=None, verified=False)
 
-    # citação genuinamente não encontrada → cacheia o resultado negativo
+    # citação não encontrada → cacheia por 24h (não 30 dias) para retentar depois
     await cache_service.set_json(
         cache_key,
         {"title": citation, "pmid": None, "verified": False},
-        cache_service.TTL_PUBMED,
+        86400,
     )
     return VerifiedCitation(title=citation, pmid=None, verified=False)
 
@@ -241,8 +240,8 @@ async def _fetch_recent_guidelines(
         "retmode": "json",
         "sort": "relevance",
     }
-    if PUBMED_API_KEY:
-        params["api_key"] = PUBMED_API_KEY
+    if settings.pubmed_api_key:
+        params["api_key"] = settings.pubmed_api_key
 
     try:
         res = await client.get(f"{PUBMED_BASE}/esearch.fcgi", params=params)
@@ -273,8 +272,8 @@ async def _fetch_article_titles(
         "rettype": "abstract",
         "retmode": "xml",
     }
-    if PUBMED_API_KEY:
-        params["api_key"] = PUBMED_API_KEY
+    if settings.pubmed_api_key:
+        params["api_key"] = settings.pubmed_api_key
 
     res = await client.get(f"{PUBMED_BASE}/efetch.fcgi", params=params)
     res.raise_for_status()
@@ -430,9 +429,12 @@ async def validate_with_pubmed(
         )
     except (asyncio.TimeoutError, Exception) as exc:
         logger.warning("[PubMed] Fallback ativado: %s", exc)
+        # não cacheia falbacks de erro/timeout — deve retentar na próxima requisição
         return ValidationResult(confidence_score=0.0, low_evidence_alert=True, fallback=True)
 
     if not result.fallback:
-        await cache_service.set_json(cache_key, _result_to_dict(result), cache_service.TTL_PUBMED)
+        has_verified = any(c.verified for c in result.cited_guidelines_verified)
+        ttl = cache_service.TTL_PUBMED if has_verified else 86400
+        await cache_service.set_json(cache_key, _result_to_dict(result), ttl)
 
     return result

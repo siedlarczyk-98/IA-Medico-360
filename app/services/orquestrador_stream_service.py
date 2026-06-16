@@ -189,7 +189,7 @@ class OrquestradorStreamService:
                     clarification = await _check_clarification(sanitized_prompt)
                     if not clarification.get("sufficient", True):
                         questions = clarification.get("questions", [])
-                        conv_id = await self._ensure_conversation(db, conversation_id, prompt, folder_id=folder_id)
+                        conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
                         pending = Interaction(
                             conversation_id=conv_id,
                             user_id=self.user_id,
@@ -227,7 +227,7 @@ class OrquestradorStreamService:
                         return
 
                 # 4. Conversation + Interaction
-                conv_id = await self._ensure_conversation(db, conversation_id, prompt, folder_id=folder_id)
+                conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
                 interaction = Interaction(
                     conversation_id=conv_id,
                     user_id=self.user_id,

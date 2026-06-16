@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     google_ai_api_key: str = ""
     perplexity_api_key: str = ""
     pharmadb_api_key: str = ""
+    pubmed_api_key: str = ""
     
     # --- SendGrid ---
     sendgrid_api_key: str = ""

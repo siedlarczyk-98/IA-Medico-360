@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.limiter import limiter
@@ -8,7 +8,19 @@ from app.core.limiter import limiter
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.models.models import User
+from app.models.models import (
+    AuditLog,
+    Conversation,
+    Folder,
+    Interaction,
+    InteractionMedication,
+    InteractionResponse,
+    PharmaAlert,
+    PubmedValidation,
+    User,
+    UserPreference,
+    UserWeeklyUsage,
+)
 from app.schemas.auth import (
     DeleteAccountRequest,
     InviteAcceptRequest,
@@ -164,5 +176,31 @@ async def delete_me(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Complete o onboarding antes de excluir a conta")
     if not body.confirm_name or body.confirm_name != current_user.name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nome de confirmação não confere")
-    await db.delete(current_user)
+
+    user_id = current_user.id
+
+    # Coleta IDs das conversas do usuário
+    conv_ids_result = await db.execute(select(Conversation.id).where(Conversation.user_id == user_id))
+    conv_ids = [r[0] for r in conv_ids_result.fetchall()]
+
+    if conv_ids:
+        # Coleta IDs das interactions dessas conversas
+        inter_ids_result = await db.execute(select(Interaction.id).where(Interaction.conversation_id.in_(conv_ids)))
+        inter_ids = [r[0] for r in inter_ids_result.fetchall()]
+
+        if inter_ids:
+            await db.execute(sql_delete(PubmedValidation).where(PubmedValidation.interaction_id.in_(inter_ids)))
+            await db.execute(sql_delete(InteractionMedication).where(InteractionMedication.interaction_id.in_(inter_ids)))
+            await db.execute(sql_delete(PharmaAlert).where(PharmaAlert.interaction_id.in_(inter_ids)))
+            await db.execute(sql_delete(InteractionResponse).where(InteractionResponse.interaction_id.in_(inter_ids)))
+
+        await db.execute(sql_delete(Interaction).where(Interaction.conversation_id.in_(conv_ids)))
+
+    await db.execute(sql_delete(Conversation).where(Conversation.user_id == user_id))
+    await db.execute(sql_delete(Folder).where(Folder.user_id == user_id))
+    await db.execute(sql_delete(UserPreference).where(UserPreference.user_id == user_id))
+    await db.execute(sql_delete(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user_id))
+    # Nullifica referências em audit_logs (user_id nullable) antes de remover o user
+    await db.execute(update(AuditLog).where(AuditLog.user_id == user_id).values(user_id=None))
+    await db.execute(sql_delete(User).where(User.id == user_id))
     await db.commit()

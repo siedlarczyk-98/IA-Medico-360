@@ -278,18 +278,15 @@ function MainApp() {
   }, [selectedModels, activeConvId, cancelFlush, scheduleFlush]);
 
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado') => {
-    // Capturar histórico ANTES de adicionar a nova mensagem do usuário
-    setMessages(prev => {
-      const priorMessages = prev;
-      if (mode === 'orquestrador') {
-        runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages });
-      } else {
-        runAgregador(text, priorMessages, effort);
-      }
-      return [...prev, { role: 'user', content: text }];
-    });
+    const priorMessages = messages;
+    if (mode === 'orquestrador') {
+      runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages });
+    } else {
+      runAgregador(text, priorMessages, effort);
+    }
+    setMessages(prev => [...prev, { role: 'user', content: text }]);
     setScrollTrigger(n => n + 1);
-  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador]);
+  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador, messages]);
 
   const sendClarification = useCallback((answers: string) => {
     if (!clarification) return;

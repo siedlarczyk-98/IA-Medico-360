@@ -103,7 +103,7 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
         onClick={() => selectionMode ? onToggleSelect?.() : onSelect()}
         style={{
           padding: '7px 10px',
-          paddingLeft: selectionMode ? 6 : 10,
+          paddingLeft: (selectionMode || hovered) ? 6 : 10,
           paddingRight: showBtn ? 26 : 10,
           fontSize: 12.5,
           color: 'var(--pen)',
@@ -118,11 +118,15 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
         }}
         title={conv.title ?? ''}
       >
-        {selectionMode && (
-          <span style={{
-            width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected ? 'var(--green)' : 'var(--line2)'}`,
-            background: selected ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
+        {(selectionMode || hovered) && (
+          <span
+            onClick={e => { e.stopPropagation(); onToggleSelect?.(); }}
+            style={{
+              width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected ? 'var(--green)' : 'var(--line2)'}`,
+              background: selected ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: selectionMode || hovered ? 1 : 0,
+            }}
+          >
             {selected && <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 5 L4 7 L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>}
           </span>
         )}
@@ -474,7 +478,6 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [, setProfileTick] = useState(0);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
@@ -870,7 +873,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       {showProfile && (
         <ProfileModal
           onClose={() => setShowProfile(false)}
-          onSuccess={() => setProfileTick(t => t + 1)}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ['currentUser'] })}
         />
       )}
     </aside>

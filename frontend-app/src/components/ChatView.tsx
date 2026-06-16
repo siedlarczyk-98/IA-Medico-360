@@ -142,18 +142,8 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
         <div style={{
           marginTop: 14, fontSize: 11, color: 'var(--pen3)',
           borderTop: '1px solid var(--line2)', paddingTop: 10,
-          display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'center',
         }}>
-          <span style={{ flex: 1 }}>{DISCLAIMER}</span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['↻', '↗', '♥'].map(icon => (
-              <button key={icon} style={{
-                width: 24, height: 24, borderRadius: 6, border: '1px solid var(--line2)',
-                background: '#fff', fontSize: 11, color: 'var(--pen2)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>{icon}</button>
-            ))}
-          </div>
+          {DISCLAIMER}
         </div>
       </div>
     </div>

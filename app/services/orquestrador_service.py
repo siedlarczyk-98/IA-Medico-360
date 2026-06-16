@@ -133,7 +133,7 @@ class OrquestradorService:
                 clarification = await _check_clarification(sanitized_prompt)
                 if not clarification.get("sufficient", True):
                     questions = clarification.get("questions", [])
-                    conv_id = await self._ensure_conversation(conversation_id, prompt, folder_id=folder_id)
+                    conv_id = await self._ensure_conversation(conversation_id, sanitized_prompt, folder_id=folder_id)
                     pending = Interaction(
                         conversation_id=conv_id,
                         user_id=self.user_id,
@@ -168,7 +168,7 @@ class OrquestradorService:
                     return {**cached, "cache_hit": True}
 
             # 4. Conversation
-            conv_id = await self._ensure_conversation(conversation_id, prompt, folder_id=folder_id)
+            conv_id = await self._ensure_conversation(conversation_id, sanitized_prompt, folder_id=folder_id)
 
             # 5. Interaction
             interaction = Interaction(
