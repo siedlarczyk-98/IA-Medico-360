@@ -1,12 +1,16 @@
 import asyncio
+import logging
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 async def send_otp(to_email: str, code: str) -> None:
     settings = get_settings()
     if not settings.sendgrid_api_key:
-        print(f"[DEV] OTP para {to_email}: {code}")
+        # Só ocorre sem SendGrid configurado (ambiente local); em produção a chave existe.
+        logger.warning("[DEV] OTP para %s: %s", to_email, code)
         return
 
     import sendgrid
@@ -29,7 +33,8 @@ async def send_otp(to_email: str, code: str) -> None:
 async def send_invite(to_email: str, invite_url: str) -> None:
     settings = get_settings()
     if not settings.sendgrid_api_key:
-        print(f"[DEV] Link de acesso para {to_email}: {invite_url}")
+        # Só ocorre sem SendGrid configurado (ambiente local); em produção a chave existe.
+        logger.warning("[DEV] Link de acesso para %s: %s", to_email, invite_url)
         return
 
     import sendgrid

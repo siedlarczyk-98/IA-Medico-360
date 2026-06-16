@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # --- JWT ---
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 1440  # 24h
+    jwt_access_token_expire_minutes: int = 60  # 1h (padrão seguro; ajustável via env)
 
     # --- AI Providers ---
     anthropic_api_key: str = ""

@@ -6,7 +6,6 @@ Pipeline: Triagem → Roteamento → Agente Especializado → Resposta.
 import asyncio
 import logging
 import time
-import traceback
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -364,8 +363,7 @@ class OrquestradorService:
             return return_dict
 
         except Exception as e:
-            logger.error(f"ERRO NO ORQUESTRADOR: {e}")
-            traceback.print_exc()
+            logger.exception("ERRO NO ORQUESTRADOR: %s", e)
             raise
 
 # ── Agente de IA ─────────────────────────────────────────

@@ -50,7 +50,9 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
 
 
 @router.post("/invite/generate", response_model=InviteGenerateResponse)
+@limiter.limit("30/minute")
 async def generate_invite(
+    request: Request,
     body: InviteGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -59,6 +61,17 @@ async def generate_invite(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Apenas admins podem gerar convites")
     invite = await auth_service.generate_invite_token(
         db, current_user.id, body.email, body.expires_hours
+    )
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action="invite.generate",
+            entity_type="invite",
+            entity_id=invite.id,
+            metadata_={"invited_email": body.email},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
     )
     settings = get_settings()
     url = f"{settings.frontend_url}/invite?token={invite.token}"
@@ -89,16 +102,18 @@ class EmbedTokenRequest(BaseModel):
 
 
 @router.post("/embed/token", response_model=TokenResponse)
-@limiter.limit("20/minute")
+@limiter.limit("5/minute")
 async def embed_token(
     request: Request,
     body: EmbedTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Autenticação para embeds externos (ex: Curseduca). Cria usuário se não existir."""
-    origin = request.headers.get("origin") or request.headers.get("referer", "")
+    # Usa apenas o header Origin (definido pelo browser, não forjável via JS no cliente)
+    # e exige correspondência exata contra a allowlist — evita bypass por subdomínio.
+    origin = request.headers.get("origin", "")
     settings = get_settings()
-    if not any(origin.startswith(o) for o in settings.embed_allowed_origins):
+    if origin not in settings.embed_allowed_origins:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
 
     user, _ = await auth_service.get_or_create_embed_user(body.email, db)
@@ -113,7 +128,7 @@ async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Dep
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
-@limiter.limit("10/minute")
+@limiter.limit("5/minute")
 async def verify_otp(request: Request, body: OTPVerify, db: AsyncSession = Depends(get_db)):
     user, token = await auth_service.verify_otp(db, body.email, body.code)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)

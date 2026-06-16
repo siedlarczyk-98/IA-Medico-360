@@ -2,15 +2,19 @@
 Médico 360 — Aplicação principal FastAPI.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.limiter import limiter
+
+logger = logging.getLogger(__name__)
 
 from app.api.v1.router import api_v1_router
 from app.core.config import get_settings
@@ -60,9 +64,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+# ── Exception handler global ─────────────────────────────────
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Loga o erro internamente e devolve mensagem genérica (sem stack trace)."""
+    logger.exception("Erro não tratado em %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Erro interno do servidor."},
+    )
+
 
 # ── Routes ───────────────────────────────────────────────────
 app.include_router(api_v1_router)
