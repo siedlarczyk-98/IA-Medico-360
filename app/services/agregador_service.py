@@ -318,6 +318,7 @@ class AgregadorService:
                 cost = await calculate_cost(
                     self.db, model_id, data.get("tokens_in"), data.get("tokens_out")
                 )
+                cost += Decimal(str(data.get("search_cost_usd", 0.0)))
                 total_cost += cost
                 ir = InteractionResponse(
                     interaction_id=interaction.id,

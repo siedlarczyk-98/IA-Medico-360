@@ -8,9 +8,13 @@ interface Props {
   onChange: (ids: string[]) => void;
   max?: number;
   locked?: boolean;
+  webSearch?: Record<string, boolean>;
+  onWebSearchChange?: (modelId: string, enabled: boolean) => void;
 }
 
-export function ModelSelector({ selected, onChange, max = 4, locked = false }: Props) {
+const PERPLEXITY_PREFIX = 'sonar';
+
+export function ModelSelector({ selected, onChange, max = 4, locked = false, webSearch = {}, onWebSearchChange }: Props) {
   const isMobile = useIsMobile();
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +33,12 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false }: P
     } else if (selected.length < max) {
       onChange([...selected, id]);
     }
+  }
+
+  function toggleWebSearch(e: React.MouseEvent, modelId: string) {
+    e.stopPropagation();
+    if (locked) return;
+    onWebSearchChange?.(modelId, !webSearch[modelId]);
   }
 
   if (loading) return (
@@ -52,27 +62,51 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false }: P
         const active = selected.includes(m.model_id);
         const info = MODEL_DESCRIPTIONS[m.model_id];
         const atMax = selected.length >= max && !active;
+        const isPerplexity = m.model_id.includes(PERPLEXITY_PREFIX) || m.provider?.toLowerCase() === 'perplexity';
+        const wsActive = !!webSearch[m.model_id];
         let tooltipText: string | undefined;
         if (locked) tooltipText = 'Para trocar de modelo, inicie uma nova consulta';
         else if (atMax) tooltipText = `Máximo ${max} modelo${max > 1 ? 's' : ''}`;
         else if (info) tooltipText = info.shortDescription;
         return (
-          <button
-            key={m.model_id}
-            onClick={() => toggle(m.model_id)}
-            title={tooltipText}
-            style={{
-              padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-              border: `1px solid ${active ? 'transparent' : 'var(--line2)'}`,
-              background: active ? 'var(--mint)' : '#fff',
-              color: active ? 'var(--petrol)' : 'var(--pen2)',
-              cursor: locked || atMax ? 'not-allowed' : 'pointer',
-              opacity: !locked && atMax ? 0.45 : 1,
-              transition: 'background 0.12s, color 0.12s',
-            }}
-          >
-            {m.display_name}
-          </button>
+          <div key={m.model_id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <button
+              onClick={() => toggle(m.model_id)}
+              title={tooltipText}
+              style={{
+                padding: '4px 10px', borderRadius: active && !isPerplexity ? '999px 0 0 999px' : 999,
+                fontSize: 11, fontWeight: 600,
+                border: `1px solid ${active ? 'transparent' : 'var(--line2)'}`,
+                borderRight: active && !isPerplexity ? 'none' : undefined,
+                background: active ? 'var(--mint)' : '#fff',
+                color: active ? 'var(--petrol)' : 'var(--pen2)',
+                cursor: locked || atMax ? 'not-allowed' : 'pointer',
+                opacity: !locked && atMax ? 0.45 : 1,
+                transition: 'background 0.12s, color 0.12s',
+              }}
+            >
+              {m.display_name}
+            </button>
+            {active && !isPerplexity && (
+              <button
+                onClick={(e) => toggleWebSearch(e, m.model_id)}
+                title={wsActive ? 'Desativar busca web' : 'Ativar busca web'}
+                style={{
+                  padding: '4px 7px', borderRadius: '0 999px 999px 0',
+                  fontSize: 11,
+                  border: `1px solid transparent`,
+                  borderLeft: `1px solid ${wsActive ? 'rgba(1,71,81,0.2)' : 'rgba(1,71,81,0.15)'}`,
+                  background: wsActive ? 'var(--petrol)' : 'var(--mint)',
+                  color: wsActive ? '#fff' : 'var(--petrol)',
+                  cursor: locked ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.12s, color 0.12s',
+                  lineHeight: 1,
+                }}
+              >
+                🌐
+              </button>
+            )}
+          </div>
         );
       })}
       {locked ? (

@@ -60,6 +60,10 @@ class AgregadorRequest(BaseModel):
         default="detalhado",
         description="Nível de esforço da resposta: 'rápido' (conciso) ou 'detalhado' (padrão).",
     )
+    web_search: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Mapa model_id → true/false para ativar busca web por modelo.",
+    )
 
     @field_validator("models")
     @classmethod

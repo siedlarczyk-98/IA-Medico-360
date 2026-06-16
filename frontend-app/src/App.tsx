@@ -65,6 +65,11 @@ function MainApp() {
   const pendingFolderNameRef = useRef<string | undefined>(undefined);
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
+  const [webSearch, setWebSearch] = useState<Record<string, boolean>>({});
+
+  function handleWebSearchChange(modelId: string, enabled: boolean) {
+    setWebSearch(prev => ({ ...prev, [modelId]: enabled }));
+  }
   // Tracks the index of the assistant message being streamed, so we can remove it if the stream is aborted mid-way
   const streamMsgIndexRef = useRef<number>(-1);
   // Stable ref to latest messages — avoids recreating sendMessage on every token
@@ -240,7 +245,7 @@ function MainApp() {
 
     try {
       const history = priorMessages.map(m => ({ role: m.role, content: m.content }));
-      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream)) {
+      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream, webSearch)) {
         if (event.type === 'delta') {
           const mid = event.model_id;
           buffers[mid] = (buffers[mid] ?? '') + event.delta;
@@ -378,14 +383,14 @@ function MainApp() {
         )}
 
         {mode === 'agregador' && messages.length > 0 && (
-          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked />
+          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {messages.length === 0 && !streaming ? (
             mode === 'agregador' ? (
               <>
-                <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} />
+                <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
                 <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked}
                   placeholder={agregadorBlocked ? 'Selecione um modelo acima para começar.' : undefined} />
               </>

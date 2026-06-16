@@ -3,12 +3,16 @@ import { fetchModels, type AIModel } from '../api/agregador';
 import { MODEL_DESCRIPTIONS, type AIModelInfo } from '../lib/modelDescriptions';
 import { useIsMobile } from '../hooks/useIsMobile';
 
+const PERPLEXITY_PROVIDER = 'perplexity';
+
 interface Props {
   selected: string[];
   onChange: (ids: string[]) => void;
+  webSearch?: Record<string, boolean>;
+  onWebSearchChange?: (modelId: string, enabled: boolean) => void;
 }
 
-export function EmptyStateAgregador({ selected, onChange }: Props) {
+export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebSearchChange }: Props) {
   const isMobile = useIsMobile();
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,6 +69,8 @@ export function EmptyStateAgregador({ selected, onChange }: Props) {
             {models.map(m => {
               const active = selected.includes(m.model_id);
               const info = getModelInfo(m.model_id);
+              const isPerplexity = m.provider?.toLowerCase() === PERPLEXITY_PROVIDER || m.model_id.includes('sonar');
+              const wsActive = !!webSearch[m.model_id];
               return (
                 <button
                   key={m.model_id}
@@ -110,6 +116,27 @@ export function EmptyStateAgregador({ selected, onChange }: Props) {
                       fontWeight: 700,
                     }}>
                       ✓
+                    </div>
+                  )}
+
+                  {/* Toggle busca web */}
+                  {active && !isPerplexity && (
+                    <div
+                      onClick={e => { e.stopPropagation(); onWebSearchChange?.(m.model_id, !wsActive); }}
+                      title={wsActive ? 'Desativar busca web' : 'Ativar busca web para resultados atualizados'}
+                      style={{
+                        position: 'absolute', bottom: 12, right: 12,
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '3px 8px', borderRadius: 999,
+                        background: wsActive ? 'var(--petrol)' : 'rgba(1,71,81,0.08)',
+                        color: wsActive ? '#fff' : 'var(--petrol)',
+                        fontSize: 11, fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                        userSelect: 'none',
+                      }}
+                    >
+                      🌐 {wsActive ? 'Web on' : 'Web'}
                     </div>
                   )}
 

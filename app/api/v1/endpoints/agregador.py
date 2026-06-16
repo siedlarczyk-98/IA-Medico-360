@@ -170,7 +170,7 @@ async def agregador_stream(
     async def event_generator():
         # Acumula texto + tokens por modelo para salvar após stream
         collected: dict[str, dict] = {
-            mid: {"text": "", "tokens_in": None, "tokens_out": None, "error": None}
+            mid: {"text": "", "tokens_in": None, "tokens_out": None, "error": None, "search_cost_usd": 0.0}
             for mid in models_info
         }
 
@@ -181,7 +181,7 @@ async def agregador_stream(
 
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system)
+            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system, web_search=body.web_search.get(model_id, False))
             model_start = time.monotonic()
 
             async def _run(mid=model_id, ps=provider_stream, mstart=model_start):
@@ -197,6 +197,7 @@ async def agregador_stream(
                             collected[mid]["tokens_in"] = token.tokens_in
                             collected[mid]["tokens_out"] = token.tokens_out
                             collected[mid]["citations"] = token.citations or []
+                            collected[mid]["search_cost_usd"] = token.search_cost_usd
                             elapsed = int((time.monotonic() - mstart) * 1000)
                             await shared_q.put({
                                 "event": "complete",

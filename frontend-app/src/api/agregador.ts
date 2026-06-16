@@ -60,11 +60,12 @@ export async function* streamAgregador(
   history?: HistoryMessage[],
   effort: 'rápido' | 'detalhado' = 'detalhado',
   folder_id?: string,
+  web_search?: Record<string, boolean>,
 ): AsyncGenerator<AgregadorStreamEvent> {
   const res = await fetch(`${BASE}/api/v1/agregador/stream`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort, ...(folder_id ? { folder_id } : {}) }),
+    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort, ...(folder_id ? { folder_id } : {}), ...(web_search ? { web_search } : {}) }),
     signal,
   });
 
