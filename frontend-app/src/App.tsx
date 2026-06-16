@@ -62,6 +62,11 @@ function MainApp() {
   const pendingFolderNameRef = useRef<string | undefined>(undefined);
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
+  // Tracks the index of the assistant message being streamed, so we can remove it if the stream is aborted mid-way
+  const streamMsgIndexRef = useRef<number>(-1);
+  // Stable ref to latest messages — avoids recreating sendMessage on every token
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
   // state uma vez por frame (requestAnimationFrame), evitando re-render por token.
   const rafRef = useRef<number | null>(null);
@@ -91,6 +96,14 @@ function MainApp() {
   const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[] }) => {
     abortRef.current?.abort();
     cancelFlush();
+
+    // Remove partial assistant message left by an aborted previous stream
+    const prevStreamIdx = streamMsgIndexRef.current;
+    if (prevStreamIdx !== -1) {
+      setMessages(prev => prev.slice(0, prevStreamIdx));
+      streamMsgIndexRef.current = -1;
+    }
+
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);
@@ -137,6 +150,7 @@ function MainApp() {
           if (assistantIndex === -1) {
             setMessages(prev => {
               assistantIndex = prev.length;
+              streamMsgIndexRef.current = prev.length;
               return [...prev, { role: 'assistant', content: acc.current }];
             });
           } else {
@@ -184,6 +198,7 @@ function MainApp() {
     } finally {
       cancelFlush();
       flushAssistant();
+      streamMsgIndexRef.current = -1;
       setStreaming(false);
       setUsageTick(t => t + 1);
     }
@@ -278,7 +293,7 @@ function MainApp() {
   }, [selectedModels, activeConvId, cancelFlush, scheduleFlush]);
 
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado') => {
-    const priorMessages = messages;
+    const priorMessages = messagesRef.current;
     if (mode === 'orquestrador') {
       runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages });
     } else {
@@ -286,7 +301,7 @@ function MainApp() {
     }
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setScrollTrigger(n => n + 1);
-  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador, messages]);
+  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador]);
 
   const sendClarification = useCallback((answers: string) => {
     if (!clarification) return;
