@@ -1,9 +1,9 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { ModeChip } from './ModeChip';
-import type { Message } from '../api/orquestrador';
+import type { Message, PubmedValidation } from '../api/orquestrador';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de responsabilidade exclusiva do médico assistente.';
@@ -74,7 +74,7 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
         {messages.map((msg, i) => (
           msg.role === 'user'
             ? <UserMessage key={i} content={msg.content} />
-            : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} />
+            : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} />
         ))}
         {streaming && <ThinkingIndicator mode={streamingMode} />}
         <div ref={bottomRef} />
@@ -95,7 +95,7 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
   );
 });
 
-const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence }: { content: string; mode?: string; confidence?: number }) {
+const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence, citations, pubmed_validation }: { content: string; mode?: string; confidence?: number; citations?: string[]; pubmed_validation?: PubmedValidation }) {
   const rendered = useMemo(() => (
     <ReactMarkdown rehypePlugins={rehypePlugins} remarkPlugins={remarkPlugins} components={mdComponents}>
       {content}
@@ -122,6 +122,23 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
         <div style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.55, wordBreak: 'break-word' }}>
           {rendered}
         </div>
+        {citations && citations.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line2)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>Fontes</div>
+            <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {citations.map((url, i) => (
+                <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+                  <a href={url} target="_blank" rel="noopener noreferrer"
+                    style={{ color: 'var(--petrol)', textDecoration: 'none', wordBreak: 'break-all' }}
+                    onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                    onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+                  >{url}</a>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {pubmed_validation && <PubmedSection validation={pubmed_validation} />}
         <div style={{
           marginTop: 14, fontSize: 11, color: 'var(--pen3)',
           borderTop: '1px solid var(--line2)', paddingTop: 10,
@@ -142,6 +159,70 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
     </div>
   );
 });
+
+function PubmedSection({ validation }: { validation: PubmedValidation }) {
+  const [showGuidelines, setShowGuidelines] = useState(false);
+  const { cited_verified, newer_guidelines } = validation;
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line2)' }}>
+      {cited_verified.length > 0 && (
+        <>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>
+            Referências verificadas no PubMed
+          </div>
+          <ol style={{ margin: '0 0 6px', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {cited_verified.map((c, i) => (
+              <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+                {c.pmid
+                  ? <a
+                      href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--petrol)', textDecoration: 'none' }}
+                      onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                      onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+                    >{c.title}</a>
+                  : <span>{c.title}</span>
+                }
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      {newer_guidelines.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowGuidelines(v => !v)}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontSize: 11, color: 'var(--petrol)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <span style={{ fontSize: 10 }}>{showGuidelines ? '▾' : '▸'}</span>
+            Diretrizes recentes relacionadas ({newer_guidelines.length})
+          </button>
+          {showGuidelines && (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {newer_guidelines.map((a, i) => (
+                <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+                  <a
+                    href={`https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--petrol)', textDecoration: 'none' }}
+                    onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                    onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+                  >{a.article_title}</a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ThinkingIndicator({ mode }: { mode?: string }) {
   const label = (mode && STREAMING_LABELS[mode]) ?? 'Processando…';

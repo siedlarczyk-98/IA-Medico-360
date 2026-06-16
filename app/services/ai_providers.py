@@ -39,6 +39,7 @@ class StreamToken:
     done: bool = False
     tokens_in: int | None = None
     tokens_out: int | None = None
+    citations: list[str] | None = None
 
 
 class BaseProvider(ABC):
@@ -289,7 +290,7 @@ class GeminiProvider(BaseProvider):
 
 class PerplexityProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         resp = await client.post(
@@ -326,13 +327,13 @@ class PerplexityProvider(BaseProvider):
     async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para
         # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
-        response = await self.complete(model_id, prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature)
+        response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature)
         chunk_size = 20
         text = response.text
         for i in range(0, len(text), chunk_size):
             yield StreamToken(delta=text[i:i + chunk_size])
             await asyncio.sleep(0.015)
-        yield StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out)
+        yield StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out, citations=response.citations)
 
 
 # ── Registry por tipo ────────────────────────────────────────

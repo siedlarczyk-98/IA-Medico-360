@@ -1,8 +1,8 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -23,6 +23,11 @@ class FolderRename(BaseModel):
 
 
 class ConversationMoveBody(BaseModel):
+    folder_id: UUID | None
+
+
+class ConversationBulkMoveBody(BaseModel):
+    conversation_ids: list[UUID] = Field(..., min_length=1, max_length=100)
     folder_id: UUID | None
 
 
@@ -115,4 +120,29 @@ async def move_conversation(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Pasta não encontrada")
 
     conv.folder_id = body.folder_id
+    await db.commit()
+
+
+@router.patch("/conversations/bulk", status_code=status.HTTP_204_NO_CONTENT)
+async def bulk_move_conversations(
+    body: ConversationBulkMoveBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move múltiplas conversas para uma pasta (ou remove da pasta) em uma única operação."""
+    if body.folder_id is not None:
+        folder_result = await db.execute(
+            select(Folder).where(Folder.id == body.folder_id, Folder.user_id == current_user.id)
+        )
+        if not folder_result.scalar_one_or_none():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Pasta não encontrada")
+
+    await db.execute(
+        update(Conversation)
+        .where(
+            Conversation.id.in_(body.conversation_ids),
+            Conversation.user_id == current_user.id,
+        )
+        .values(folder_id=body.folder_id)
+    )
     await db.commit()

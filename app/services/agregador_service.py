@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.prompts import DISCLAIMER_RESPOSTA
+from app.services.pubmed_service import validate_with_pubmed
+from app.schemas.agregador import PubmedValidationResult, VerifiedCitationOut, PubMedArticleOut
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
     AuditLog,
@@ -50,7 +52,7 @@ class AgregadorService:
 
     # ── Consulta principal (non-streaming) ───────────────────
 
-    async def query(self, request: AgregadorRequest) -> AgregadorResponse:
+    async def query(self, request: AgregadorRequest, system_prompt: str | None = None) -> AgregadorResponse:
         """
         Executa consulta no Agregador:
         1. Sanitiza prompt via DLP
@@ -96,14 +98,19 @@ class AgregadorService:
         model_responses = await self._call_providers(
             prompt=sanitized_prompt,
             models_info=models_info,
+            system_prompt=system_prompt,
         )
 
         # 6. Respostas + custo
         total_cost = Decimal("0")
         response_models: list[ModelResponse] = []
+        # Guarda objetos ir e citations antes do commit para evitar lazy-load após expiração
+        ir_by_model: dict[str, InteractionResponse] = {}
+        citations_by_model: dict[str, list] = {}
 
         for model_id, result in model_responses.items():
             if isinstance(result, ProviderResponse):
+                citations = result.citations or []
                 cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
@@ -112,10 +119,12 @@ class AgregadorService:
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
                     cost_usd=cost,
-                    extra_metadata={"citations": result.citations} if result.citations else None,
+                    extra_metadata={"citations": citations} if citations else None,
                     is_fallback=False,
                 )
                 self.db.add(ir)
+                ir_by_model[model_id] = ir
+                citations_by_model[model_id] = citations
                 total_cost += cost
                 response_models.append(
                     ModelResponse(
@@ -162,10 +171,57 @@ class AgregadorService:
         # 7-9. Enriquecimento best-effort (falha aqui não perde a interação)
         classification = {"specialty": None, "topic": None}
         medications: list[dict] = []
+        pubmed_by_model: dict[str, PubmedValidationResult] = {}
         try:
             classification = await detect_specialty_and_topic(sanitized_prompt)
             interaction.specialty_detected = classification["specialty"]
             interaction.topic_detected = classification["topic"]
+
+            # Validação PubMed — só para respostas clínicas com texto
+            is_clinical = classification["specialty"] not in (None, "Cotidiano/Não clínico")
+            if is_clinical:
+                clinical_tasks = {
+                    rm.model_id: validate_with_pubmed(
+                        agent_response=rm.response_text,
+                        mode="CLINICAL_REASONING",
+                        topic=classification.get("topic", ""),
+                    )
+                    for rm in response_models
+                    if rm.response_text and not rm.error
+                }
+                if clinical_tasks:
+                    pub_results = await asyncio.gather(*clinical_tasks.values(), return_exceptions=True)
+                    for mid, val in zip(clinical_tasks.keys(), pub_results):
+                        if isinstance(val, Exception):
+                            logger.warning(f"PubMed validation falhou para {mid}: {val}")
+                            continue
+                        # Só processa se não for fallback e tiver citações verificadas ou guidelines
+                        verified = [c for c in val.cited_guidelines_verified if c.verified]
+                        if val.fallback or (not verified and not val.newer_guidelines_found):
+                            continue
+                        pubmed_schema = PubmedValidationResult(
+                            cited_guidelines_verified=[
+                                VerifiedCitationOut(title=c.title, pmid=c.pmid, verified=c.verified)
+                                for c in verified
+                            ],
+                            newer_guidelines_found=[
+                                PubMedArticleOut(
+                                    pmid=a.pmid,
+                                    article_title=a.article_title,
+                                    abstract_snippet=a.abstract_snippet,
+                                )
+                                for a in val.newer_guidelines_found
+                            ],
+                            fallback=val.fallback,
+                        )
+                        pubmed_by_model[mid] = pubmed_schema
+                        # Atualiza extra_metadata no banco (cita citations já em memória)
+                        existing_citations = citations_by_model.get(mid, [])
+                        meta: dict = {}
+                        if existing_citations:
+                            meta["citations"] = existing_citations
+                        meta["pubmed"] = pubmed_schema.model_dump()
+                        ir_by_model[mid].extra_metadata = meta
 
             response_texts = [r.response_text for r in response_models if r.response_text]
             medications = await extract_from_interaction(sanitized_prompt, response_texts)
@@ -193,6 +249,7 @@ class AgregadorService:
                     "specialty_detected": classification["specialty"],
                     "topic_detected": classification["topic"],
                     "medications": [m["medication_normalized"] for m in medications],
+                    "pubmed_validated": list(pubmed_by_model.keys()),
                 },
             )
             self.db.add(audit)
@@ -200,10 +257,16 @@ class AgregadorService:
         except Exception as e:
             logger.warning(f"Enriquecimento pós-query falhou (interação já salva): {e}")
 
+        # Incorpora pubmed_validation nos ModelResponse
+        final_responses = [
+            rm.model_copy(update={"pubmed_validation": pubmed_by_model.get(rm.model_id)})
+            for rm in response_models
+        ]
+
         return AgregadorResponse(
             interaction_id=interaction.id,
             conversation_id=conversation_id,
-            responses=response_models,
+            responses=final_responses,
             disclaimer=DISCLAIMER_RESPOSTA,
             total_response_time_ms=elapsed_ms,
             created_at=interaction.createdat,
@@ -220,7 +283,7 @@ class AgregadorService:
         prompt_sanitized: bool,
         collected: dict[str, dict],
         elapsed_ms: int,
-    ) -> UUID:
+    ) -> tuple[UUID, dict[str, PubmedValidationResult]]:
         """Persiste interação + respostas coletadas durante o stream."""
         interaction = Interaction(
             conversation_id=conversation_id,
@@ -239,6 +302,8 @@ class AgregadorService:
         await self.db.flush()
 
         total_cost = Decimal("0")
+        ir_by_model: dict[str, InteractionResponse] = {}
+        citations_by_model: dict[str, list] = {}
         for model_id, data in collected.items():
             if data.get("error"):
                 ir = InteractionResponse(
@@ -249,6 +314,7 @@ class AgregadorService:
                     is_fallback=False,
                 )
             else:
+                citations = data.get("citations") or []
                 cost = await calculate_cost(
                     self.db, model_id, data.get("tokens_in"), data.get("tokens_out")
                 )
@@ -260,8 +326,11 @@ class AgregadorService:
                     tokens_in=data.get("tokens_in"),
                     tokens_out=data.get("tokens_out"),
                     cost_usd=cost,
+                    extra_metadata={"citations": citations} if citations else None,
                     is_fallback=False,
                 )
+                ir_by_model[model_id] = ir
+                citations_by_model[model_id] = citations
             self.db.add(ir)
 
         interaction.token_cost_usd = total_cost
@@ -272,10 +341,56 @@ class AgregadorService:
         await self.db.commit()
 
         # Enriquecimento best-effort
+        pubmed_by_model: dict[str, PubmedValidationResult] = {}
         try:
             classification = await detect_specialty_and_topic(sanitized_prompt)
             interaction.specialty_detected = classification["specialty"]
             interaction.topic_detected = classification["topic"]
+
+            # Validação PubMed — só para respostas clínicas com texto
+            is_clinical = classification["specialty"] not in (None, "Cotidiano/Não clínico")
+            if is_clinical:
+                clinical_tasks = {
+                    mid: validate_with_pubmed(
+                        agent_response=data["text"],
+                        mode="CLINICAL_REASONING",
+                        topic=classification.get("topic", ""),
+                    )
+                    for mid, data in collected.items()
+                    if data.get("text") and not data.get("error")
+                }
+                if clinical_tasks:
+                    pub_results = await asyncio.gather(*clinical_tasks.values(), return_exceptions=True)
+                    for mid, val in zip(clinical_tasks.keys(), pub_results):
+                        if isinstance(val, Exception):
+                            logger.warning(f"PubMed validation falhou para {mid}: {val}")
+                            continue
+                        verified = [c for c in val.cited_guidelines_verified if c.verified]
+                        if val.fallback or (not verified and not val.newer_guidelines_found):
+                            continue
+                        pubmed_schema = PubmedValidationResult(
+                            cited_guidelines_verified=[
+                                VerifiedCitationOut(title=c.title, pmid=c.pmid, verified=c.verified)
+                                for c in verified
+                            ],
+                            newer_guidelines_found=[
+                                PubMedArticleOut(
+                                    pmid=a.pmid,
+                                    article_title=a.article_title,
+                                    abstract_snippet=a.abstract_snippet,
+                                )
+                                for a in val.newer_guidelines_found
+                            ],
+                            fallback=val.fallback,
+                        )
+                        pubmed_by_model[mid] = pubmed_schema
+                        if mid in ir_by_model:
+                            existing_citations = citations_by_model.get(mid, [])
+                            meta: dict = {}
+                            if existing_citations:
+                                meta["citations"] = existing_citations
+                            meta["pubmed"] = pubmed_schema.model_dump()
+                            ir_by_model[mid].extra_metadata = meta
 
             response_texts = [d.get("text", "") for d in collected.values() if d.get("text")]
             medications = await extract_from_interaction(sanitized_prompt, response_texts)
@@ -298,6 +413,7 @@ class AgregadorService:
                     "prompt_length": len(sanitized_prompt),
                     "response_count": len([d for d in collected.values() if not d.get("error")]),
                     "total_cost_usd": str(total_cost),
+                    "pubmed_validated": list(pubmed_by_model.keys()),
                 },
             )
             self.db.add(audit)
@@ -305,7 +421,7 @@ class AgregadorService:
         except Exception as e:
             logger.warning(f"Enriquecimento pós-stream falhou (interação já salva): {e}")
 
-        return interaction.id
+        return interaction.id, pubmed_by_model
 
     # ── Buscar info dos modelos no banco ─────────────────────
 
@@ -326,6 +442,7 @@ class AgregadorService:
         self,
         prompt: str,
         models_info: dict[str, ModelPricing],
+        system_prompt: str | None = None,
     ) -> dict[str, ProviderResponse | Exception]:
         """
         RN-AGR-001: Se um modelo falhar, não impacta os demais.
@@ -334,7 +451,7 @@ class AgregadorService:
         tasks = {}
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            tasks[model_id] = provider.complete(model_id, prompt)
+            tasks[model_id] = provider.complete(model_id, prompt, system_prompt=system_prompt)
 
         results = await asyncio.gather(
             *tasks.values(),
@@ -346,7 +463,7 @@ class AgregadorService:
     # ── Conversation management ──────────────────────────────
 
     async def _ensure_conversation(
-        self, conversation_id: UUID | None, sanitized_prompt: str
+        self, conversation_id: UUID | None, sanitized_prompt: str, folder_id: UUID | None = None
     ) -> UUID:
         """Cria nova conversa ou valida existente. Usa prompt já sanitizado no título."""
         if conversation_id:
@@ -365,6 +482,7 @@ class AgregadorService:
             user_id=self.user_id,
             title=title,
             feature="AGREGADOR",
+            folder_id=folder_id,
         )
         self.db.add(conv)
         await self.db.flush()

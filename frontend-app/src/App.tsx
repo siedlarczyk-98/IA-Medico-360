@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+// moveConversation is still used by Sidebar; not needed here after folder_id in request
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -45,6 +47,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 function MainApp() {
   const currentUser = useCurrentUser();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState<AppMode>('orquestrador');
@@ -55,6 +58,9 @@ function MainApp() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [usageTick, setUsageTick] = useState(0);
+  const pendingFolderIdRef = useRef<string | undefined>();
+  const pendingFolderNameRef = useRef<string | undefined>();
+  const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
   // state uma vez por frame (requestAnimationFrame), evitando re-render por token.
@@ -82,7 +88,7 @@ function MainApp() {
     [messages]
   );
 
-  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort }) => {
+  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[] }) => {
     abortRef.current?.abort();
     cancelFlush();
     const ctrl = new AbortController();
@@ -103,8 +109,11 @@ function MainApp() {
       });
     };
 
+    const history = (params.priorMessages ?? []).map(m => ({ role: m.role, content: m.content }));
+    const folder_id = pendingFolderIdRef.current;
+
     try {
-      for await (const event of streamQuery(params, ctrl.signal)) {
+      for await (const event of streamQuery({ ...params, history, folder_id }, ctrl.signal)) {
         if (event.type === 'clarification') {
           const formatted = event.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
           setMessages(prev => [...prev, {
@@ -112,6 +121,15 @@ function MainApp() {
             content: `Para responder com mais precisão, preciso de algumas informações:\n\n${formatted}`,
           }]);
           setClarification({ conversationId: event.conversation_id, questions: event.questions });
+          return;
+        }
+        if (event.type === 'cache_hit') {
+          setActiveConvId(event.conversation_id);
+          pendingFolderIdRef.current = undefined;
+          setPendingFolderName(undefined);
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          const chipMode = BACKEND_TO_CHIP[event.mode] ?? event.mode;
+          setMessages(prev => [...prev, { role: 'assistant', content: event.response_text, mode: chipMode }]);
           return;
         }
         if (event.type === 'token') {
@@ -127,12 +145,19 @@ function MainApp() {
         }
         if (event.type === 'done') {
           setActiveConvId(event.conversation_id);
+          pendingFolderIdRef.current = undefined;
+          setPendingFolderName(undefined);
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
           const chipMode = BACKEND_TO_CHIP[event.mode] ?? event.mode;
           if (assistantIndex !== -1) {
             setMessages(prev => {
               if (assistantIndex >= prev.length) return prev;
               const next = [...prev];
-              next[assistantIndex] = { ...next[assistantIndex], mode: chipMode };
+              next[assistantIndex] = {
+                ...next[assistantIndex],
+                mode: chipMode,
+                ...(event.citations && event.citations.length > 0 ? { citations: event.citations } : {}),
+              };
               return next;
             });
           }
@@ -140,9 +165,14 @@ function MainApp() {
         if (event.type === 'error') {
           if (event.status === 'unsupported_mode') {
             // PHARMA_CHECK não suporta streaming — fallback para /query
-            const result = await queryOrquestrador(params);
+            const result = await queryOrquestrador({ ...params, folder_id });
             setMessages(prev => [...prev, { role: 'assistant', content: result.response, mode: result.mode }]);
-            if (result.conversation_id) setActiveConvId(result.conversation_id);
+            if (result.conversation_id) {
+              setActiveConvId(result.conversation_id);
+              pendingFolderIdRef.current = undefined;
+              setPendingFolderName(undefined);
+              queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            }
           } else {
             setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${event.message}` }]);
           }
@@ -187,9 +217,11 @@ function MainApp() {
       });
     };
 
+    const folderIdForStream = pendingFolderIdRef.current;
+
     try {
       const history = priorMessages.map(m => ({ role: m.role, content: m.content }));
-      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort)) {
+      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream)) {
         if (event.type === 'delta') {
           const mid = event.model_id;
           buffers[mid] = (buffers[mid] ?? '') + event.delta;
@@ -203,9 +235,35 @@ function MainApp() {
             scheduleFlush(flushBuffers);
           }
         }
-        if (event.type === 'done') setActiveConvId(event.conversation_id);
+        if (event.type === 'complete') {
+          if (event.citations && event.citations.length > 0) {
+            const mid = event.model_id;
+            setMessages(prev => {
+              const next = [...prev];
+              const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
+              if (idx !== -1) next[idx] = { ...next[idx], citations: event.citations };
+              return next;
+            });
+          }
+        }
+        if (event.type === 'pubmed') {
+          const mid = event.model_id;
+          setMessages(prev => {
+            const next = [...prev];
+            const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
+            if (idx !== -1) next[idx] = { ...next[idx], pubmed_validation: { cited_verified: event.cited_verified, newer_guidelines: event.newer_guidelines } };
+            return next;
+          });
+        }
+        if (event.type === 'done') {
+          setActiveConvId(event.conversation_id);
+          pendingFolderIdRef.current = undefined;
+          setPendingFolderName(undefined);
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        }
         if (event.type === 'error') {
-          setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${event.error ?? 'Erro no modelo'}` }]);
+          const errMsg = event.error || 'Tempo limite excedido ou erro no modelo. Tente novamente.';
+          setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${errMsg}` }]);
         }
       }
     } catch (err) {
@@ -224,14 +282,14 @@ function MainApp() {
     setMessages(prev => {
       const priorMessages = prev;
       if (mode === 'orquestrador') {
-        runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode });
+        runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages });
       } else {
         runAgregador(text, priorMessages, effort);
       }
       return [...prev, { role: 'user', content: text }];
     });
     setScrollTrigger(n => n + 1);
-  }, [mode, activeConvId, runOrquestrador, runAgregador]);
+  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador]);
 
   const sendClarification = useCallback((answers: string) => {
     if (!clarification) return;
@@ -243,19 +301,24 @@ function MainApp() {
     });
   }, [clarification, runOrquestrador]);
 
-  const handleNew = useCallback(() => {
+  const handleNew = useCallback((folderId?: string, folderName?: string) => {
     abortRef.current?.abort();
     setMessages([]);
     setStreaming(false);
     setActiveConvId(undefined);
     setClarification(null);
     setSelectedMode('QUICK_SEARCH');
+    pendingFolderIdRef.current = folderId;
+    pendingFolderNameRef.current = folderName;
+    setPendingFolderName(folderName);
   }, []);
 
   const handleSelectConversation = useCallback(async (id: string) => {
     abortRef.current?.abort();
     setStreaming(false);
     setClarification(null);
+    pendingFolderIdRef.current = undefined;
+    setPendingFolderName(undefined);
     try {
       const detail = await getConversation(id);
       setMessages(detail.messages);
@@ -289,6 +352,14 @@ function MainApp() {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} onMenuToggle={() => setSidebarOpen(o => !o)} />
+        {pendingFolderName && messages.length === 0 && (
+          <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+            Nova consulta em <strong style={{ color: 'var(--ink)' }}>{pendingFolderName}</strong>
+          </div>
+        )}
 
         {mode === 'agregador' && messages.length > 0 && (
           <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked />

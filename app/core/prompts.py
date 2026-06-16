@@ -12,22 +12,42 @@ QUANDO O TEMA FOR CLÍNICO:
 5. Cite fontes quando possível (artigos, diretrizes, bases farmacológicas).
 6. Se não tiver certeza, diga explicitamente.
 7. NUNCA invente referências ou PMIDs.
-8. OBRIGATÓRIO: Ao final de qualquer resposta clínica, adicione exatamente o seguinte aviso:
-"⚕️ Esta resposta é de suporte à decisão clínica. A conduta adotada é de responsabilidade exclusiva do médico assistente. As informações apresentadas não substituem avaliação clínica individualizada."
+8. Quando usar referências numeradas ([1], [2]...), OBRIGATORIAMENTE liste-as ao final da resposta com título completo. Se não puder listar, use citação inline sem número (ex: "conforme as diretrizes SBD 2024").
 
 QUANDO O TEMA NÃO FOR CLÍNICO:
 - Responda normalmente com a melhor informação disponível.
 - Seja prático e direto.
-- NÃO adicione o aviso de responsabilidade médica no final.
 
 RESTRIÇÕES:
 - Você NÃO faz diagnósticos definitivos.
 - Você NÃO emite prescrições.
 - Você é uma ferramenta de APOIO à decisão.
-
-NOTA: Quando a pergunta for de natureza clínica (diagnóstico, conduta, posologia, interação medicamentosa), inclua ao final da sua resposta a seguinte sugestão (abaixo do aviso médico):
-"💡 Para consultas clínicas com validação científica e checagem farmacológica, utilize o Modo Orquestrador."
 """
+
+def _user_context_suffix(specialty: str | None, med_status: str | None) -> str:
+    if not specialty:
+        return ""
+    ctx = f"\n\n[Contexto do usuário] Você está respondendo a um médico especialista em {specialty}"
+    if med_status == "residente":
+        ctx += " (em residência médica)"
+    ctx += ". Calibre a profundidade técnica e o vocabulário conforme esse perfil."
+    return ctx
+
+
+def build_agregador_prompt(specialty: str | None, med_status: str | None = None) -> str:
+    return SYSTEM_PROMPT_AGREGADOR + _user_context_suffix(specialty, med_status)
+
+
+def build_orquestrador_prompt(mode: str, specialty: str | None, med_status: str | None = None) -> str:
+    """Retorna o prompt do modo do Orquestrador enriquecido com contexto do médico."""
+    base_map = {
+        "QUICK_SEARCH": SYSTEM_PROMPT_QUICK_SEARCH,
+        "CLINICAL_REASONING": SYSTEM_PROMPT_CLINICAL_REASONING,
+        "PRODUCTIVITY": SYSTEM_PROMPT_PRODUCTIVITY,
+    }
+    base = base_map.get(mode, "")
+    return base + _user_context_suffix(specialty, med_status)
+
 
 DISCLAIMER_RESPOSTA = (
     "⚕️ *Esta resposta é de suporte à decisão clínica. "
@@ -70,6 +90,7 @@ ORIENTAÇÕES:
 - Mencione ajustes de dose relevantes (renal, pediátrico) quando pertinentes
 - Cite a fonte ou diretriz quando disponível
 - Destaque alertas importantes em negrito
+- Quando usar referências numeradas ([1], [2]...), LISTE-AS ao final da resposta com título completo. Se não puder listar, use citação inline sem número (ex: "conforme as diretrizes ACC/AHA 2023").
 
 RESTRIÇÕES:
 - Você NÃO faz diagnósticos definitivos
@@ -86,7 +107,7 @@ SEMPRE QUE FIZER SENTIDO, inclua:
 - **Exames** sugeridos com breve justificativa
 - **Conduta** imediata e seguimento
 - **Alertas** em negrito quando houver sinais de gravidade
-- **Referências** apenas quando relevante (cite apenas fontes reais — NUNCA invente)
+- **Referências** apenas quando relevante (cite apenas fontes reais — NUNCA invente). Quando usar referências numeradas ([1], [2]...), LISTE-AS ao final com título e autores. Se não puder listar, prefira citação inline (ex: "conforme as diretrizes GOLD 2024").
 
 REGRAS:
 - Adapte sempre ao contexto fornecido (sexo, idade, comorbidades). Não sugira condições biologicamente impossíveis para o paciente descrito.

@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.prompts import DISCLAIMER_RESPOSTA
+from app.core.prompts import DISCLAIMER_RESPOSTA, build_agregador_prompt
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import ModelPricing, User
 from app.schemas.agregador import (
@@ -108,7 +108,8 @@ async def agregador_query(
         user_id=user.id,
         company_id=user.company_id,
     )
-    return await service.query(body)
+    system_prompt = build_agregador_prompt(user.specialty, user.med_status)
+    return await service.query(body, system_prompt=system_prompt)
 
 
 # ── Consulta com Streaming (SSE) ────────────────────────────
@@ -135,7 +136,7 @@ async def agregador_stream(
     sanitized_prompt = dlp_result.sanitized_text
 
     # Criar/recuperar conversa (já usa prompt sanitizado no título)
-    conversation_id = await service._ensure_conversation(body.conversation_id, sanitized_prompt)
+    conversation_id = await service._ensure_conversation(body.conversation_id, sanitized_prompt, folder_id=body.folder_id)
     await db.commit()
 
     # Montar prompt enriquecido com histórico recebido do frontend
@@ -158,8 +159,11 @@ async def agregador_stream(
     )
     models_info = {m.model_id: m for m in result.scalars().all()}
 
-    effort_prefix = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" if body.effort == "rápido" else ""
-    effort_system = effort_prefix.strip() or None
+    base_system_prompt = build_agregador_prompt(user.specialty, user.med_status)
+    if body.effort == "rápido":
+        effort_system = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + base_system_prompt
+    else:
+        effort_system = base_system_prompt
 
     stream_start = time.monotonic()
 
@@ -170,69 +174,65 @@ async def agregador_stream(
             for mid in models_info
         }
 
-        tasks = {}
+        # Fila única compartilhada — cada task escreve nela; consumer faz await get()
+        # eliminando o busy-loop com get_nowait() + sleep(0.01).
+        shared_q: asyncio.Queue = asyncio.Queue()
+        total = len(models_info)
+
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            tasks[model_id] = provider.stream(model_id, enriched_prompt, system_prompt=effort_system)
-
-        queues: dict[str, asyncio.Queue] = {}
-
-        for model_id, provider_stream in tasks.items():
-            q: asyncio.Queue = asyncio.Queue()
-            queues[model_id] = q
+            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system)
             model_start = time.monotonic()
 
-            async def _run(mid=model_id, ps=provider_stream, queue=q, mstart=model_start):
+            async def _run(mid=model_id, ps=provider_stream, mstart=model_start):
                 try:
                     async for token in ps:
                         if token.delta:
                             collected[mid]["text"] += token.delta
-                            await queue.put({
+                            await shared_q.put({
                                 "event": "delta",
                                 "data": json.dumps({"model_id": mid, "delta": token.delta}),
                             })
                         if token.done:
                             collected[mid]["tokens_in"] = token.tokens_in
                             collected[mid]["tokens_out"] = token.tokens_out
+                            collected[mid]["citations"] = token.citations or []
                             elapsed = int((time.monotonic() - mstart) * 1000)
-                            await queue.put({
+                            await shared_q.put({
                                 "event": "complete",
                                 "data": json.dumps({
                                     "model_id": mid,
                                     "response_time_ms": elapsed,
                                     "tokens_in": token.tokens_in,
                                     "tokens_out": token.tokens_out,
+                                    "citations": token.citations,
                                 }),
                             })
                 except Exception as e:
-                    collected[mid]["error"] = str(e)
-                    await queue.put({
+                    err_msg = str(e) or f"Tempo limite excedido para {mid}. Tente novamente."
+                    collected[mid]["error"] = err_msg
+                    await shared_q.put({
                         "event": "error",
-                        "data": json.dumps({"model_id": mid, "error": str(e)}),
+                        "data": json.dumps({"model_id": mid, "error": err_msg}),
                     })
                 finally:
-                    await queue.put(None)
+                    await shared_q.put(None)  # sentinela de conclusão deste modelo
 
             asyncio.create_task(_run())
 
         done_count = 0
-        total = len(queues)
         while done_count < total:
-            for q in queues.values():
-                try:
-                    event = q.get_nowait()
-                    if event is None:
-                        done_count += 1
-                    else:
-                        yield event
-                except asyncio.QueueEmpty:
-                    pass
-            await asyncio.sleep(0.01)
+            event = await shared_q.get()
+            if event is None:
+                done_count += 1
+            else:
+                yield event
 
         # Salvar interação no banco após stream completo
         elapsed_ms = int((time.monotonic() - stream_start) * 1000)
+        pubmed_results = {}
         try:
-            await service.save_stream_interaction(
+            _interaction_id, pubmed_results = await service.save_stream_interaction(
                 conversation_id=conversation_id,
                 sanitized_prompt=sanitized_prompt,
                 prompt_sanitized=dlp_result.was_sanitized,
@@ -241,6 +241,17 @@ async def agregador_stream(
             )
         except Exception as e:
             logger.error(f"Erro ao salvar interação stream: {e}")
+
+        # Emite resultados PubMed por modelo (só quando há citações verificadas)
+        for mid, pub in pubmed_results.items():
+            yield {
+                "event": "pubmed",
+                "data": json.dumps({
+                    "model_id": mid,
+                    "cited_verified": [c.model_dump() for c in pub.cited_guidelines_verified],
+                    "newer_guidelines": [a.model_dump() for a in pub.newer_guidelines_found],
+                }),
+            }
 
         yield {"event": "disclaimer", "data": json.dumps({"text": DISCLAIMER_RESPOSTA})}
         yield {"event": "done", "data": json.dumps({"conversation_id": str(conversation_id)})}

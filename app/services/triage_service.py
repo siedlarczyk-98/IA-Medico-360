@@ -1,9 +1,12 @@
 
-
 import json
+import logging
+
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.services import cache_service
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -90,7 +93,7 @@ async def triage(prompt: str) -> dict:
         return out
 
     except Exception as e:
-        print(f"Error occurred while triaging: {e}")
+        logger.warning(f"Triage falhou, usando fallback QUICK_SEARCH: {e}")
         return {
             "mode": "QUICK_SEARCH",
             "confidence": 0.0,

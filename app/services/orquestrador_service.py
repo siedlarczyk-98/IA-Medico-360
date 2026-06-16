@@ -19,6 +19,7 @@ from app.core.prompts import (
     SYSTEM_PROMPT_CLINICAL_REASONING,
     SYSTEM_PROMPT_PRODUCTIVITY,
     SYSTEM_PROMPT_QUICK_SEARCH,
+    build_orquestrador_prompt,
 )
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
@@ -31,6 +32,7 @@ from app.models.models import (
     PharmaAlert,
     PubmedValidation,
 )
+from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import get_provider_by_type
 from app.services.orquestrador_stream_service import _check_clarification
 from app.services.medication_extractor import extract_from_interaction
@@ -66,10 +68,13 @@ MODE_PROMPT_MAP = {
 class OrquestradorService:
     """Serviço principal do Orquestrador Multi-Agente."""
 
-    def __init__(self, db: AsyncSession, user_id: UUID, company_id: UUID | None = None):
+    def __init__(self, db: AsyncSession, user_id: UUID, company_id: UUID | None = None,
+                 user_specialty: str | None = None, user_med_status: str | None = None):
         self.db = db
         self.user_id = user_id
         self.company_id = company_id
+        self.user_specialty = user_specialty
+        self.user_med_status = user_med_status
 
     async def query(
         self,
@@ -78,6 +83,8 @@ class OrquestradorService:
         force: bool = False,
         clarification_answers: str | None = None,
         mode: str | None = None,
+        history: list[ConversationMessage] | None = None,
+        folder_id: UUID | None = None,
     ) -> dict:
         try:
             start_time = time.monotonic()
@@ -89,6 +96,17 @@ class OrquestradorService:
             # 2. DLP
             dlp_result = sanitize_prompt(prompt)
             sanitized_prompt = dlp_result.sanitized_text
+
+            # 2b. Enriquecer prompt com histórico
+            if history:
+                parts = ["[Conversa anterior]"]
+                for msg in history[-10:]:
+                    role_label = "Médico" if msg.role == "user" else "Assistente"
+                    parts.append(f"{role_label}: {msg.content[:800]}")
+                parts.append("[Pergunta atual]")
+                enriched_prompt = "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
+            else:
+                enriched_prompt = sanitized_prompt
 
             # 3. Triagem (pulada quando o modo vem explícito do frontend)
             if mode:
@@ -115,7 +133,7 @@ class OrquestradorService:
                 clarification = await _check_clarification(sanitized_prompt)
                 if not clarification.get("sufficient", True):
                     questions = clarification.get("questions", [])
-                    conv_id = await self._ensure_conversation(conversation_id, prompt)
+                    conv_id = await self._ensure_conversation(conversation_id, prompt, folder_id=folder_id)
                     pending = Interaction(
                         conversation_id=conv_id,
                         user_id=self.user_id,
@@ -150,7 +168,7 @@ class OrquestradorService:
                     return {**cached, "cache_hit": True}
 
             # 4. Conversation
-            conv_id = await self._ensure_conversation(conversation_id, prompt)
+            conv_id = await self._ensure_conversation(conversation_id, prompt, folder_id=folder_id)
 
             # 5. Interaction
             interaction = Interaction(
@@ -171,9 +189,9 @@ class OrquestradorService:
 
             # 5. Roteamento pro agente
             if mode == "PHARMA_CHECK":
-                agent_response = await self._handle_pharma_check(sanitized_prompt, interaction.id)
+                agent_response = await self._handle_pharma_check(enriched_prompt, interaction.id)
             else:
-                agent_response = await self._handle_ai_agent(mode, sanitized_prompt)
+                agent_response = await self._handle_ai_agent(mode, enriched_prompt)
 
             # 6. Salvar resposta
             cost = Decimal("0")
@@ -338,7 +356,7 @@ class OrquestradorService:
 
     async def _handle_ai_agent(self, mode: str, prompt: str) -> dict:
         model_id = MODE_MODEL_MAP[mode]
-        system_prompt = MODE_PROMPT_MAP[mode]
+        system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
 
         result = await self.db.execute(
             select(ModelPricing).where(
@@ -426,7 +444,18 @@ class OrquestradorService:
                 "is_fallback": False,
             }
 
-        resultado = await pharmadb.checar_interacoes(nomes)
+        try:
+            resultado = await pharmadb.checar_interacoes(nomes)
+        except Exception as e:
+            logger.warning(f"PharmaDB indisponível, caindo para CLINICAL_REASONING: {e}")
+            aviso = (
+                "⚠️ *A checagem automática de interações está temporariamente indisponível.* "
+                "Segue análise clínica com base no conhecimento do modelo:\n\n"
+            )
+            fallback = await self._handle_ai_agent("CLINICAL_REASONING", prompt)
+            fallback["text"] = aviso + fallback.get("text", "")
+            fallback["is_fallback"] = True
+            return fallback
 
         for alerta in resultado.get("interacoes", []):
             self.db.add(PharmaAlert(
@@ -478,7 +507,7 @@ class OrquestradorService:
 
     # ── Conversation ─────────────────────────────────────────
 
-    async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str) -> UUID:
+    async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str, folder_id: UUID | None = None) -> UUID:
         if conversation_id:
             result = await self.db.execute(
                 select(Conversation).where(
@@ -495,6 +524,7 @@ class OrquestradorService:
             user_id=self.user_id,
             title=title,
             feature="ORQUESTRADOR",
+            folder_id=folder_id,
         )
         self.db.add(conv)
         await self.db.flush()

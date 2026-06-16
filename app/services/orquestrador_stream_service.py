@@ -26,7 +26,9 @@ from app.core.prompts import (
     SYSTEM_PROMPT_CLINICAL_REASONING,
     SYSTEM_PROMPT_QUICK_SEARCH,
     SYSTEM_PROMPT_PRODUCTIVITY,
+    build_orquestrador_prompt,
 )
+from app.schemas.agregador import ConversationMessage
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
     AuditLog,
@@ -103,10 +105,13 @@ async def _check_clarification(prompt: str) -> dict:
 
 class OrquestradorStreamService:
 
-    def __init__(self, session_factory: async_sessionmaker, user_id: UUID, company_id: UUID | None = None):
+    def __init__(self, session_factory: async_sessionmaker, user_id: UUID, company_id: UUID | None = None,
+                 user_specialty: str | None = None, user_med_status: str | None = None):
         self.session_factory = session_factory
         self.user_id = user_id
         self.company_id = company_id
+        self.user_specialty = user_specialty
+        self.user_med_status = user_med_status
 
     async def stream(
         self,
@@ -116,6 +121,8 @@ class OrquestradorStreamService:
         clarification_answers: str | None = None,
         effort: str = "detalhado",
         mode: str | None = None,
+        history: list[ConversationMessage] | None = None,
+        folder_id: UUID | None = None,
     ) -> AsyncIterator[str]:
         """
         Gerador SSE. Yields strings no formato 'event: ...\ndata: ...\n\n'.
@@ -140,6 +147,17 @@ class OrquestradorStreamService:
                 # 2. DLP
                 dlp_result = sanitize_prompt(prompt)
                 sanitized_prompt = dlp_result.sanitized_text
+
+                # 2b. Enriquecer prompt com histórico (cache usa sanitized_prompt; modelo usa enriched_prompt)
+                if history:
+                    parts = ["[Conversa anterior]"]
+                    for msg in history[-10:]:
+                        role_label = "Médico" if msg.role == "user" else "Assistente"
+                        parts.append(f"{role_label}: {msg.content[:800]}")
+                    parts.append("[Pergunta atual]")
+                    enriched_prompt = "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
+                else:
+                    enriched_prompt = sanitized_prompt
 
                 # 3. Triage (pulada quando o modo vem explícito do frontend)
                 if mode:
@@ -171,7 +189,7 @@ class OrquestradorStreamService:
                     clarification = await _check_clarification(sanitized_prompt)
                     if not clarification.get("sufficient", True):
                         questions = clarification.get("questions", [])
-                        conv_id = await self._ensure_conversation(db, conversation_id, prompt)
+                        conv_id = await self._ensure_conversation(db, conversation_id, prompt, folder_id=folder_id)
                         pending = Interaction(
                             conversation_id=conv_id,
                             user_id=self.user_id,
@@ -209,7 +227,7 @@ class OrquestradorStreamService:
                         return
 
                 # 4. Conversation + Interaction
-                conv_id = await self._ensure_conversation(db, conversation_id, prompt)
+                conv_id = await self._ensure_conversation(db, conversation_id, prompt, folder_id=folder_id)
                 interaction = Interaction(
                     conversation_id=conv_id,
                     user_id=self.user_id,
@@ -228,7 +246,7 @@ class OrquestradorStreamService:
 
                 # 5. Streaming do modelo
                 model_id = MODE_MODEL_MAP.get(mode)
-                system_prompt = MODE_PROMPT_MAP.get(mode)
+                system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
                 if effort == "rápido" and system_prompt:
                     system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
                 temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
@@ -244,12 +262,13 @@ class OrquestradorStreamService:
                 full_text = ""
                 tokens_in: int | None = None
                 tokens_out: int | None = None
+                perplexity_citations: list[str] | None = None
                 is_fallback = False
 
                 try:
                     async for token in provider.stream(
                         model_id,
-                        sanitized_prompt,
+                        enriched_prompt,
                         system_prompt=system_prompt,
                         temperature=temperature,
                     ):
@@ -259,11 +278,12 @@ class OrquestradorStreamService:
                         if token.done:
                             tokens_in = token.tokens_in
                             tokens_out = token.tokens_out
+                            perplexity_citations = token.citations
 
                 except Exception as e:
                     logger.warning(f"Stream falhou em {model_id}: {e}. Tentando fallback completo...")
                     is_fallback = True
-                    fallback_result = await self._fallback_complete(db, mode, sanitized_prompt, system_prompt)
+                    fallback_result = await self._fallback_complete(db, mode, enriched_prompt, system_prompt)
                     full_text = fallback_result.get("text", "")
                     tokens_in = fallback_result.get("tokens_in")
                     tokens_out = fallback_result.get("tokens_out")
@@ -431,6 +451,7 @@ class OrquestradorStreamService:
                     ],
                     "total_response_time_ms": elapsed_ms,
                     "disclaimer": DISCLAIMER_RESPOSTA,
+                    "citations": perplexity_citations,
                 })
 
             except Exception as e:
@@ -501,7 +522,7 @@ class OrquestradorStreamService:
 
         return consolidated
 
-    async def _ensure_conversation(self, db, conversation_id: UUID | None, prompt: str) -> UUID:
+    async def _ensure_conversation(self, db, conversation_id: UUID | None, prompt: str, folder_id: UUID | None = None) -> UUID:
         if conversation_id:
             result = await db.execute(
                 select(Conversation).where(
@@ -518,6 +539,7 @@ class OrquestradorStreamService:
             user_id=self.user_id,
             title=title,
             feature="ORQUESTRADOR",
+            folder_id=folder_id,
         )
         db.add(conv)
         await db.flush()

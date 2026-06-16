@@ -23,9 +23,27 @@ export async function fetchModels(): Promise<AIModel[]> {
   return res.json();
 }
 
+export interface VerifiedCitation {
+  title: string;
+  pmid: string | null;
+  verified: boolean;
+}
+
+export interface PubMedArticle {
+  pmid: string;
+  article_title: string;
+  abstract_snippet: string;
+}
+
+export interface PubmedValidation {
+  cited_verified: VerifiedCitation[];
+  newer_guidelines: PubMedArticle[];
+}
+
 export type AgregadorStreamEvent =
   | { type: 'delta';    model_id: string; delta: string }
-  | { type: 'complete'; model_id: string; response_time_ms: number; tokens_in?: number; tokens_out?: number }
+  | { type: 'complete'; model_id: string; response_time_ms: number; tokens_in?: number; tokens_out?: number; citations?: string[] }
+  | { type: 'pubmed';   model_id: string; cited_verified: VerifiedCitation[]; newer_guidelines: PubMedArticle[] }
   | { type: 'done';     conversation_id: string }
   | { type: 'error';    model_id?: string; error?: string; message?: string };
 
@@ -41,11 +59,12 @@ export async function* streamAgregador(
   conversation_id?: string,
   history?: HistoryMessage[],
   effort: 'rápido' | 'detalhado' = 'detalhado',
+  folder_id?: string,
 ): AsyncGenerator<AgregadorStreamEvent> {
   const res = await fetch(`${BASE}/api/v1/agregador/stream`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort }),
+    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort, ...(folder_id ? { folder_id } : {}) }),
     signal,
   });
 

@@ -10,19 +10,27 @@ function authHeaders(): HeadersInit {
   };
 }
 
+export interface PubmedValidation {
+  cited_verified: Array<{ title: string; pmid: string | null; verified: boolean }>;
+  newer_guidelines: Array<{ pmid: string; article_title: string; abstract_snippet: string }>;
+}
+
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
   mode?: string;
   confidence?: number;
+  citations?: string[];
+  pubmed_validation?: PubmedValidation;
 }
 
 // Eventos tipados que o stream pode emitir
 export type StreamEvent =
   | { type: 'start';         mode: string; triage_confidence: number }
   | { type: 'token';         text: string }
+  | { type: 'cache_hit';     response_text: string; conversation_id: string; mode: string; model_used: string }
   | { type: 'clarification'; conversation_id: string; questions: string[] }
-  | { type: 'done';          conversation_id: string; mode: string; model_used: string }
+  | { type: 'done';          conversation_id: string; mode: string; model_used: string; citations?: string[] }
   | { type: 'error';         status?: string; message: string };
 
 export interface StreamParams {
@@ -32,6 +40,8 @@ export interface StreamParams {
   force?: boolean;
   effort?: 'rápido' | 'detalhado';
   mode?: string;
+  history?: { role: 'user' | 'assistant'; content: string }[];
+  folder_id?: string;
 }
 
 export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
@@ -45,6 +55,8 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.force                 ? { force: params.force }                               : {}),
       effort: params.effort ?? 'detalhado',
       ...(params.mode                  ? { mode: params.mode }                                 : {}),
+      history: params.history ?? [],
+      ...(params.folder_id             ? { folder_id: params.folder_id }                       : {}),
     }),
   });
   if (!res.ok) {
@@ -73,6 +85,8 @@ export async function* streamQuery(
       ...(params.force               ? { force: params.force }                             : {}),
       effort: params.effort ?? 'detalhado',
       ...(params.mode                ? { mode: params.mode }                               : {}),
+      history: params.history ?? [],
+      ...(params.folder_id           ? { folder_id: params.folder_id }                     : {}),
     }),
     signal,
   });

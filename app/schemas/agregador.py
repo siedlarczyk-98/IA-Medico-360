@@ -48,6 +48,10 @@ class AgregadorRequest(BaseModel):
         default=None,
         description="ID da conversa existente (ou None para criar nova)",
     )
+    folder_id: UUID | None = Field(
+        default=None,
+        description="Pasta onde a nova conversa será criada (opcional).",
+    )
     history: list[ConversationMessage] = Field(
         default_factory=list,
         description="Histórico de mensagens anteriores da conversa",
@@ -65,6 +69,26 @@ class AgregadorRequest(BaseModel):
         return v
 
 
+# ── PubMed Validation ────────────────────────────────────────
+
+class VerifiedCitationOut(BaseModel):
+    title: str
+    pmid: str | None
+    verified: bool
+
+
+class PubMedArticleOut(BaseModel):
+    pmid: str
+    article_title: str
+    abstract_snippet: str
+
+
+class PubmedValidationResult(BaseModel):
+    cited_guidelines_verified: list[VerifiedCitationOut]
+    newer_guidelines_found: list[PubMedArticleOut]
+    fallback: bool
+
+
 # ── Response ─────────────────────────────────────────────────
 
 class ModelResponse(BaseModel):
@@ -78,6 +102,7 @@ class ModelResponse(BaseModel):
     cost_usd: float | None = None
     is_fallback: bool = False
     error: str | None = None
+    pubmed_validation: PubmedValidationResult | None = None
 
 
 class AgregadorResponse(BaseModel):

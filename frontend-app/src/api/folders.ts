@@ -59,3 +59,12 @@ export async function moveConversation(conversationId: string, folderId: string 
   });
   if (!res.ok) throw new Error('Erro ao mover conversa');
 }
+
+export async function bulkMoveConversations(conversationIds: string[], folderId: string | null): Promise<void> {
+  const res = await fetch(`${BASE}/api/v1/folders/conversations/bulk`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ conversation_ids: conversationIds, folder_id: folderId }),
+  });
+  if (!res.ok) throw new Error('Erro ao mover conversas');
+}

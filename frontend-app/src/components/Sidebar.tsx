@@ -4,14 +4,14 @@ import { Logo } from './Logo';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
 import { listConversations, type ConversationSummary } from '../api/conversations';
-import { listFolders, createFolder, renameFolder, deleteFolder, moveConversation, type Folder } from '../api/folders';
+import { listFolders, createFolder, renameFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder } from '../api/folders';
 import { logout } from '../lib/auth';
 import { ProfileModal } from './ProfileModal';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   activeId?: string;
-  onNew: () => void;
+  onNew: (folderId?: string, folderName?: string) => void;
   onSelect: (id: string) => void;
   open: boolean;
   onToggle: () => void;
@@ -50,9 +50,13 @@ interface ConvItemProps {
   folders: Folder[];
   onSelect: () => void;
   onMove: (folderId: string | null) => void;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onToggleSelect?: () => void;
+  onDragStart?: () => void;
 }
 
-function ConvItem({ conv, activeId, folders, onSelect, onMove }: ConvItemProps) {
+function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -85,18 +89,21 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove }: ConvItemProps) 
     drop.style.left = (rect.right - drop.offsetWidth) + 'px';
   }, [menuOpen]);
 
-  const rowBg = isActive ? 'var(--mint)' : hovered ? 'var(--fill)' : 'transparent';
+  const rowBg = selected ? 'var(--fill2)' : isActive ? 'var(--mint)' : hovered ? 'var(--fill)' : 'transparent';
 
   return (
     <div
-      style={{ position: 'relative', borderRadius: 6, background: rowBg, transition: 'background 0.1s' }}
+      draggable
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(); }}
+      style={{ position: 'relative', borderRadius: 6, background: rowBg, transition: 'background 0.1s', cursor: 'grab' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        onClick={onSelect}
+        onClick={() => selectionMode ? onToggleSelect?.() : onSelect()}
         style={{
           padding: '7px 10px',
+          paddingLeft: selectionMode ? 6 : 10,
           paddingRight: showBtn ? 26 : 10,
           fontSize: 12.5,
           color: 'var(--pen)',
@@ -105,10 +112,21 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove }: ConvItemProps) 
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}
         title={conv.title ?? ''}
       >
-        {conv.title ?? 'Sem título'}
+        {selectionMode && (
+          <span style={{
+            width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected ? 'var(--green)' : 'var(--line2)'}`,
+            background: selected ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {selected && <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 5 L4 7 L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>}
+          </span>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.title ?? 'Sem título'}</span>
       </div>
 
       {showBtn && (
@@ -217,13 +235,21 @@ interface FolderRowProps {
   onMove: (convId: string, folderId: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onNewInFolder: () => void;
+  selectedConvIds?: Set<string>;
+  selectionMode?: boolean;
+  onToggleSelect?: (convId: string) => void;
+  onDragStart?: (convId: string) => void;
+  onDropConv?: (folderId: string | null) => void;
 }
 
-function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete }: FolderRowProps) {
+function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -248,7 +274,12 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
 
   return (
     <div style={{ marginBottom: 2 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 4px', borderRadius: 6 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 4px', borderRadius: 6, background: dragOver ? 'var(--fill2)' : 'transparent', transition: 'background 0.1s' }}
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); onDropConv?.(folder.id); }}
+      >
         <button
           onClick={() => setOpen(o => !o)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}
@@ -277,6 +308,16 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
           )}
         </button>
 
+        <button
+          onClick={e => { e.stopPropagation(); onNewInFolder(); }}
+          title="Nova consulta nesta pasta"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center', flexShrink: 0 }}
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path d="M8 3 V13 M3 8 H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </button>
+
         <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
           <button
             onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
@@ -302,12 +343,33 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
                 Renomear
               </button>
               <div style={{ height: 1, background: 'var(--line2)', margin: '0 8px' }} />
-              <button onClick={() => { onDelete(folder.id); setMenuOpen(false); }} style={{ ...ctxItemStyle, color: '#ef4444' }}>
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 5h10M6 5V3h4v2M6 8v5M10 8v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-                Excluir pasta
-              </button>
+              {!confirmDelete ? (
+                <button onClick={() => setConfirmDelete(true)} style={{ ...ctxItemStyle, color: '#ef4444' }}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 5h10M6 5V3h4v2M6 8v5M10 8v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  </svg>
+                  Excluir pasta
+                </button>
+              ) : (
+                <div style={{ padding: '8px 12px' }}>
+                  <p style={{ fontSize: 11.5, color: 'var(--ink)', margin: '0 0 6px', lineHeight: 1.4 }}>
+                    {conversations.length > 0
+                      ? `${conversations.length} conversa${conversations.length > 1 ? 's' : ''} voltará${conversations.length > 1 ? 'ão' : ''} para "Sem pasta".`
+                      : 'Confirmar exclusão?'
+                    }
+                  </p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => { onDelete(folder.id); setMenuOpen(false); setConfirmDelete(false); }}
+                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                    >Excluir</button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: '1px solid var(--line2)', background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}
+                    >Cancelar</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -326,11 +388,41 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
                 folders={allFolders}
                 onSelect={() => onSelect(conv.id)}
                 onMove={fId => onMove(conv.id, fId)}
+                selected={selectedConvIds?.has(conv.id)}
+                selectionMode={selectionMode}
+                onToggleSelect={() => onToggleSelect?.(conv.id)}
+                onDragStart={() => onDragStart?.(conv.id)}
               />
             ))
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Drop zone "Sem pasta" ────────────────────────────────────────
+
+function DropZoneNoPasta({ onDrop }: { onDrop: () => void }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      onDragOver={e => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { e.preventDefault(); setOver(false); onDrop(); }}
+      style={{
+        margin: '0 4px 6px',
+        padding: '5px 10px',
+        borderRadius: 6,
+        border: `1.5px dashed ${over ? 'var(--green)' : 'var(--line2)'}`,
+        background: over ? 'var(--fill2)' : 'transparent',
+        fontSize: 11,
+        color: over ? 'var(--green)' : 'var(--pen3)',
+        textAlign: 'center',
+        transition: 'all 0.1s',
+      }}
+    >
+      Soltar aqui para remover da pasta
     </div>
   );
 }
@@ -385,8 +477,41 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const [, setProfileTick] = useState(0);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
+  const [draggingConvId, setDraggingConvId] = useState<string | null>(null);
+  const [showBulkFolderPicker, setShowBulkFolderPicker] = useState(false);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const selectionMode = selectedConvIds.size > 0;
+
+  const bulkMoveMutation = useMutation({
+    mutationFn: ({ ids, folderId }: { ids: string[]; folderId: string | null }) =>
+      bulkMoveConversations(ids, folderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setSelectedConvIds(new Set());
+      setShowBulkFolderPicker(false);
+    },
+  });
+
+  function toggleSelect(convId: string) {
+    setSelectedConvIds(prev => {
+      const next = new Set(prev);
+      if (next.has(convId)) next.delete(convId); else next.add(convId);
+      return next;
+    });
+  }
+
+  function handleDrop(folderId: string | null) {
+    if (!draggingConvId) return;
+    if (selectedConvIds.has(draggingConvId) && selectedConvIds.size > 1) {
+      bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId });
+    } else {
+      moveConvMutation.mutate({ convId: draggingConvId, folderId });
+    }
+    setDraggingConvId(null);
+  }
 
   useEffect(() => {
     if (activeId && !conversations.some(c => c.id === activeId)) {
@@ -538,6 +663,12 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 onMove={(convId, fId) => moveConvMutation.mutate({ convId, folderId: fId })}
                 onRename={(id, name) => renameFolderMutation.mutate({ id, name })}
                 onDelete={id => deleteFolderMutation.mutate(id)}
+                onNewInFolder={closeAfter(() => onNew(folder.id, folder.name))}
+                selectedConvIds={selectedConvIds}
+                selectionMode={selectionMode}
+                onToggleSelect={toggleSelect}
+                onDragStart={convId => setDraggingConvId(convId)}
+                onDropConv={folderId => handleDrop(folderId)}
               />
             ))}
           </div>
@@ -563,6 +694,11 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           </div>
         )}
 
+        {/* Zona de drop "Sem pasta" — visível apenas durante drag de conversa de dentro de uma pasta */}
+        {draggingConvId && (
+          <DropZoneNoPasta onDrop={() => handleDrop(null)} />
+        )}
+
         {/* Grupos por data */}
         {groups.length === 0 && folders.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 80 }}>
@@ -584,12 +720,48 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                   folders={folders}
                   onSelect={closeAfter(() => onSelect(conv.id))}
                   onMove={fId => moveConvMutation.mutate({ convId: conv.id, folderId: fId })}
+                  selected={selectedConvIds.has(conv.id)}
+                  selectionMode={selectionMode}
+                  onToggleSelect={() => toggleSelect(conv.id)}
+                  onDragStart={() => setDraggingConvId(conv.id)}
                 />
               ))}
             </div>
           ))
         )}
       </div>
+
+      {/* Barra de seleção múltipla */}
+      {selectionMode && (
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--line2)', background: 'var(--fill)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink)' }}>{selectedConvIds.size} selecionada{selectedConvIds.size > 1 ? 's' : ''}</span>
+            <button onClick={() => setSelectedConvIds(new Set())} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--pen3)', cursor: 'pointer' }}>Limpar</button>
+          </div>
+          {showBulkFolderPicker ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <button onClick={() => { bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId: null }); setShowBulkFolderPicker(false); }}
+                style={{ ...ctxItemStyle, fontSize: 11.5, padding: '5px 8px', color: 'var(--pen2)' }}>
+                Sem pasta
+              </button>
+              {folders.map(f => (
+                <button key={f.id} onClick={() => bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId: f.id })}
+                  style={{ ...ctxItemStyle, fontSize: 11.5, padding: '5px 8px' }}>
+                  {f.name}
+                </button>
+              ))}
+              <button onClick={() => setShowBulkFolderPicker(false)} style={{ ...ctxItemStyle, fontSize: 11, padding: '4px 8px', color: 'var(--pen3)' }}>Cancelar</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowBulkFolderPicker(true)}
+              style={{ width: '100%', padding: '6px 0', borderRadius: 7, border: 'none', background: 'var(--ink)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Mover {selectedConvIds.size} conversa{selectedConvIds.size > 1 ? 's' : ''}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Limite semanal */}
       {usage.hasLimit && !usage.loading && (
