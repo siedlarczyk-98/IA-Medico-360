@@ -5,7 +5,7 @@ import type { OrchestratorMode } from './InputBar';
 const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: string }[] = [
   { icon: 'busca',         key: 'QUICK_SEARCH',       title: 'Busca rápida',            desc: 'Pergunte qualquer coisa — posologia, protocolo, critério diagnóstico. Resposta direta, sem elaboração.' },
   { icon: 'raciocinio',   key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
-  { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Informe dois ou mais medicamentos e veja interações, ajustes de dose e contraindicações.' },
+  { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Interações, bulas, receituário e genéricos — dados oficiais vindos da ANVISA em tempo real.' },
   { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
 ];
 

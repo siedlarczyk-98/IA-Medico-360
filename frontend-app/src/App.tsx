@@ -27,10 +27,13 @@ const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ de
 type AppMode = 'orquestrador' | 'agregador';
 
 const BACKEND_TO_CHIP: Record<string, string> = {
-  QUICK_SEARCH: 'busca',
-  CLINICAL_REASONING: 'raciocinio',
-  PHARMA_CHECK: 'farmaco',
-  PRODUCTIVITY: 'produtividade',
+  QUICK_SEARCH:      'busca',
+  CLINICAL_REASONING:'raciocinio',
+  PHARMA_CHECK:      'farmaco',
+  PHARMA_BULA:       'farmaco',
+  PHARMA_RECEITA:    'farmaco',
+  PHARMA_GENERICO:   'farmaco',
+  PRODUCTIVITY:      'produtividade',
 };
 
 interface PendingClarification {
@@ -178,9 +181,10 @@ function MainApp() {
         }
         if (event.type === 'error') {
           if (event.status === 'unsupported_mode') {
-            // PHARMA_CHECK não suporta streaming — fallback para /query
+            // Modos PharmaDB não suportam streaming — fallback para /query
             const result = await queryOrquestrador({ ...params, folder_id });
-            setMessages(prev => [...prev, { role: 'assistant', content: result.response, mode: result.mode }]);
+            const chipMode = BACKEND_TO_CHIP[result.mode] ?? result.mode;
+            setMessages(prev => [...prev, { role: 'assistant', content: result.response, mode: chipMode }]);
             if (result.conversation_id) {
               setActiveConvId(result.conversation_id);
               pendingFolderIdRef.current = undefined;

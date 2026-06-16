@@ -47,6 +47,9 @@ const STREAMING_LABELS: Record<string, string> = {
   QUICK_SEARCH:       'Buscando em fontes médicas…',
   CLINICAL_REASONING: 'Analisando o caso clínico…',
   PHARMA_CHECK:       'Checando interações…',
+  PHARMA_BULA:        'Consultando bula…',
+  PHARMA_RECEITA:     'Verificando receituário…',
+  PHARMA_GENERICO:    'Buscando genéricos…',
   PRODUCTIVITY:       'Preparando resposta…',
 };
 

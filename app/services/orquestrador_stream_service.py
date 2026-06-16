@@ -46,7 +46,7 @@ from app.services.usage_service import record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE
+from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
 
 logger = logging.getLogger(__name__)
 
@@ -159,15 +159,18 @@ class OrquestradorStreamService:
                 else:
                     enriched_prompt = sanitized_prompt
 
-                # 3. Triage (pulada quando o modo vem explícito do frontend)
-                if mode:
+                # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
+                # resolver o sub-modo correto (bula, receita, genérico, interação),
+                # mas ignora o gate de confiança baixa — o usuário já escolheu o modo.
+                explicit_pharma = (mode == "PHARMA_CHECK")
+                if mode and not explicit_pharma:
                     confidence = 1.0
                 else:
                     triage_result = await triage(sanitized_prompt)
                     mode = triage_result["mode"]
                     confidence = triage_result["confidence"]
 
-                    if confidence < 0.7:
+                    if confidence < 0.7 and not explicit_pharma:
                         yield _sse("error", {
                             "status": "needs_refinement",
                             "message": "Preciso de um pouco mais de aprofundamento. Pode reformular com mais detalhes?",
@@ -175,12 +178,15 @@ class OrquestradorStreamService:
                         return
 
                     if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
-                        mode = "CLINICAL_REASONING"
+                        mode = "CLINICAL_REASONING" if not explicit_pharma else "PHARMA_CHECK"
 
-                if mode == "PHARMA_CHECK":
+                    if mode in PHARMA_MODES and mode != "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE and not explicit_pharma:
+                        mode = "QUICK_SEARCH"
+
+                if mode in PHARMA_MODES:
                     yield _sse("error", {
                         "status": "unsupported_mode",
-                        "message": "Modo Farmácia não suporta streaming. Use /query.",
+                        "message": "Modos PharmaDB não suportam streaming. Use /query.",
                     })
                     return
 

@@ -13,36 +13,60 @@ settings = get_settings()
 TRIAGE_PROMPT = """Você é o sistema de triagem da plataforma Médico 360. Classifique a pergunta do médico em EXATAMENTE uma categoria.
 
 Categorias:
-- QUICK_SEARCH: dúvida direta e objetiva — posologia, CID, conduta rápida, bulas, doses, protocolos simples, efeitos adversos ou contraindicações de um único medicamento isolado
+- QUICK_SEARCH: dúvida direta e objetiva — CID, conduta rápida, doses, protocolos simples, efeitos adversos ou contraindicações gerais de um único medicamento
 - CLINICAL_REASONING: caso clínico, diagnóstico diferencial, quadro atípico, discussão complexa, múltiplos sintomas, análise de exames
-- PHARMA_CHECK: EXCLUSIVAMENTE checagem de interação medicamentosa direta entre DOIS OU MAIS medicamentos explicitamente nomeados na pergunta, OU contraindicação explícita entre dois ou mais fármacos nomeados. OBRIGATÓRIO: a pergunta deve citar dois ou mais nomes de medicamentos sendo COMPARADOS ou COMBINADOS entre si. NÃO use PHARMA_CHECK para: dúvidas sobre um único fármaco, mecanismo de ação, posologia, efeitos adversos isolados ou contraindicações gerais de um medicamento.
+- PHARMA_CHECK: EXCLUSIVAMENTE checagem de interação medicamentosa direta entre DOIS OU MAIS medicamentos explicitamente nomeados. A pergunta deve citar dois ou mais nomes de medicamentos sendo COMPARADOS ou COMBINADOS. NÃO use para dúvida sobre um único fármaco.
+- PHARMA_BULA: pedido de bula, indicações, contraindicações, posologia ou reações adversas de UM medicamento específico nomeado. Exemplos: "bula do Dorflex", "indicações do paracetamol", "o que é contraindicado no Rivotril".
+- PHARMA_RECEITA: dúvida sobre receituário, tipo de receita, retenção, Portaria 344 ou dispensação de UM medicamento nomeado. Exemplos: "Rivotril precisa de receita?", "qual receita para codeína", "posso vender clonazepam sem retenção?".
+- PHARMA_GENERICO: busca de genérico, similar intercambiável ou comparação de preço de UM medicamento nomeado. Exemplos: "tem genérico do Tylenol?", "similar mais barato para Crestor", "intercambiável do Rivotril".
 - PRODUCTIVITY: tarefas não clínicas — gerar email, resumir prontuário, redigir laudo, gestão, finanças, carreira
 
 Retorne APENAS um JSON com dois campos:
-- "mode": a categoria escolhida (uma das 4 acima)
+- "mode": a categoria escolhida (uma das 7 acima)
 - "confidence": número de 0 a 1 indicando sua confiança na classificação
 
-Exemplos — PHARMA_CHECK (correto):
+Exemplos — PHARMA_CHECK:
 - "Posso dar losartana com espironolactona?" → {{"mode": "PHARMA_CHECK", "confidence": 0.97}}
 - "Tem interação entre metformina e glibenclamida?" → {{"mode": "PHARMA_CHECK", "confidence": 0.96}}
-- "Warfarina interage com AAS? É seguro combinar?" → {{"mode": "PHARMA_CHECK", "confidence": 0.96}}
-- "Posso usar amiodarona junto com metoprolol no mesmo paciente?" → {{"mode": "PHARMA_CHECK", "confidence": 0.95}}
+- "Warfarina interage com AAS?" → {{"mode": "PHARMA_CHECK", "confidence": 0.96}}
 
-Exemplos — NÃO é PHARMA_CHECK:
+Exemplos — PHARMA_BULA:
+- "Bula do Dorflex" → {{"mode": "PHARMA_BULA", "confidence": 0.97}}
+- "Quais as indicações do paracetamol?" → {{"mode": "PHARMA_BULA", "confidence": 0.95}}
+- "Posologia do Rivotril" → {{"mode": "PHARMA_BULA", "confidence": 0.95}}
+- "Contraindicações do omeprazol" → {{"mode": "PHARMA_BULA", "confidence": 0.94}}
+
+Exemplos — PHARMA_RECEITA:
+- "Rivotril precisa de receita azul?" → {{"mode": "PHARMA_RECEITA", "confidence": 0.97}}
+- "Qual receita para dispensar codeína?" → {{"mode": "PHARMA_RECEITA", "confidence": 0.96}}
+- "Clonazepam tem retenção de receita?" → {{"mode": "PHARMA_RECEITA", "confidence": 0.95}}
+
+Exemplos — PHARMA_GENERICO:
+- "Tem genérico do Tylenol?" → {{"mode": "PHARMA_GENERICO", "confidence": 0.97}}
+- "Similar mais barato para o Crestor" → {{"mode": "PHARMA_GENERICO", "confidence": 0.96}}
+- "Intercambiável do Rivotril" → {{"mode": "PHARMA_GENERICO", "confidence": 0.95}}
+
+Exemplos — outros:
 - "Quais as contraindicações do metoprolol?" → {{"mode": "QUICK_SEARCH", "confidence": 0.94}}
-- "Efeitos adversos do paracetamol em dose alta?" → {{"mode": "QUICK_SEARCH", "confidence": 0.94}}
-- "Como funciona o mecanismo da varfarina?" → {{"mode": "QUICK_SEARCH", "confidence": 0.93}}
 - "Qual a dose de amoxicilina pra sinusite?" → {{"mode": "QUICK_SEARCH", "confidence": 0.95}}
 - "Paciente 60 anos, diabético, com dor torácica e dispneia. ECG com supra de ST em V1-V4" → {{"mode": "CLINICAL_REASONING", "confidence": 0.98}}
-- "Me ajuda a montar um cronograma de atividades físicas que se encaixe na minha rotina?" → {{"mode": "PRODUCTIVITY", "confidence": 0.90}}
+- "Me ajuda a montar um cronograma de atividades físicas" → {{"mode": "PRODUCTIVITY", "confidence": 0.90}}
 
 Pergunta: {prompt}"""
 
-VALID_MODES = {"QUICK_SEARCH", "CLINICAL_REASONING", "PHARMA_CHECK", "PRODUCTIVITY"}
+VALID_MODES = {
+    "QUICK_SEARCH",
+    "CLINICAL_REASONING",
+    "PHARMA_CHECK",
+    "PHARMA_BULA",
+    "PHARMA_RECEITA",
+    "PHARMA_GENERICO",
+    "PRODUCTIVITY",
+}
+
+PHARMA_MODES = {"PHARMA_CHECK", "PHARMA_BULA", "PHARMA_RECEITA", "PHARMA_GENERICO"}
 
 # Threshold mínimo de confiança para acionar o PharmaDB.
-# Perguntas classificadas como PHARMA_CHECK abaixo deste valor são rebaixadas
-# para CLINICAL_REASONING para evitar acionamentos incorretos do serviço externo.
 PHARMA_CHECK_MIN_CONFIDENCE = 0.90
 
 

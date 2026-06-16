@@ -40,7 +40,7 @@ from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE
+from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,9 @@ MODE_MODEL_MAP = {
     "QUICK_SEARCH": "sonar-pro",
     "CLINICAL_REASONING": "claude-sonnet-4-6",
     "PHARMA_CHECK": None,
+    "PHARMA_BULA": None,
+    "PHARMA_RECEITA": None,
+    "PHARMA_GENERICO": None,
     "PRODUCTIVITY": "gpt-5.4-nano",
 }
 
@@ -108,15 +111,19 @@ class OrquestradorService:
             else:
                 enriched_prompt = sanitized_prompt
 
-            # 3. Triagem (pulada quando o modo vem explícito do frontend)
-            if mode:
+            # 3. Triagem
+            # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage
+            # para descobrir o sub-modo correto (bula, receita, genérico, interação),
+            # mas ignoramos o gate de confiança baixa — o usuário já escolheu o modo.
+            explicit_pharma = (mode == "PHARMA_CHECK")
+            if mode and not explicit_pharma:
                 confidence = 1.0
             else:
                 triage_result = await triage(sanitized_prompt)
                 mode = triage_result["mode"]
                 confidence = triage_result["confidence"]
 
-                if confidence < 0.7:
+                if confidence < 0.7 and not explicit_pharma:
                     return {
                         "status": "needs_refinement",
                         "mode": mode,
@@ -126,7 +133,10 @@ class OrquestradorService:
                     }
 
                 if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
-                    mode = "CLINICAL_REASONING"
+                    mode = "CLINICAL_REASONING" if not explicit_pharma else "PHARMA_CHECK"
+
+                if mode in PHARMA_MODES and mode != "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE and not explicit_pharma:
+                    mode = "QUICK_SEARCH"
 
             # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
             if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
@@ -190,6 +200,12 @@ class OrquestradorService:
             # 5. Roteamento pro agente
             if mode == "PHARMA_CHECK":
                 agent_response = await self._handle_pharma_check(enriched_prompt, interaction.id)
+            elif mode == "PHARMA_BULA":
+                agent_response = await self._handle_pharma_bula(enriched_prompt)
+            elif mode == "PHARMA_RECEITA":
+                agent_response = await self._handle_pharma_receita(enriched_prompt)
+            elif mode == "PHARMA_GENERICO":
+                agent_response = await self._handle_pharma_generico(enriched_prompt)
             else:
                 agent_response = await self._handle_ai_agent(mode, enriched_prompt)
 
@@ -435,7 +451,8 @@ class OrquestradorService:
         pharmadb = get_pharmadb_service()
 
         meds = await extract_medications(prompt)
-        nomes = [m.get("normalized") or m.get("raw", "") for m in meds]
+        # Usa normalized (genérico) para busca de PA
+        nomes = [m.get("normalized") or m.get("raw", "") for m in meds if m.get("normalized") or m.get("raw")]
 
         if len(nomes) < 2:
             return {
@@ -466,13 +483,131 @@ class OrquestradorService:
                 source_api="pharmadb",
             ))
 
-        texto = pharmadb.formatar_resposta_texto(resultado)
+        texto = pharmadb.formatar_interacoes(resultado)
 
         return {
             "text": texto,
             "model_id": "pharmadb",
             "is_fallback": False,
         }
+
+    async def _extrair_nome_medicamento(self, prompt: str) -> tuple[str | None, str | None]:
+        """Retorna (raw, normalized) do primeiro medicamento extraído do prompt."""
+        from app.services.medication_extractor import extract_medications
+        meds = await extract_medications(prompt)
+        if not meds:
+            return None, None
+        return meds[0].get("raw") or "", meds[0].get("normalized") or ""
+
+    async def _buscar_com_fallback(self, buscar_fn, raw: str, normalized: str):
+        """Tenta buscar pelo raw; se não achar, tenta pelo normalized."""
+        resultado = await buscar_fn(raw)
+        if resultado is None and normalized and normalized.lower() != raw.lower():
+            resultado = await buscar_fn(normalized)
+        return resultado
+
+    # ── PHARMA_BULA ───────────────────────────────────────────
+
+    async def _handle_pharma_bula(self, prompt: str) -> dict:
+        from app.services.pharmadb_service import get_pharmadb_service
+
+        pharmadb = get_pharmadb_service()
+
+        raw, normalized = await self._extrair_nome_medicamento(prompt)
+        if not raw and not normalized:
+            return {
+                "text": "⚠️ Não identifiquei o nome do medicamento na sua pergunta. Por favor, informe o nome do produto.",
+                "model_id": "pharmadb",
+                "is_fallback": False,
+            }
+
+        try:
+            bula = await self._buscar_com_fallback(pharmadb.buscar_bula, raw, normalized)
+        except Exception as e:
+            logger.warning(f"PharmaDB bula indisponível: {e}")
+            return await self._pharma_fallback(prompt)
+
+        if not bula:
+            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "bula")
+            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
+
+        return {
+            "text": await pharmadb.formatar_bula(bula),
+            "model_id": "pharmadb",
+            "is_fallback": False,
+        }
+
+    # ── PHARMA_RECEITA ────────────────────────────────────────
+
+    async def _handle_pharma_receita(self, prompt: str) -> dict:
+        from app.services.pharmadb_service import get_pharmadb_service
+
+        pharmadb = get_pharmadb_service()
+
+        raw, normalized = await self._extrair_nome_medicamento(prompt)
+        if not raw and not normalized:
+            return {
+                "text": "⚠️ Não identifiquei o nome do medicamento na sua pergunta. Por favor, informe o nome do produto.",
+                "model_id": "pharmadb",
+                "is_fallback": False,
+            }
+
+        try:
+            receita = await self._buscar_com_fallback(pharmadb.buscar_receita, raw, normalized)
+        except Exception as e:
+            logger.warning(f"PharmaDB receita indisponível: {e}")
+            return await self._pharma_fallback(prompt)
+
+        if not receita:
+            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "receituário")
+            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
+
+        return {
+            "text": pharmadb.formatar_receita(receita),
+            "model_id": "pharmadb",
+            "is_fallback": False,
+        }
+
+    # ── PHARMA_GENERICO ───────────────────────────────────────
+
+    async def _handle_pharma_generico(self, prompt: str) -> dict:
+        from app.services.pharmadb_service import get_pharmadb_service
+
+        pharmadb = get_pharmadb_service()
+
+        raw, normalized = await self._extrair_nome_medicamento(prompt)
+        if not raw and not normalized:
+            return {
+                "text": "⚠️ Não identifiquei o nome do medicamento na sua pergunta. Por favor, informe o nome do produto.",
+                "model_id": "pharmadb",
+                "is_fallback": False,
+            }
+
+        try:
+            genericos = await self._buscar_com_fallback(pharmadb.buscar_genericos, raw, normalized)
+        except Exception as e:
+            logger.warning(f"PharmaDB genéricos indisponível: {e}")
+            return await self._pharma_fallback(prompt)
+
+        if not genericos:
+            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "genéricos")
+            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
+
+        return {
+            "text": pharmadb.formatar_genericos(genericos),
+            "model_id": "pharmadb",
+            "is_fallback": False,
+        }
+
+    async def _pharma_fallback(self, prompt: str) -> dict:
+        aviso = (
+            "⚠️ *A base PharmaDB está temporariamente indisponível.* "
+            "Segue análise com base no conhecimento do modelo:\n\n"
+        )
+        fallback = await self._handle_ai_agent("QUICK_SEARCH", prompt)
+        fallback["text"] = aviso + fallback.get("text", "")
+        fallback["is_fallback"] = True
+        return fallback
 
     # ── Clarification ─────────────────────────────────────────
 

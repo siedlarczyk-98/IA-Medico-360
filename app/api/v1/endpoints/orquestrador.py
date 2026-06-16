@@ -41,7 +41,7 @@ class OrquestradorRequest(BaseModel):
     )
     mode: str | None = Field(
         default=None,
-        description="Modo explícito selecionado pelo usuário (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PRODUCTIVITY). Se informado, pula a triagem automática.",
+        description="Modo explícito (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PHARMA_BULA, PHARMA_RECEITA, PHARMA_GENERICO, PRODUCTIVITY). Se informado, pula a triagem automática.",
     )
     history: list[ConversationMessage] = Field(
         default_factory=list,
@@ -66,7 +66,10 @@ async def orquestrador_query(
     Faz triagem automática da pergunta e roteia pro agente especializado:
     - QUICK_SEARCH → Perplexity (respostas rápidas com fontes)
     - CLINICAL_REASONING → Claude Sonnet (raciocínio clínico avançado)
-    - PHARMA_CHECK → PharmaDB (interações medicamentosas)
+    - PHARMA_CHECK → PharmaDB (interações medicamentosas entre 2+ fármacos)
+    - PHARMA_BULA → PharmaDB (bula completa de um medicamento)
+    - PHARMA_RECEITA → PharmaDB (receituário e dispensação — Portaria 344)
+    - PHARMA_GENERICO → PharmaDB (genéricos e similares intercambiáveis)
     - PRODUCTIVITY → GPT-5.4 Nano (tarefas não clínicas)
     """
     await check_limit(db, user)
