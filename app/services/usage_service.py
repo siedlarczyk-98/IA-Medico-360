@@ -5,10 +5,35 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import User, UserWeeklyUsage
+from app.models.models import AuditLog, User, UserWeeklyUsage
 
 BETA_WEEKLY_LIMIT = Decimal("1.00")
 BETA_ROLE = "beta_user"
+
+
+def add_interaction_audit(
+    db: AsyncSession,
+    *,
+    user_id,
+    interaction_id,
+    action: str,
+    metadata: dict,
+) -> AuditLog:
+    """
+    Cria e enfileira um AuditLog padronizado para uma interação.
+    Centraliza o wrapper repetido em Orquestrador e Agregador — o conteúdo
+    de `metadata` continua específico de cada fluxo.
+    """
+    audit = AuditLog(
+        user_id=user_id,
+        interaction_id=interaction_id,
+        action=action,
+        entity_type="interaction",
+        entity_id=interaction_id,
+        metadata_=metadata,
+    )
+    db.add(audit)
+    return audit
 
 
 async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:

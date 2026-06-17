@@ -4,6 +4,7 @@ Pipeline: Triagem → Roteamento → Agente Especializado → Resposta.
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,6 @@ from app.core.prompts import (
 )
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
-    AuditLog,
     Conversation,
     Interaction,
     InteractionMedication,
@@ -40,6 +40,7 @@ from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
+from app.services.usage_service import add_interaction_audit
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,14 @@ MODE_MODEL_MAP = {
     "PHARMA_RECEITA": None,
     "PHARMA_GENERICO": None,
     "PRODUCTIVITY": "gpt-5.4-nano",
+}
+
+# Configuração por modo PharmaDB: (método de busca, método de formatação, rótulo).
+# Os três fluxos compartilham a mesma lógica — só mudam essas três peças.
+PHARMA_MODE_CONFIG = {
+    "PHARMA_BULA": ("buscar_bula", "formatar_bula", "bula"),
+    "PHARMA_RECEITA": ("buscar_receita", "formatar_receita", "receituário"),
+    "PHARMA_GENERICO": ("buscar_genericos", "formatar_genericos", "genéricos"),
 }
 
 # temperature=0 para modos clínicos garante respostas consistentes e reproduzíveis
@@ -199,12 +208,8 @@ class OrquestradorService:
             # 5. Roteamento pro agente
             if mode == "PHARMA_CHECK":
                 agent_response = await self._handle_pharma_check(enriched_prompt, interaction.id)
-            elif mode == "PHARMA_BULA":
-                agent_response = await self._handle_pharma_bula(enriched_prompt)
-            elif mode == "PHARMA_RECEITA":
-                agent_response = await self._handle_pharma_receita(enriched_prompt)
-            elif mode == "PHARMA_GENERICO":
-                agent_response = await self._handle_pharma_generico(enriched_prompt)
+            elif mode in PHARMA_MODE_CONFIG:
+                agent_response = await self._handle_pharma(enriched_prompt, mode)
             else:
                 agent_response = await self._handle_ai_agent(mode, enriched_prompt)
 
@@ -283,13 +288,12 @@ class OrquestradorService:
                 ))
 
             # 11. Audit log
-            audit = AuditLog(
+            add_interaction_audit(
+                self.db,
                 user_id=self.user_id,
                 interaction_id=interaction.id,
                 action="orquestrador_query",
-                entity_type="interaction",
-                entity_id=interaction.id,
-                metadata_={
+                metadata={
                     "mode": mode,
                     "triage_confidence": confidence,
                     "model_used": agent_response.get("model_id", "pharmadb"),
@@ -308,7 +312,6 @@ class OrquestradorService:
                     "pubmed_newer_found": len(pubmed.newer_guidelines_found),
                 },
             )
-            self.db.add(audit)
             await self.db.flush()
 
             return_dict = {
@@ -504,12 +507,17 @@ class OrquestradorService:
             resultado = await buscar_fn(normalized)
         return resultado
 
-    # ── PHARMA_BULA ───────────────────────────────────────────
+    # ── PHARMA_BULA / RECEITA / GENERICO ──────────────────────
 
-    async def _handle_pharma_bula(self, prompt: str) -> dict:
+    async def _handle_pharma(self, prompt: str, mode: str) -> dict:
+        """
+        Fluxo único para os modos PharmaDB baseados em medicamento
+        (bula/receita/genérico). As diferenças por modo vêm de PHARMA_MODE_CONFIG.
+        """
         from app.services.pharmadb_service import get_pharmadb_service
 
         pharmadb = get_pharmadb_service()
+        buscar_attr, formatar_attr, label = PHARMA_MODE_CONFIG[mode]
 
         raw, normalized = await self._extrair_nome_medicamento(prompt)
         if not raw and not normalized:
@@ -520,82 +528,23 @@ class OrquestradorService:
             }
 
         try:
-            bula = await self._buscar_com_fallback(pharmadb.buscar_bula, raw, normalized)
+            resultado = await self._buscar_com_fallback(
+                getattr(pharmadb, buscar_attr), raw, normalized
+            )
         except Exception as e:
-            logger.warning(f"PharmaDB bula indisponível: {e}")
+            logger.warning("PharmaDB %s indisponível: %s", label, e)
             return await self._pharma_fallback(prompt)
 
-        if not bula:
-            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "bula")
+        if not resultado:
+            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, label)
             return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
 
-        return {
-            "text": await pharmadb.formatar_bula(bula),
-            "model_id": "pharmadb",
-            "is_fallback": False,
-        }
+        # formatar_bula é async; formatar_receita/genericos são síncronos.
+        formatado = getattr(pharmadb, formatar_attr)(resultado)
+        if inspect.isawaitable(formatado):
+            formatado = await formatado
 
-    # ── PHARMA_RECEITA ────────────────────────────────────────
-
-    async def _handle_pharma_receita(self, prompt: str) -> dict:
-        from app.services.pharmadb_service import get_pharmadb_service
-
-        pharmadb = get_pharmadb_service()
-
-        raw, normalized = await self._extrair_nome_medicamento(prompt)
-        if not raw and not normalized:
-            return {
-                "text": "⚠️ Não identifiquei o nome do medicamento na sua pergunta. Por favor, informe o nome do produto.",
-                "model_id": "pharmadb",
-                "is_fallback": False,
-            }
-
-        try:
-            receita = await self._buscar_com_fallback(pharmadb.buscar_receita, raw, normalized)
-        except Exception as e:
-            logger.warning(f"PharmaDB receita indisponível: {e}")
-            return await self._pharma_fallback(prompt)
-
-        if not receita:
-            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "receituário")
-            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
-
-        return {
-            "text": pharmadb.formatar_receita(receita),
-            "model_id": "pharmadb",
-            "is_fallback": False,
-        }
-
-    # ── PHARMA_GENERICO ───────────────────────────────────────
-
-    async def _handle_pharma_generico(self, prompt: str) -> dict:
-        from app.services.pharmadb_service import get_pharmadb_service
-
-        pharmadb = get_pharmadb_service()
-
-        raw, normalized = await self._extrair_nome_medicamento(prompt)
-        if not raw and not normalized:
-            return {
-                "text": "⚠️ Não identifiquei o nome do medicamento na sua pergunta. Por favor, informe o nome do produto.",
-                "model_id": "pharmadb",
-                "is_fallback": False,
-            }
-
-        try:
-            genericos = await self._buscar_com_fallback(pharmadb.buscar_genericos, raw, normalized)
-        except Exception as e:
-            logger.warning(f"PharmaDB genéricos indisponível: {e}")
-            return await self._pharma_fallback(prompt)
-
-        if not genericos:
-            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, "genéricos")
-            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
-
-        return {
-            "text": pharmadb.formatar_genericos(genericos),
-            "model_id": "pharmadb",
-            "is_fallback": False,
-        }
+        return {"text": formatado, "model_id": "pharmadb", "is_fallback": False}
 
     async def _pharma_fallback(self, prompt: str) -> dict:
         aviso = (

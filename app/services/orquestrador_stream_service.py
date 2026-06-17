@@ -31,7 +31,6 @@ from app.core.prompts import (
 from app.schemas.agregador import ConversationMessage
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
-    AuditLog,
     Conversation,
     Interaction,
     InteractionMedication,
@@ -42,7 +41,7 @@ from app.models.models import (
 from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost, get_model_pricing
-from app.services.usage_service import record_cost
+from app.services.usage_service import add_interaction_audit, record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
@@ -359,13 +358,12 @@ class OrquestradorStreamService:
                         relevance_score=0.0,
                     ))
 
-                audit = AuditLog(
+                add_interaction_audit(
+                    db,
                     user_id=self.user_id,
                     interaction_id=interaction.id,
                     action="orquestrador_stream",
-                    entity_type="interaction",
-                    entity_id=interaction.id,
-                    metadata_={
+                    metadata={
                         "mode": mode,
                         "triage_confidence": confidence,
                         "model_used": model_id,
@@ -384,7 +382,6 @@ class OrquestradorStreamService:
                         "pubmed_newer_found": len(pubmed.newer_guidelines_found),
                     },
                 )
-                db.add(audit)
 
                 # Store no cache
                 if (

@@ -1,6 +1,5 @@
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-// moveConversation is still used by Sidebar; not needed here after folder_id in request
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';

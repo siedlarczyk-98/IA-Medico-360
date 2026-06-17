@@ -140,47 +140,36 @@ class PharmaDBService:
 
     # ── HTTP helpers ─────────────────────────────────────────────────────────
 
-    async def _get(self, path: str, params: dict | None = None) -> dict:
-        token = await self._get_token()
+    async def _request(self, method: str, path: str, **kwargs) -> dict:
+        """
+        Executa uma requisição autenticada. Renova o token automaticamente
+        e refaz a chamada uma vez em caso de 401 (token expirado server-side).
+        """
         client = get_client()
-        resp = await client.get(
-            f"{BASE_URL}{path}",
-            headers={"Authorization": f"Bearer {token}"},
-            params=params,
-            timeout=15,
-        )
+        url = f"{BASE_URL}{path}"
+        extra_headers = kwargs.pop("headers", {})
+
+        async def _call() -> "httpx.Response":
+            token = await self._get_token()
+            headers = {"Authorization": f"Bearer {token}", **extra_headers}
+            return await client.request(method, url, headers=headers, timeout=15, **kwargs)
+
+        resp = await _call()
         if resp.status_code == 401:
             self._jwt_token = None
-            token = await self._get_token()
-            resp = await client.get(
-                f"{BASE_URL}{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-                timeout=15,
-            )
+            resp = await _call()
         resp.raise_for_status()
         return resp.json()
 
+    async def _get(self, path: str, params: dict | None = None) -> dict:
+        return await self._request("GET", path, params=params)
+
     async def _post(self, path: str, body: dict) -> dict:
-        token = await self._get_token()
-        client = get_client()
-        resp = await client.post(
-            f"{BASE_URL}{path}",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        return await self._request(
+            "POST", path,
+            headers={"Content-Type": "application/json"},
             json=body,
-            timeout=15,
         )
-        if resp.status_code == 401:
-            self._jwt_token = None
-            token = await self._get_token()
-            resp = await client.post(
-                f"{BASE_URL}{path}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=body,
-                timeout=15,
-            )
-        resp.raise_for_status()
-        return resp.json()
 
     # ── Princípios Ativos ─────────────────────────────────────────────────────
 

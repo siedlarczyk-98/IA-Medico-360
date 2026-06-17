@@ -7,7 +7,6 @@ Chamadas concorrentes a múltiplos providers com auditoria completa.
 import asyncio
 import logging
 import time
-import traceback
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -21,7 +20,6 @@ from app.services.pubmed_service import validate_with_pubmed
 from app.schemas.agregador import PubmedValidationResult, VerifiedCitationOut, PubMedArticleOut
 from app.middleware.dlp import sanitize_prompt
 from app.models.models import (
-    AuditLog,
     Conversation,
     Interaction,
     InteractionMedication,
@@ -36,7 +34,7 @@ from app.schemas.agregador import (
 from app.services.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost, get_model_pricing
-from app.services.usage_service import record_cost
+from app.services.usage_service import add_interaction_audit, record_cost
 from app.services.specialty_detector import detect_specialty_and_topic
 
 logger = logging.getLogger(__name__)
@@ -233,13 +231,12 @@ class AgregadorService:
                     source=med["source"],
                 ))
 
-            audit = AuditLog(
+            add_interaction_audit(
+                self.db,
                 user_id=self.user_id,
                 interaction_id=interaction.id,
                 action="agregador_query",
-                entity_type="interaction",
-                entity_id=interaction.id,
-                metadata_={
+                metadata={
                     "models": request.models,
                     "prompt_length": len(request.prompt),
                     "response_count": len(response_models),
@@ -252,7 +249,6 @@ class AgregadorService:
                     "pubmed_validated": list(pubmed_by_model.keys()),
                 },
             )
-            self.db.add(audit)
             await self.db.flush()
         except Exception as e:
             logger.warning(f"Enriquecimento pós-query falhou (interação já salva): {e}")
@@ -403,13 +399,12 @@ class AgregadorService:
                     source=med["source"],
                 ))
 
-            audit = AuditLog(
+            add_interaction_audit(
+                self.db,
                 user_id=self.user_id,
                 interaction_id=interaction.id,
                 action="agregador_stream",
-                entity_type="interaction",
-                entity_id=interaction.id,
-                metadata_={
+                metadata={
                     "models": list(collected.keys()),
                     "prompt_length": len(sanitized_prompt),
                     "response_count": len([d for d in collected.values() if not d.get("error")]),
@@ -417,7 +412,6 @@ class AgregadorService:
                     "pubmed_validated": list(pubmed_by_model.keys()),
                 },
             )
-            self.db.add(audit)
             await self.db.flush()
         except Exception as e:
             logger.warning(f"Enriquecimento pós-stream falhou (interação já salva): {e}")

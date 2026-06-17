@@ -20,9 +20,10 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 # TTLs (segundos)
-TTL_TRIAGE = 7200       # 2h
-TTL_SPECIALTY = 3600    # 1h
-TTL_PUBMED = 2592000    # 30 dias
+TTL_TRIAGE = 7200        # 2h
+TTL_SPECIALTY = 3600     # 1h
+TTL_MEDICATION = 86400   # 24h
+TTL_PUBMED = 2592000     # 30 dias
 
 _redis: redis.Redis | None = None
 
