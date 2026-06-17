@@ -483,7 +483,7 @@ class PerplexityProvider(BaseProvider):
             citations=citations,
         )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para
         # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
         response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature)
