@@ -29,7 +29,10 @@ export function useCurrentUser() {
     : null;
 
   return {
+    id: user.id,
     name: user.name,
+    email: user.email,
+    intercomUserHash: user.intercom_user_hash ?? null,
     firstName,
     crmLabel,
     initial,

@@ -135,3 +135,5 @@ class UserResponse(BaseModel):
     role: str
     med_status: str | None
     onboarding_complete: bool
+    # HMAC para o Messenger Security do Intercom (gerado sob demanda, não persistido)
+    intercom_user_hash: str | None = None

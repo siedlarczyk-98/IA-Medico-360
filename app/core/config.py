@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # --- Embed SSO ---
     embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
 
+    # --- Intercom (Identity Verification / Messenger Security) ---
+    # Secret do Web SDK; usado para gerar o user_hash (HMAC) do Messenger.
+    intercom_identity_secret: str = ""
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 

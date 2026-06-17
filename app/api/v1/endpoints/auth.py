@@ -158,7 +158,9 @@ async def complete_onboarding(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    resp = UserResponse.model_validate(current_user)
+    resp.intercom_user_hash = auth_service.intercom_user_hash(current_user)
+    return resp
 
 
 @router.patch("/me", response_model=TokenResponse)

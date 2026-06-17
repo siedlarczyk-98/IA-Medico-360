@@ -18,6 +18,7 @@ export interface UserResponse {
   role: string;
   med_status: string | null;
   onboarding_complete: boolean;
+  intercom_user_hash?: string | null;
 }
 
 export interface OnboardingData {

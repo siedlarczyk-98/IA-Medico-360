@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +16,23 @@ from app.services import email_service
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def intercom_user_hash(user: "User") -> str | None:
+    """
+    Gera o user_hash (HMAC-SHA256 do user.id) exigido pelo Messenger Security
+    do Intercom. Retorna None se o secret não estiver configurado.
+    O identificador usado (user.id) deve ser o mesmo enviado como user_id no boot.
+    """
+    settings = get_settings()
+    secret = settings.intercom_identity_secret
+    if not secret:
+        return None
+    return hmac.new(
+        secret.encode("utf-8"),
+        str(user.id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def create_access_token(user: "User") -> str:
