@@ -9,7 +9,7 @@ import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import { ModelSelector } from './components/ModelSelector';
 import { EmptyStateAgregador } from './components/EmptyStateAgregador';
-import type { Effort, OrchestratorMode } from './components/InputBar';
+import type { Effort, OrchestratorMode, Attachment } from './components/InputBar';
 import { streamQuery, queryOrquestrador, type Message } from './api/orquestrador';
 import { streamAgregador } from './api/agregador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
@@ -62,12 +62,22 @@ function MainApp() {
   const [usageTick, setUsageTick] = useState(0);
   const pendingFolderIdRef = useRef<string | undefined>(undefined);
   const pendingFolderNameRef = useRef<string | undefined>(undefined);
+  const [currentAttachment, setCurrentAttachment] = useState<Attachment | null>(null);
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
   const [webSearch, setWebSearch] = useState<Record<string, boolean>>({});
 
   function handleWebSearchChange(modelId: string, enabled: boolean) {
     setWebSearch(prev => ({ ...prev, [modelId]: enabled }));
+  }
+
+  const activeModelId = selectedModels[0];
+  const isPerplexitySelected = !!activeModelId && activeModelId.includes('sonar');
+  const showWebSearch = mode === 'agregador' && !!activeModelId && !isPerplexitySelected;
+  const activeModelWebSearch = activeModelId ? (webSearch[activeModelId] ?? false) : false;
+
+  function handleWebSearchToggle() {
+    if (activeModelId) handleWebSearchChange(activeModelId, !webSearch[activeModelId]);
   }
   // Tracks the index of the assistant message being streamed, so we can remove it if the stream is aborted mid-way
   const streamMsgIndexRef = useRef<number>(-1);
@@ -100,7 +110,7 @@ function MainApp() {
     [messages]
   );
 
-  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[] }) => {
+  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[]; file_id?: string }) => {
     abortRef.current?.abort();
     cancelFlush();
 
@@ -133,7 +143,7 @@ function MainApp() {
     const folder_id = pendingFolderIdRef.current;
 
     try {
-      for await (const event of streamQuery({ ...params, history, folder_id }, ctrl.signal)) {
+      for await (const event of streamQuery({ ...params, history, folder_id, file_id: params.file_id }, ctrl.signal)) {
         if (event.type === 'clarification') {
           const formatted = event.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
           setMessages(prev => [...prev, {
@@ -212,7 +222,7 @@ function MainApp() {
     }
   }, [cancelFlush, scheduleFlush]);
 
-  const runAgregador = useCallback(async (prompt: string, priorMessages: Message[], effort: Effort = 'detalhado') => {
+  const runAgregador = useCallback(async (prompt: string, priorMessages: Message[], effort: Effort = 'detalhado', file_id?: string) => {
     if (selectedModels.length === 0) return;
     abortRef.current?.abort();
     cancelFlush();
@@ -244,7 +254,7 @@ function MainApp() {
 
     try {
       const history = priorMessages.map(m => ({ role: m.role, content: m.content }));
-      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream, webSearch)) {
+      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream, webSearch, file_id)) {
         if (event.type === 'delta') {
           const mid = event.model_id;
           buffers[mid] = (buffers[mid] ?? '') + event.delta;
@@ -300,14 +310,14 @@ function MainApp() {
     }
   }, [selectedModels, activeConvId, cancelFlush, scheduleFlush]);
 
-  const sendMessage = useCallback((text: string, effort: Effort = 'detalhado') => {
+  const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachment?: Attachment) => {
     const priorMessages = messagesRef.current;
     if (mode === 'orquestrador') {
-      runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages });
+      runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages, file_id: attachment?.fileId });
     } else {
-      runAgregador(text, priorMessages, effort);
+      runAgregador(text, priorMessages, effort, attachment?.fileId);
     }
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    setMessages(prev => [...prev, { role: 'user', content: text, attachmentName: attachment?.name }]);
     setScrollTrigger(n => n + 1);
   }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador]);
 
@@ -382,21 +392,25 @@ function MainApp() {
         )}
 
         {mode === 'agregador' && messages.length > 0 && (
-          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
+          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked hasImageAttached={currentAttachment?.fileType === 'image'} />
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {messages.length === 0 && !streaming ? (
             mode === 'agregador' ? (
               <>
-                <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
+                <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} hasImageAttached={currentAttachment?.fileType === 'image'} />
                 <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked}
-                  placeholder={agregadorBlocked ? 'Selecione um modelo acima para começar.' : undefined} />
+                  placeholder={agregadorBlocked ? 'Selecione um modelo acima para começar.' : undefined}
+                  onAttachmentChange={setCurrentAttachment}
+                  webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
+                  onWebSearchToggle={showWebSearch ? handleWebSearchToggle : undefined} />
               </>
             ) : (
               <>
                 <EmptyState userName={currentUser?.firstName} onModeSelect={setSelectedMode} selectedMode={selectedMode} />
-                <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
+                <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode}
+                  onAttachmentChange={setCurrentAttachment} />
               </>
             )
           ) : (
@@ -404,7 +418,10 @@ function MainApp() {
               <ChatView messages={messages} streaming={streaming} streamingMode={mode === 'orquestrador' ? selectedMode : undefined} scrollToBottomTrigger={scrollTrigger} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
-                : <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined} />
+                : <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined}
+                    onAttachmentChange={setCurrentAttachment}
+                    webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
+                    onWebSearchToggle={showWebSearch ? handleWebSearchToggle : undefined} />
               }
             </>
           )}

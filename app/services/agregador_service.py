@@ -40,6 +40,15 @@ from app.services.specialty_detector import detect_specialty_and_topic
 logger = logging.getLogger(__name__)
 
 
+def _make_title(prompt: str) -> str:
+    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
+    if prompt.startswith('[Imagem:'):
+        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
+    elif '---\n\n' in prompt:
+        prompt = prompt.split('---\n\n', 1)[1]
+    return prompt[:100] + ('...' if len(prompt) > 100 else '')
+
+
 class AgregadorService:
     """Serviço principal do Agregador de IA."""
 
@@ -472,7 +481,7 @@ class AgregadorService:
             if conv:
                 return conv.id
 
-        title = sanitized_prompt[:100] + ("..." if len(sanitized_prompt) > 100 else "")
+        title = _make_title(sanitized_prompt)
         conv = Conversation(
             user_id=self.user_id,
             title=title,

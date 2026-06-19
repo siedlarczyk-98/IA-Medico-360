@@ -22,6 +22,7 @@ export interface Message {
   confidence?: number;
   citations?: string[];
   pubmed_validation?: PubmedValidation;
+  attachmentName?: string;
 }
 
 // Eventos tipados que o stream pode emitir
@@ -42,6 +43,7 @@ export interface StreamParams {
   mode?: string;
   history?: { role: 'user' | 'assistant'; content: string }[];
   folder_id?: string;
+  file_id?: string;
 }
 
 export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
@@ -57,6 +59,7 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.mode                  ? { mode: params.mode }                                 : {}),
       history: params.history ?? [],
       ...(params.folder_id             ? { folder_id: params.folder_id }                       : {}),
+      ...(params.file_id               ? { file_id: params.file_id }                           : {}),
     }),
   });
   if (!res.ok) {
@@ -87,6 +90,7 @@ export async function* streamQuery(
       ...(params.mode                ? { mode: params.mode }                               : {}),
       history: params.history ?? [],
       ...(params.folder_id           ? { folder_id: params.folder_id }                     : {}),
+      ...(params.file_id             ? { file_id: params.file_id }                         : {}),
     }),
     signal,
   });

@@ -76,7 +76,7 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
       <div style={{ width: 720, maxWidth: '100%', paddingBottom: 16 }}>
         {messages.map((msg, i) => (
           msg.role === 'user'
-            ? <UserMessage key={i} content={msg.content} />
+            ? <UserMessage key={i} content={msg.content} attachmentName={msg.attachmentName} />
             : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} />
         ))}
         {streaming && <ThinkingIndicator mode={streamingMode} />}
@@ -86,14 +86,28 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
   );
 }
 
-const UserMessage = memo(function UserMessage({ content }: { content: string }) {
+const UserMessage = memo(function UserMessage({ content, attachmentName }: { content: string; attachmentName?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
-      <div style={{
-        maxWidth: 480, background: 'var(--ink)', color: '#fff',
-        padding: '11px 14px', borderRadius: 14, borderBottomRightRadius: 4,
-        fontSize: 13, lineHeight: 1.5,
-      }}>{content}</div>
+      <div style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+        {attachmentName && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '3px 9px', borderRadius: 8,
+            background: 'var(--fill2)', border: '1px solid var(--line2)',
+            fontSize: 11, color: 'var(--pen2)',
+          }}>
+            📎 <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachmentName}</span>
+          </div>
+        )}
+        {content && (
+          <div style={{
+            background: 'var(--ink)', color: '#fff',
+            padding: '11px 14px', borderRadius: 14, borderBottomRightRadius: 4,
+            fontSize: 13, lineHeight: 1.5,
+          }}>{content}</div>
+        )}
+      </div>
     </div>
   );
 });

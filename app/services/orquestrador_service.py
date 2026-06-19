@@ -44,6 +44,15 @@ from app.services.usage_service import add_interaction_audit
 
 logger = logging.getLogger(__name__)
 
+
+def _make_title(prompt: str) -> str:
+    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
+    if prompt.startswith('[Imagem:'):
+        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
+    elif '---\n\n' in prompt:
+        prompt = prompt.split('---\n\n', 1)[1]
+    return prompt[:100] + ('...' if len(prompt) > 100 else '')
+
 MODE_MODEL_MAP = {
     "QUICK_SEARCH": "sonar-pro",
     "CLINICAL_REASONING": "claude-sonnet-4-6",
@@ -96,6 +105,7 @@ class OrquestradorService:
         mode: str | None = None,
         history: list[ConversationMessage] | None = None,
         folder_id: UUID | None = None,
+        image_content: dict | None = None,
     ) -> dict:
         try:
             start_time = time.monotonic()
@@ -211,7 +221,7 @@ class OrquestradorService:
             elif mode in PHARMA_MODE_CONFIG:
                 agent_response = await self._handle_pharma(enriched_prompt, mode)
             else:
-                agent_response = await self._handle_ai_agent(mode, enriched_prompt)
+                agent_response = await self._handle_ai_agent(mode, enriched_prompt, image_content=image_content)
 
             # 6. Salvar resposta
             cost = Decimal("0")
@@ -371,7 +381,7 @@ class OrquestradorService:
 
 # ── Agente de IA ─────────────────────────────────────────
 
-    async def _handle_ai_agent(self, mode: str, prompt: str) -> dict:
+    async def _handle_ai_agent(self, mode: str, prompt: str, image_content: dict | None = None) -> dict:
         model_id = MODE_MODEL_MAP[mode]
         system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
 
@@ -387,11 +397,11 @@ class OrquestradorService:
             return {"text": f"Modelo {model_id} não disponível.", "error": "model_not_found"}
 
         provider = get_provider_by_type(model_info.provider_type)
-        temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)  # ← fora do try, não precisa estar dentro
+        temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
 
         try:
             response = await provider.complete(
-                model_id, prompt, system_prompt=system_prompt, temperature=temperature
+                model_id, prompt, system_prompt=system_prompt, temperature=temperature, image_content=image_content
             )
             return {
                 "text": response.text,
@@ -601,7 +611,7 @@ class OrquestradorService:
             if conv:
                 return conv.id
 
-        title = prompt[:100] + ("..." if len(prompt) > 100 else "")
+        title = _make_title(prompt)
         conv = Conversation(
             user_id=self.user_id,
             title=title,

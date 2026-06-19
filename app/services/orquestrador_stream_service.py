@@ -49,6 +49,15 @@ from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHA
 
 logger = logging.getLogger(__name__)
 
+
+def _make_title(prompt: str) -> str:
+    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
+    if prompt.startswith('[Imagem:'):
+        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
+    elif '---\n\n' in prompt:
+        prompt = prompt.split('---\n\n', 1)[1]
+    return prompt[:100] + ('...' if len(prompt) > 100 else '')
+
 MODE_MODEL_MAP = {
     "QUICK_SEARCH": "sonar-pro",
     "CLINICAL_REASONING": "claude-sonnet-4-6",
@@ -122,6 +131,7 @@ class OrquestradorStreamService:
         mode: str | None = None,
         history: list[ConversationMessage] | None = None,
         folder_id: UUID | None = None,
+        image_content: dict | None = None,
     ) -> AsyncIterator[str]:
         """
         Gerador SSE. Yields strings no formato 'event: ...\ndata: ...\n\n'.
@@ -276,6 +286,7 @@ class OrquestradorStreamService:
                         enriched_prompt,
                         system_prompt=system_prompt,
                         temperature=temperature,
+                        image_content=image_content,
                     ):
                         if token.delta:
                             full_text += token.delta
@@ -537,7 +548,7 @@ class OrquestradorStreamService:
             if conv:
                 return conv.id
 
-        title = prompt[:100] + ("..." if len(prompt) > 100 else "")
+        title = _make_title(prompt)
         conv = Conversation(
             user_id=self.user_id,
             title=title,

@@ -44,16 +44,20 @@ class DLPMiddleware:
         sanitized = text
         replacements = []
 
-        for pattern_name, pattern, replacement in self._patterns:
-            matches = pattern.finditer(sanitized)
-            for match in matches:
-                original_value = match.group()
+        for pattern_name, pattern, replacement, validator in self._patterns:
+            def _repl(match, _name=pattern_name, _rep=replacement, _val=validator):
+                # Validador opcional: se retornar False, mantém o texto original
+                # (evita falsos positivos — ex.: número clínico de 11 dígitos que não é CPF).
+                if _val is not None and not _val(match.group()):
+                    return match.group()
                 replacements.append({
-                    "type": pattern_name,
-                    "placeholder": replacement,
+                    "type": _name,
+                    "placeholder": _rep,
                     "position": match.start(),
                 })
-            sanitized = pattern.sub(replacement, sanitized)
+                return _rep
+
+            sanitized = pattern.sub(_repl, sanitized)
 
         return SanitizationResult(
             original_text=text,
@@ -62,26 +66,36 @@ class DLPMiddleware:
             replacements=replacements,
         )
 
-    def _build_patterns(self) -> list[tuple[str, re.Pattern, str]]:
+    def _build_patterns(self) -> list[tuple[str, re.Pattern, str, object]]:
         """
         Constrói lista de padrões regex para detecção de PII.
+        Cada entrada é (nome, padrão, placeholder, validator | None).
         Ordem importa: padrões mais específicos primeiro.
         """
         return [
             # ── CPF ──────────────────────────────────────
-            # Formato: 123.456.789-00 ou 12345678900
+            # Formato: 123.456.789-00 ou 12345678900.
+            # Mascaramos por FORMATO (sem exigir dígito verificador válido): num app de
+            # saúde, deixar vazar um CPF real digitado com erro é pior que mascarar um
+            # eventual número clínico de 11 dígitos (raro). Privacidade > precisão aqui.
             (
                 "cpf",
                 re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}[-.]?\d{2}\b"),
                 "[DOCUMENTO]",
+                None,
             ),
 
             # ── RG ───────────────────────────────────────
-            # Formato: 12.345.678-9 ou variações
+            # Exige rótulo explícito ("RG"/"identidade") para reduzir falsos positivos
+            # com valores numéricos clínicos. Substitui o trecho inteiro (rótulo + número).
             (
                 "rg",
-                re.compile(r"\b\d{1,2}\.?\d{3}\.?\d{3}[-.]?\d{1,2}\b"),
+                re.compile(
+                    r"(?:RG|R\.G\.|identidade)\s*:?\s*\d{1,2}\.?\d{3}\.?\d{3}[-.]?[\dxX]\b",
+                    re.IGNORECASE,
+                ),
                 "[DOCUMENTO]",
+                None,
             ),
 
             # ── Cartão SUS (CNS) ─────────────────────────
@@ -90,6 +104,7 @@ class DLPMiddleware:
                 "cns",
                 re.compile(r"\b\d{3}\s?\d{4}\s?\d{4}\s?\d{4}\b"),
                 "[DOCUMENTO]",
+                None,
             ),
 
             # ── E-mail ───────────────────────────────────
@@ -99,6 +114,7 @@ class DLPMiddleware:
                     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
                 ),
                 "[CONTATO]",
+                None,
             ),
 
             # ── Telefone BR ──────────────────────────────
@@ -109,14 +125,17 @@ class DLPMiddleware:
                     r"(?:\+55\s?)?\(?\d{2}\)?\s?\d{4,5}[-.\s]?\d{4}\b"
                 ),
                 "[CONTATO]",
+                None,
             ),
 
             # ── CEP ──────────────────────────────────────
-            # 01234-567 ou 01234567
+            # Exige o hífen (01234-567) para não colidir com sequências de 8 dígitos
+            # comuns em dados clínicos.
             (
                 "cep",
-                re.compile(r"\b\d{5}[-]?\d{3}\b"),
+                re.compile(r"\b\d{5}-\d{3}\b"),
                 "[ENDEREÇO]",
+                None,
             ),
 
             # ── Endereço (padrões comuns) ─────────────────
@@ -130,11 +149,13 @@ class DLPMiddleware:
                     re.IGNORECASE,
                 ),
                 "[ENDEREÇO]",
+                None,
             ),
 
-            # ── Nomes próprios (heurística) ──────────────
-            # Detecta padrões como "paciente João Silva" ou "Dr. Maria Santos"
-            # Trigger word é case-insensitive, mas nome exige maiúscula inicial
+            # ── Nomes próprios (heurística best-effort) ──
+            # Detecta padrões como "paciente João Silva" ou "Dr. Maria Santos".
+            # Trigger word é case-insensitive, mas nome exige maiúscula inicial.
+            # NOTA: é heurística — nomes sem palavra-gatilho NÃO são detectados.
             (
                 "nome_paciente",
                 re.compile(
@@ -142,6 +163,7 @@ class DLPMiddleware:
                     r"\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+(?:da|de|do|das|dos|e)\s+)?(?:[A-ZÀ-Ÿ][a-zà-ÿ]+\s*){0,4})",
                 ),
                 "[PACIENTE]",
+                None,
             ),
             (
                 "nome_medico",
@@ -150,6 +172,7 @@ class DLPMiddleware:
                     r"\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+(?:da|de|do|das|dos|e)\s+)?(?:[A-ZÀ-Ÿ][a-zà-ÿ]+\s*){0,4})",
                 ),
                 "[MÉDICO]",
+                None,
             ),
         ]
 

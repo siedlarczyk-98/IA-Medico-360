@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,7 @@ from app.api.deps import get_current_user
 from app.core.database import get_db, async_session_factory
 from app.models.models import User
 from app.schemas.agregador import ConversationMessage
+from app.services.file_extractor_service import resolve_file_context
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 from app.services.usage_service import check_limit
@@ -51,6 +52,10 @@ class OrquestradorRequest(BaseModel):
         default=None,
         description="Pasta onde a nova conversa será criada (opcional).",
     )
+    file_id: UUID | None = Field(
+        default=None,
+        description="ID de uma extração de arquivo previamente enviada via /uploads/extract.",
+    )
 
 
 @router.post("/query")
@@ -73,7 +78,7 @@ async def orquestrador_query(
     - PRODUCTIVITY → GPT-5.4 Nano (tarefas não clínicas)
     """
     await check_limit(db, user)
-    await db.commit()
+    prompt, image_content = await resolve_file_context(body.prompt, body.file_id, user.id, db)
 
     service = OrquestradorService(
         db=db,
@@ -83,13 +88,14 @@ async def orquestrador_query(
         user_med_status=user.med_status,
     )
     return await service.query(
-        prompt=body.prompt,
+        prompt=prompt,
         conversation_id=body.conversation_id,
         force=body.force,
         clarification_answers=body.clarification_answers,
         mode=body.mode,
         history=body.history or [],
         folder_id=body.folder_id,
+        image_content=image_content,
     )
 
 
@@ -115,7 +121,7 @@ async def orquestrador_stream(
     Não suporta PHARMA_CHECK — use /query para interações medicamentosas.
     """
     await check_limit(db, user)
-    await db.commit()
+    prompt, image_content = await resolve_file_context(body.prompt, body.file_id, user.id, db)
 
     service = OrquestradorStreamService(
         session_factory=async_session_factory,
@@ -126,7 +132,7 @@ async def orquestrador_stream(
     )
     return StreamingResponse(
         service.stream(
-            prompt=body.prompt,
+            prompt=prompt,
             conversation_id=body.conversation_id,
             force=body.force,
             clarification_answers=body.clarification_answers,
@@ -134,6 +140,7 @@ async def orquestrador_stream(
             mode=body.mode,
             history=body.history or [],
             folder_id=body.folder_id,
+            image_content=image_content,
         ),
         media_type="text/event-stream",
         headers={

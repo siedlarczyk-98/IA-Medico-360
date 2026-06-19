@@ -3,23 +3,21 @@ import { fetchModels, type AIModel } from '../api/agregador';
 import { MODEL_DESCRIPTIONS, type AIModelInfo } from '../lib/modelDescriptions';
 import { useIsMobile } from '../hooks/useIsMobile';
 
-const PERPLEXITY_PROVIDER = 'perplexity';
 
 interface Props {
   selected: string[];
   onChange: (ids: string[]) => void;
-  webSearch?: Record<string, boolean>;
-  onWebSearchChange?: (modelId: string, enabled: boolean) => void;
+  hasImageAttached?: boolean;
 }
 
-export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebSearchChange }: Props) {
+export function EmptyStateAgregador({ selected, onChange, hasImageAttached = false }: Props) {
   const isMobile = useIsMobile();
   const [models, setModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchModels()
-      .then(m => setModels(m.filter(x => x.available && x.model_id !== 'gemini-3-flash')))
+      .then(m => setModels(m.filter(x => x.available)))
       .catch(() => setModels([]))
       .finally(() => setLoading(false));
   }, []);
@@ -61,6 +59,7 @@ export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebS
         {loading ? (
           <div style={{ fontSize: 12, color: 'var(--pen3)' }}>Carregando modelos…</div>
         ) : (
+          <>
           <div style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))',
@@ -69,8 +68,7 @@ export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebS
             {models.map(m => {
               const active = selected.includes(m.model_id);
               const info = getModelInfo(m.model_id);
-              const isPerplexity = m.provider?.toLowerCase() === PERPLEXITY_PROVIDER || m.model_id.includes('sonar');
-              const wsActive = !!webSearch[m.model_id];
+              const noVision = hasImageAttached && !m.supports_vision;
               return (
                 <button
                   key={m.model_id}
@@ -119,24 +117,17 @@ export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebS
                     </div>
                   )}
 
-                  {/* Toggle busca web */}
-                  {active && !isPerplexity && (
+                  {/* Badge de suporte a visão (só quando imagem anexada) */}
+                  {hasImageAttached && !active && (
                     <div
-                      onClick={e => { e.stopPropagation(); onWebSearchChange?.(m.model_id, !wsActive); }}
-                      title={wsActive ? 'Desativar busca web' : 'Ativar busca web para resultados atualizados'}
+                      title={noVision ? 'Não suporta visão — usará descrição automática' : 'Analisa a imagem diretamente'}
                       style={{
-                        position: 'absolute', bottom: 12, right: 12,
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '3px 8px', borderRadius: 999,
-                        background: wsActive ? 'var(--petrol)' : 'rgba(1,71,81,0.08)',
-                        color: wsActive ? '#fff' : 'var(--petrol)',
-                        fontSize: 11, fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'background 0.15s',
-                        userSelect: 'none',
+                        position: 'absolute', top: 10, right: 10,
+                        fontSize: 14, lineHeight: 1,
+                        opacity: 0.75,
                       }}
                     >
-                      🌐 {wsActive ? 'Web on' : 'Web'}
+                      {noVision ? '📝' : '👁'}
                     </div>
                   )}
 
@@ -250,6 +241,27 @@ export function EmptyStateAgregador({ selected, onChange, webSearch = {}, onWebS
               );
             })}
           </div>
+
+          {hasImageAttached && selected.some(id => {
+            const m = models.find(x => x.model_id === id);
+            return m && !m.supports_vision;
+          }) && (
+            <div style={{
+              marginTop: 14,
+              padding: '9px 16px',
+              borderRadius: 10,
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              fontSize: 12,
+              color: '#92400e',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}>
+              📝 <span><strong>Perplexity</strong> não suporta visão direta — usará descrição automática gerada por IA. Para análise real da imagem, escolha Claude, GPT ou Gemini.</span>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

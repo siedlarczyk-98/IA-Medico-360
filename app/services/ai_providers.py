@@ -56,11 +56,11 @@ class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
     @abstractmethod
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         ...
 
     @abstractmethod
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         ...
 
 
@@ -71,7 +71,16 @@ class AnthropicProvider(BaseProvider):
     def _web_search_tool(self) -> list:
         return [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> ProviderResponse:
+    @staticmethod
+    def _build_user_content(prompt: str, image_content: dict | None) -> list | str:
+        if not image_content:
+            return prompt
+        return [
+            {"type": "image", "source": {"type": "base64", "media_type": image_content["media_type"], "data": image_content["base64"]}},
+            {"type": "text", "text": prompt},
+        ]
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         payload: dict = {
@@ -79,7 +88,7 @@ class AnthropicProvider(BaseProvider):
             "max_tokens": 4096,
             "temperature": temperature,
             "system": sys_prompt,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": self._build_user_content(prompt, image_content)}],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()
@@ -119,7 +128,7 @@ class AnthropicProvider(BaseProvider):
             citations=citations,
         )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         tokens_in: int | None = None
@@ -129,7 +138,7 @@ class AnthropicProvider(BaseProvider):
             "stream": True,
             "temperature": temperature,
             "system": sys_prompt,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": self._build_user_content(prompt, image_content)}],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()
@@ -182,7 +191,16 @@ class AnthropicProvider(BaseProvider):
 
 class OpenAIProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> ProviderResponse:
+    @staticmethod
+    def _build_user_content(prompt: str, image_content: dict | None) -> list | str:
+        if not image_content:
+            return prompt
+        return [
+            {"type": "image_url", "image_url": {"url": f"data:{image_content['media_type']};base64,{image_content['base64']}"}},
+            {"type": "text", "text": prompt},
+        ]
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         if web_search:
@@ -244,7 +262,7 @@ class OpenAIProvider(BaseProvider):
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": self._build_user_content(prompt, image_content)},
                 ],
                 "max_completion_tokens": 4096,
                 "temperature": temperature,
@@ -263,7 +281,7 @@ class OpenAIProvider(BaseProvider):
             provider="OpenAI",
         )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         if web_search:
@@ -327,7 +345,7 @@ class OpenAIProvider(BaseProvider):
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": self._build_user_content(prompt, image_content)},
                 ],
                 "max_completion_tokens": 4096,
                 "temperature": temperature,
@@ -363,21 +381,31 @@ class OpenAIProvider(BaseProvider):
 
 class GeminiProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> ProviderResponse:
+    @staticmethod
+    def _build_parts(prompt: str, image_content: dict | None) -> list:
+        parts = []
+        if image_content:
+            parts.append({"inlineData": {"mimeType": image_content["media_type"], "data": image_content["base64"]}})
+        parts.append({"text": prompt})
+        return parts
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
-            f":generateContent?key={settings.google_ai_api_key}"
+            f":generateContent"
         )
         client = get_client()
         payload: dict = {
             "system_instruction": {"parts": [{"text": sys_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": self._build_parts(prompt, image_content)}],
             "generationConfig": {"temperature": temperature},
         }
         if web_search:
             payload["tools"] = [{"google_search": {}}]
-        resp = await client.post(url, json=payload, timeout=timeout)
+        resp = await client.post(
+            url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
+        )
         resp.raise_for_status()
         data = resp.json()
         candidate = data["candidates"][0]
@@ -400,21 +428,23 @@ class GeminiProvider(BaseProvider):
             citations=citations,
         )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
-            f":streamGenerateContent?alt=sse&key={settings.google_ai_api_key}"
+            f":streamGenerateContent?alt=sse"
         )
         client = get_client()
         payload: dict = {
             "system_instruction": {"parts": [{"text": sys_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": self._build_parts(prompt, image_content)}],
             "generationConfig": {"temperature": temperature},
         }
         if web_search:
             payload["tools"] = [{"google_search": {}}]
-        async with client.stream("POST", url, json=payload, timeout=timeout) as response:
+        async with client.stream(
+            "POST", url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
+        ) as response:
             response.raise_for_status()
             citations: list[str] = []
             async for line in response.aiter_lines():
@@ -449,7 +479,15 @@ class GeminiProvider(BaseProvider):
 
 class PerplexityProvider(BaseProvider):
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0) -> ProviderResponse:
+    @staticmethod
+    def _apply_image_fallback(prompt: str, image_content: dict | None) -> str:
+        """Perplexity não suporta visão — injeta a descrição gerada pelo Haiku no prompt."""
+        if image_content and image_content.get("fallback_text"):
+            return f"[Descrição automática da imagem]\n{image_content['fallback_text']}\n\n---\n\n{prompt}"
+        return prompt
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
+        prompt = self._apply_image_fallback(prompt, image_content)
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         resp = await client.post(
@@ -483,10 +521,10 @@ class PerplexityProvider(BaseProvider):
             citations=citations,
         )
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para
         # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
-        response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature)
+        response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content)
         chunk_size = 20
         text = response.text
         for i in range(0, len(text), chunk_size):

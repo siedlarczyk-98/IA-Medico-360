@@ -15,6 +15,7 @@ export interface AIModel {
   display_name: string;
   provider: string;
   available: boolean;
+  supports_vision: boolean;
 }
 
 export async function fetchModels(): Promise<AIModel[]> {
@@ -61,11 +62,12 @@ export async function* streamAgregador(
   effort: 'rápido' | 'detalhado' = 'detalhado',
   folder_id?: string,
   web_search?: Record<string, boolean>,
+  file_id?: string,
 ): AsyncGenerator<AgregadorStreamEvent> {
   const res = await fetch(`${BASE}/api/v1/agregador/stream`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort, ...(folder_id ? { folder_id } : {}), ...(web_search ? { web_search } : {}) }),
+    body: JSON.stringify({ prompt, models, conversation_id, history: history ?? [], effort, ...(folder_id ? { folder_id } : {}), ...(web_search ? { web_search } : {}), ...(file_id ? { file_id } : {}) }),
     signal,
   });
 

@@ -32,6 +32,12 @@ pgvector==0.3.6
 # Email
 sendgrid==6.11.0
 
+# File uploads — text extraction
+python-multipart==0.0.20
+pdfplumber==0.11.4
+python-docx==1.1.2
+openpyxl==3.1.5
+
 # Utilities
 orjson==3.10.12
 tenacity==9.0.0

@@ -18,6 +18,7 @@ class AIModelDisplay(BaseModel):
     display_name: str
     cost_tier: str
     available: bool = True
+    supports_vision: bool = True
 
 
 # ── Request ──────────────────────────────────────────────────
@@ -63,6 +64,10 @@ class AgregadorRequest(BaseModel):
     web_search: dict[str, bool] = Field(
         default_factory=dict,
         description="Mapa model_id → true/false para ativar busca web por modelo.",
+    )
+    file_id: UUID | None = Field(
+        default=None,
+        description="ID de uma extração de arquivo previamente enviada via /uploads/extract.",
     )
 
     @field_validator("models")

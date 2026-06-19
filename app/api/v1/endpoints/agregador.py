@@ -11,7 +11,7 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -32,6 +32,7 @@ from app.schemas.agregador import (
 )
 from app.services.agregador_service import AgregadorService
 from app.services.ai_providers import get_provider_by_type
+from app.services.file_extractor_service import resolve_file_context
 from app.services.usage_service import check_limit
 from app.core.limiter import limiter
 
@@ -71,6 +72,7 @@ async def list_models(
             display_name=m.display_name,
             cost_tier=_get_cost_tier(m.input_per_million),
             available=key_map.get(m.provider_type, "") not in placeholders,
+            supports_vision=m.provider_type != "perplexity",
         )
         for m in models
     ]
@@ -103,6 +105,11 @@ async def agregador_query(
     """
     await check_limit(db, user)
 
+    # Caminho non-streaming não suporta visão — imagens entram como texto (descrição).
+    body.prompt, _ = await resolve_file_context(
+        body.prompt, body.file_id, user.id, db, support_vision=False
+    )
+
     service = AgregadorService(
         db=db,
         user_id=user.id,
@@ -128,6 +135,12 @@ async def agregador_stream(
     """
 
     await check_limit(db, user)
+
+    # Imagens: envia os pixels reais como vision block; descrição (já sanitizada na
+    # extração) vai como fallback para providers sem visão (Perplexity).
+    body.prompt, image_content = await resolve_file_context(
+        body.prompt, body.file_id, user.id, db
+    )
 
     service = AgregadorService(db=db, user_id=user.id, company_id=user.company_id)
 
@@ -181,7 +194,7 @@ async def agregador_stream(
 
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system, web_search=body.web_search.get(model_id, False))
+            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system, web_search=body.web_search.get(model_id, False), image_content=image_content)
             model_start = time.monotonic()
 
             async def _run(mid=model_id, ps=provider_stream, mstart=model_start):
@@ -210,11 +223,15 @@ async def agregador_stream(
                                 }),
                             })
                 except Exception as e:
-                    err_msg = str(e) or f"Tempo limite excedido para {mid}. Tente novamente."
-                    collected[mid]["error"] = err_msg
+                    # Loga o erro real internamente, mas não expõe detalhes ao cliente.
+                    logger.warning("Falha no modelo %s: %s", mid, e)
+                    collected[mid]["error"] = str(e)
                     await shared_q.put({
                         "event": "error",
-                        "data": json.dumps({"model_id": mid, "error": err_msg}),
+                        "data": json.dumps({
+                            "model_id": mid,
+                            "error": f"Falha ao consultar o modelo {mid}. Tente novamente.",
+                        }),
                     })
                 finally:
                     await shared_q.put(None)  # sentinela de conclusão deste modelo

@@ -374,6 +374,24 @@ class OtpCode(Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+# ── File Extractions ──────────────────────────────────────────
+
+class FileExtraction(Base):
+    __tablename__ = "file_extractions"
+    __table_args__ = (
+        Index("ix_file_extractions_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    image_base64: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_media_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 # ── Invite Tokens ─────────────────────────────────────────────
 
 class InviteToken(Base):
