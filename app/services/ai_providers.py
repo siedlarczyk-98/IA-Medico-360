@@ -191,6 +191,14 @@ class AnthropicProvider(BaseProvider):
 
 class OpenAIProvider(BaseProvider):
 
+    # Modelos de raciocínio da OpenAI (o-series e gpt-5+) rejeitam o parâmetro
+    # `temperature` tanto no /chat/completions quanto no /responses.
+    _NO_TEMPERATURE_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+
+    @classmethod
+    def _supports_temperature(cls, model_id: str) -> bool:
+        return not model_id.startswith(cls._NO_TEMPERATURE_PREFIXES)
+
     @staticmethod
     def _build_user_content(prompt: str, image_content: dict | None) -> list | str:
         if not image_content:
@@ -199,6 +207,19 @@ class OpenAIProvider(BaseProvider):
             {"type": "image_url", "image_url": {"url": f"data:{image_content['media_type']};base64,{image_content['base64']}"}},
             {"type": "text", "text": prompt},
         ]
+
+    @staticmethod
+    def _build_responses_input(prompt: str, image_content: dict | None) -> list | str:
+        """Monta o campo `input` da Responses API, incluindo imagem quando houver."""
+        if not image_content:
+            return prompt
+        return [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": f"data:{image_content['media_type']};base64,{image_content['base64']}"},
+            ],
+        }]
 
     async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
@@ -214,10 +235,10 @@ class OpenAIProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "instructions": sys_prompt,
-                    "input": prompt,
+                    "input": self._build_responses_input(prompt, image_content),
                     "tools": [{"type": "web_search_preview"}],
                     "max_output_tokens": 4096,
-                    "temperature": temperature,
+                    **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
                 },
                 timeout=timeout,
             )
@@ -265,7 +286,7 @@ class OpenAIProvider(BaseProvider):
                     {"role": "user", "content": self._build_user_content(prompt, image_content)},
                 ],
                 "max_completion_tokens": 4096,
-                "temperature": temperature,
+                **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
             },
             timeout=timeout,
         )
@@ -296,10 +317,10 @@ class OpenAIProvider(BaseProvider):
                 json={
                     "model": model_id,
                     "instructions": sys_prompt,
-                    "input": prompt,
+                    "input": self._build_responses_input(prompt, image_content),
                     "tools": [{"type": "web_search_preview"}],
                     "max_output_tokens": 4096,
-                    "temperature": temperature,
+                    **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
                     "stream": True,
                 },
                 timeout=timeout,
@@ -348,7 +369,7 @@ class OpenAIProvider(BaseProvider):
                     {"role": "user", "content": self._build_user_content(prompt, image_content)},
                 ],
                 "max_completion_tokens": 4096,
-                "temperature": temperature,
+                **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
                 "stream": True,
                 "stream_options": {"include_usage": True},
             },
