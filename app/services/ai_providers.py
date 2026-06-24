@@ -17,6 +17,7 @@ from typing import AsyncIterator
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
+from app.core.telemetry import async_llm_span, _set_llm_output
 
 settings = get_settings()
 
@@ -99,34 +100,37 @@ class AnthropicProvider(BaseProvider):
         }
         if web_search:
             headers["anthropic-beta"] = "web-search-2025-03-05"
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=payload,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        text = "".join(
-            block["text"] for block in data["content"] if block["type"] == "text"
-        )
-        citations: list[str] | None = None
-        if web_search:
-            citations = [
-                r.get("url") for block in data["content"]
-                if block.get("type") == "tool_result"
-                for r in (block.get("content") or [])
-                if r.get("type") == "web_search_result" and r.get("url")
-            ] or None
-        usage = data.get("usage", {})
-        return ProviderResponse(
-            text=text,
-            tokens_in=usage.get("input_tokens"),
-            tokens_out=usage.get("output_tokens"),
-            model_id=model_id,
-            provider="Anthropic",
-            citations=citations,
-        )
+        async with async_llm_span("anthropic", model_id, prompt) as span:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = "".join(
+                block["text"] for block in data["content"] if block["type"] == "text"
+            )
+            citations: list[str] | None = None
+            if web_search:
+                citations = [
+                    r.get("url") for block in data["content"]
+                    if block.get("type") == "tool_result"
+                    for r in (block.get("content") or [])
+                    if r.get("type") == "web_search_result" and r.get("url")
+                ] or None
+            usage = data.get("usage", {})
+            result = ProviderResponse(
+                text=text,
+                tokens_in=usage.get("input_tokens"),
+                tokens_out=usage.get("output_tokens"),
+                model_id=model_id,
+                provider="Anthropic",
+                citations=citations,
+            )
+            _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+            return result
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
@@ -224,83 +228,88 @@ class OpenAIProvider(BaseProvider):
     async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
-        if web_search:
-            # Responses API com web_search_preview
+        async with async_llm_span("openai", model_id, prompt) as span:
+            if web_search:
+                # Responses API com web_search_preview
+                resp = await client.post(
+                    "https://api.openai.com/v1/responses",
+                    headers={
+                        "Authorization": f"Bearer {settings.openai_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model_id,
+                        "instructions": sys_prompt,
+                        "input": self._build_responses_input(prompt, image_content),
+                        "tools": [{"type": "web_search_preview"}],
+                        "max_output_tokens": 4096,
+                        **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
+                    },
+                    timeout=timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                text = "".join(
+                    c["text"]
+                    for item in data.get("output", [])
+                    if item.get("type") == "message"
+                    for c in item.get("content", [])
+                    if c.get("type") == "output_text" and "text" in c
+                ) or data.get("output_text", "")
+                # extrai citations de annotations
+                citations: list[str] | None = None
+                raw_citations = [
+                    ann.get("url")
+                    for item in data.get("output", [])
+                    if item.get("type") == "message"
+                    for c in item.get("content", [])
+                    if c.get("type") == "output_text"
+                    for ann in c.get("annotations", [])
+                    if ann.get("type") == "url_citation" and ann.get("url")
+                ]
+                if raw_citations:
+                    citations = raw_citations
+                usage = data.get("usage", {})
+                result = ProviderResponse(
+                    text=text,
+                    tokens_in=usage.get("input_tokens"),
+                    tokens_out=usage.get("output_tokens"),
+                    model_id=model_id,
+                    provider="OpenAI",
+                    citations=citations,
+                )
+                _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+                return result
             resp = await client.post(
-                "https://api.openai.com/v1/responses",
+                "https://api.openai.com/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {settings.openai_api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
                     "model": model_id,
-                    "instructions": sys_prompt,
-                    "input": self._build_responses_input(prompt, image_content),
-                    "tools": [{"type": "web_search_preview"}],
-                    "max_output_tokens": 4096,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": self._build_user_content(prompt, image_content)},
+                    ],
+                    "max_completion_tokens": 4096,
                     **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
                 },
                 timeout=timeout,
             )
             resp.raise_for_status()
             data = resp.json()
-            text = "".join(
-                c["text"]
-                for item in data.get("output", [])
-                if item.get("type") == "message"
-                for c in item.get("content", [])
-                if c.get("type") == "output_text" and "text" in c
-            ) or data.get("output_text", "")
-            # extrai citations de annotations
-            citations: list[str] | None = None
-            raw_citations = [
-                ann.get("url")
-                for item in data.get("output", [])
-                if item.get("type") == "message"
-                for c in item.get("content", [])
-                if c.get("type") == "output_text"
-                for ann in c.get("annotations", [])
-                if ann.get("type") == "url_citation" and ann.get("url")
-            ]
-            if raw_citations:
-                citations = raw_citations
+            choice = data["choices"][0]
             usage = data.get("usage", {})
-            return ProviderResponse(
-                text=text,
-                tokens_in=usage.get("input_tokens"),
-                tokens_out=usage.get("output_tokens"),
+            result = ProviderResponse(
+                text=choice["message"]["content"],
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
                 model_id=model_id,
                 provider="OpenAI",
-                citations=citations,
             )
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": self._build_user_content(prompt, image_content)},
-                ],
-                "max_completion_tokens": 4096,
-                **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
-            },
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        usage = data.get("usage", {})
-        return ProviderResponse(
-            text=choice["message"]["content"],
-            tokens_in=usage.get("prompt_tokens"),
-            tokens_out=usage.get("completion_tokens"),
-            model_id=model_id,
-            provider="OpenAI",
-        )
+            _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+            return result
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
@@ -424,30 +433,33 @@ class GeminiProvider(BaseProvider):
         }
         if web_search:
             payload["tools"] = [{"google_search": {}}]
-        resp = await client.post(
-            url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        candidate = data["candidates"][0]
-        text = candidate["content"]["parts"][0]["text"]
-        citations: list[str] | None = None
-        if web_search:
-            chunks = (
-                data.get("groundingMetadata", {}).get("groundingChunks", [])
-                or candidate.get("groundingMetadata", {}).get("groundingChunks", [])
+        async with async_llm_span("google", model_id, prompt) as span:
+            resp = await client.post(
+                url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
             )
-            raw_cit = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
-            citations = raw_cit or None
-        usage = data.get("usageMetadata", {})
-        return ProviderResponse(
-            text=text,
-            tokens_in=usage.get("promptTokenCount"),
-            tokens_out=usage.get("candidatesTokenCount"),
-            model_id=model_id,
-            provider="Google",
-            citations=citations,
-        )
+            resp.raise_for_status()
+            data = resp.json()
+            candidate = data["candidates"][0]
+            text = candidate["content"]["parts"][0]["text"]
+            citations: list[str] | None = None
+            if web_search:
+                chunks = (
+                    data.get("groundingMetadata", {}).get("groundingChunks", [])
+                    or candidate.get("groundingMetadata", {}).get("groundingChunks", [])
+                )
+                raw_cit = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
+                citations = raw_cit or None
+            usage = data.get("usageMetadata", {})
+            result = ProviderResponse(
+                text=text,
+                tokens_in=usage.get("promptTokenCount"),
+                tokens_out=usage.get("candidatesTokenCount"),
+                model_id=model_id,
+                provider="Google",
+                citations=citations,
+            )
+            _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+            return result
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
@@ -511,36 +523,39 @@ class PerplexityProvider(BaseProvider):
         prompt = self._apply_image_fallback(prompt, image_content)
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
-        resp = await client.post(
-            "https://api.perplexity.ai/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.perplexity_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": 4096,
-                "temperature": temperature,
-            },
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        usage = data.get("usage", {})
-        citations = data.get("citations") or None
-        return ProviderResponse(
-            text=choice["message"]["content"],
-            tokens_in=usage.get("prompt_tokens"),
-            tokens_out=usage.get("completion_tokens"),
-            model_id=model_id,
-            provider="Perplexity",
-            citations=citations,
-        )
+        async with async_llm_span("perplexity", model_id, prompt) as span:
+            resp = await client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.perplexity_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 4096,
+                    "temperature": temperature,
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {})
+            citations = data.get("citations") or None
+            result = ProviderResponse(
+                text=choice["message"]["content"],
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
+                model_id=model_id,
+                provider="Perplexity",
+                citations=citations,
+            )
+            _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+            return result
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para

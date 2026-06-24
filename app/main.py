@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from app.api.v1.router import api_v1_router
 from app.core.config import get_settings
 from app.core import http_client
+from app.core.telemetry import setup_phoenix
 
 settings = get_settings()
 
@@ -28,6 +29,11 @@ async def lifespan(app: FastAPI):
     """Startup e shutdown hooks."""
     # Startup
     print(f"🚀 Médico 360 iniciando [{settings.app_env}]")
+    setup_phoenix(
+        api_key=settings.phoenix_api_key,
+        project_name=settings.phoenix_project_name,
+        endpoint=settings.phoenix_endpoint,
+    )
     await http_client.startup()
     yield
     # Shutdown

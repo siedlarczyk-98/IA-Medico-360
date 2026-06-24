@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
+    # --- Observabilidade (Arize Phoenix) ---
+    phoenix_api_key: str = ""
+    phoenix_project_name: str = "medico-360"
+    phoenix_endpoint: str = "https://app.phoenix.arize.com/s/ruben-nogueira"
+
     # --- Agregador ---
     max_models_per_query: int = 4
     max_prompt_chars: int = 4000
