@@ -40,7 +40,7 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
 
         tracer_provider = register(project_name=project_name)
         _tracer = tracer_provider.get_tracer("medico360.ai_providers")
-        logger.info("Phoenix telemetry ativada → projeto '%s' / endpoint '%s'", project_name, endpoint)
+        print(f"[TELEMETRY] Phoenix ativado → projeto='{project_name}' endpoint='{endpoint}' tracer={_tracer}", flush=True)
     except ImportError:
         logger.warning("arize-phoenix-otel não instalado. Execute: pip install arize-phoenix-otel")
     except Exception as exc:
@@ -80,8 +80,10 @@ def start_llm_span(provider: str, model_id: str, prompt: str, operation: str = "
     Chame span.end() quando o stream terminar."""
     tracer = get_tracer()
     if tracer is None:
+        print(f"[TELEMETRY] start_llm_span: tracer é None — Phoenix não inicializado", flush=True)
         return None
     span = tracer.start_span(f"{provider}.{operation}")
+    print(f"[TELEMETRY] span criado: {provider}.{operation} recording={span.is_recording()}", flush=True)
     _set_llm_attributes(span, provider, model_id, prompt)
     return span
 
