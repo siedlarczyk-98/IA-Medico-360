@@ -70,6 +70,17 @@ def _set_llm_output(
         span.set_attribute("llm.token_count.total", tokens_in + tokens_out)
 
 
+def start_llm_span(provider: str, model_id: str, prompt: str, operation: str = "stream") -> trace.Span | None:
+    """Abre um span manualmente — use em geradores onde context manager não cabe.
+    Chame span.end() quando o stream terminar."""
+    tracer = get_tracer()
+    if tracer is None:
+        return None
+    span = tracer.start_span(f"{provider}.{operation}")
+    _set_llm_attributes(span, provider, model_id, prompt)
+    return span
+
+
 @asynccontextmanager
 async def async_llm_span(provider: str, model_id: str, prompt: str, operation: str = "complete") -> AsyncIterator[trace.Span]:
     tracer = get_tracer()

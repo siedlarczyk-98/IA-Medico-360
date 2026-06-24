@@ -17,7 +17,7 @@ from typing import AsyncIterator
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
-from app.core.telemetry import async_llm_span, _set_llm_output
+from app.core.telemetry import async_llm_span, start_llm_span, _set_llm_output
 
 settings = get_settings()
 
@@ -153,42 +153,57 @@ class AnthropicProvider(BaseProvider):
         }
         if web_search:
             stream_headers["anthropic-beta"] = "web-search-2025-03-05"
-        async with client.stream(
-            "POST",
-            "https://api.anthropic.com/v1/messages",
-            headers=stream_headers,
-            json=payload,
-            timeout=timeout,
-        ) as response:
-            response.raise_for_status()
-            citations: list[str] = []
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload_str = line[6:]
-                if payload_str == "[DONE]":
-                    break
-                event = json_lib.loads(payload_str)
-                event_type = event.get("type", "")
-                if event_type == "message_start":
-                    tokens_in = event.get("message", {}).get("usage", {}).get("input_tokens")
-                elif event_type == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        yield StreamToken(delta=delta.get("text", ""))
-                    elif web_search and delta.get("type") == "web_search_result_delta":
-                        url = delta.get("url")
-                        if url:
-                            citations.append(url)
-                elif event_type == "message_delta":
-                    usage = event.get("usage", {})
-                    yield StreamToken(
-                        delta="", done=True,
-                        tokens_in=tokens_in,
-                        tokens_out=usage.get("output_tokens"),
-                        citations=citations or None,
-                        search_cost_usd=WEB_SEARCH_COST_USD["anthropic"] if web_search else 0.0,
-                    )
+        span = start_llm_span("anthropic", model_id, prompt)
+        full_text: list[str] = []
+        try:
+            async with client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                headers=stream_headers,
+                json=payload,
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+                citations: list[str] = []
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload_str = line[6:]
+                    if payload_str == "[DONE]":
+                        break
+                    event = json_lib.loads(payload_str)
+                    event_type = event.get("type", "")
+                    if event_type == "message_start":
+                        tokens_in = event.get("message", {}).get("usage", {}).get("input_tokens")
+                    elif event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            full_text.append(text)
+                            yield StreamToken(delta=text)
+                        elif web_search and delta.get("type") == "web_search_result_delta":
+                            url = delta.get("url")
+                            if url:
+                                citations.append(url)
+                    elif event_type == "message_delta":
+                        usage = event.get("usage", {})
+                        token = StreamToken(
+                            delta="", done=True,
+                            tokens_in=tokens_in,
+                            tokens_out=usage.get("output_tokens"),
+                            citations=citations or None,
+                            search_cost_usd=WEB_SEARCH_COST_USD["anthropic"] if web_search else 0.0,
+                        )
+                        if span:
+                            _set_llm_output(span, "".join(full_text), token.tokens_in, token.tokens_out)
+                            span.end()
+                            span = None
+                        yield token
+        except Exception as exc:
+            if span:
+                span.record_exception(exc)
+                span.end()
+            raise
 
 
 # ── OpenAI ───────────────────────────────────────────────────
@@ -314,97 +329,116 @@ class OpenAIProvider(BaseProvider):
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
-        if web_search:
-            # Responses API com streaming
+        span = start_llm_span("openai", model_id, prompt)
+        full_text: list[str] = []
+        try:
+            if web_search:
+                # Responses API com streaming
+                async with client.stream(
+                    "POST",
+                    "https://api.openai.com/v1/responses",
+                    headers={
+                        "Authorization": f"Bearer {settings.openai_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model_id,
+                        "instructions": sys_prompt,
+                        "input": self._build_responses_input(prompt, image_content),
+                        "tools": [{"type": "web_search_preview"}],
+                        "max_output_tokens": 4096,
+                        **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
+                        "stream": True,
+                    },
+                    timeout=timeout,
+                ) as response:
+                    response.raise_for_status()
+                    tokens_in: int | None = None
+                    tokens_out: int | None = None
+                    citations: list[str] = []
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        payload = line[6:]
+                        if payload == "[DONE]":
+                            break
+                        event = json_lib.loads(payload)
+                        etype = event.get("type", "")
+                        if etype == "response.output_text.delta":
+                            text = event.get("delta", "")
+                            full_text.append(text)
+                            yield StreamToken(delta=text)
+                        elif etype == "response.output_item.added":
+                            pass
+                        elif etype == "response.completed":
+                            resp_data = event.get("response", {})
+                            usage = resp_data.get("usage", {})
+                            tokens_in = usage.get("input_tokens")
+                            tokens_out = usage.get("output_tokens")
+                            for out_item in resp_data.get("output", []):
+                                for c in out_item.get("content", []):
+                                    for ann in c.get("annotations", []):
+                                        if ann.get("type") == "url_citation" and ann.get("url"):
+                                            citations.append(ann["url"])
+                token = StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out, citations=citations or None, search_cost_usd=WEB_SEARCH_COST_USD["openai"])
+                if span:
+                    _set_llm_output(span, "".join(full_text), token.tokens_in, token.tokens_out)
+                    span.end()
+                    span = None
+                yield token
+                return
             async with client.stream(
                 "POST",
-                "https://api.openai.com/v1/responses",
+                "https://api.openai.com/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {settings.openai_api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
                     "model": model_id,
-                    "instructions": sys_prompt,
-                    "input": self._build_responses_input(prompt, image_content),
-                    "tools": [{"type": "web_search_preview"}],
-                    "max_output_tokens": 4096,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": self._build_user_content(prompt, image_content)},
+                    ],
+                    "max_completion_tokens": 4096,
                     **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
                     "stream": True,
+                    "stream_options": {"include_usage": True},
                 },
                 timeout=timeout,
             ) as response:
                 response.raise_for_status()
-                tokens_in: int | None = None
-                tokens_out: int | None = None
-                citations: list[str] = []
+                tokens_in = None
+                tokens_out = None
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
                     payload = line[6:]
                     if payload == "[DONE]":
+                        token = StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out)
+                        if span:
+                            _set_llm_output(span, "".join(full_text), token.tokens_in, token.tokens_out)
+                            span.end()
+                            span = None
+                        yield token
                         break
                     event = json_lib.loads(payload)
-                    etype = event.get("type", "")
-                    if etype == "response.output_text.delta":
-                        yield StreamToken(delta=event.get("delta", ""))
-                    elif etype == "response.output_item.added":
-                        item = event.get("item", {})
-                        if item.get("type") == "web_search_call":
-                            pass  # searching
-                    elif etype == "response.completed":
-                        resp_data = event.get("response", {})
-                        usage = resp_data.get("usage", {})
-                        tokens_in = usage.get("input_tokens")
-                        tokens_out = usage.get("output_tokens")
-                        for out_item in resp_data.get("output", []):
-                            for c in out_item.get("content", []):
-                                for ann in c.get("annotations", []):
-                                    if ann.get("type") == "url_citation" and ann.get("url"):
-                                        citations.append(ann["url"])
-                yield StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out, citations=citations or None, search_cost_usd=WEB_SEARCH_COST_USD["openai"])
-            return
-        async with client.stream(
-            "POST",
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": self._build_user_content(prompt, image_content)},
-                ],
-                "max_completion_tokens": 4096,
-                **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
-                "stream": True,
-                "stream_options": {"include_usage": True},
-            },
-            timeout=timeout,
-        ) as response:
-            response.raise_for_status()
-            tokens_in = None
-            tokens_out = None
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload == "[DONE]":
-                    yield StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out)
-                    break
-                event = json_lib.loads(payload)
-                usage = event.get("usage")
-                if usage:
-                    tokens_in = usage.get("prompt_tokens")
-                    tokens_out = usage.get("completion_tokens")
-                choices = event.get("choices", [])
-                if choices:
-                    delta = choices[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if content:
-                        yield StreamToken(delta=content)
+                    usage = event.get("usage")
+                    if usage:
+                        tokens_in = usage.get("prompt_tokens")
+                        tokens_out = usage.get("completion_tokens")
+                    choices = event.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_text.append(content)
+                            yield StreamToken(delta=content)
+        except Exception as exc:
+            if span:
+                span.record_exception(exc)
+                span.end()
+            raise
 
 
 # ── Google (Gemini) ──────────────────────────────────────────
@@ -475,37 +509,51 @@ class GeminiProvider(BaseProvider):
         }
         if web_search:
             payload["tools"] = [{"google_search": {}}]
-        async with client.stream(
-            "POST", url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
-        ) as response:
-            response.raise_for_status()
-            citations: list[str] = []
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                event = json_lib.loads(line[6:])
-                candidates = event.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    for part in parts:
-                        if "text" in part:
-                            yield StreamToken(delta=part["text"])
-                    finish = candidates[0].get("finishReason")
-                    if finish:
-                        if web_search:
-                            chunks = (
-                                event.get("groundingMetadata", {}).get("groundingChunks", [])
-                                or candidates[0].get("groundingMetadata", {}).get("groundingChunks", [])
+        span = start_llm_span("google", model_id, prompt)
+        full_text: list[str] = []
+        try:
+            async with client.stream(
+                "POST", url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
+            ) as response:
+                response.raise_for_status()
+                citations: list[str] = []
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    event = json_lib.loads(line[6:])
+                    candidates = event.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        for part in parts:
+                            if "text" in part:
+                                full_text.append(part["text"])
+                                yield StreamToken(delta=part["text"])
+                        finish = candidates[0].get("finishReason")
+                        if finish:
+                            if web_search:
+                                chunks = (
+                                    event.get("groundingMetadata", {}).get("groundingChunks", [])
+                                    or candidates[0].get("groundingMetadata", {}).get("groundingChunks", [])
+                                )
+                                citations = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
+                            usage = event.get("usageMetadata", {})
+                            token = StreamToken(
+                                delta="", done=True,
+                                tokens_in=usage.get("promptTokenCount"),
+                                tokens_out=usage.get("candidatesTokenCount"),
+                                citations=citations or None,
+                                search_cost_usd=WEB_SEARCH_COST_USD["google"] if web_search else 0.0,
                             )
-                            citations = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
-                        usage = event.get("usageMetadata", {})
-                        yield StreamToken(
-                            delta="", done=True,
-                            tokens_in=usage.get("promptTokenCount"),
-                            tokens_out=usage.get("candidatesTokenCount"),
-                            citations=citations or None,
-                            search_cost_usd=WEB_SEARCH_COST_USD["google"] if web_search else 0.0,
-                        )
+                            if span:
+                                _set_llm_output(span, "".join(full_text), token.tokens_in, token.tokens_out)
+                                span.end()
+                                span = None
+                            yield token
+        except Exception as exc:
+            if span:
+                span.record_exception(exc)
+                span.end()
+            raise
 
 
 # ── Perplexity ───────────────────────────────────────────────
@@ -560,13 +608,25 @@ class PerplexityProvider(BaseProvider):
     async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para
         # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
-        response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content)
-        chunk_size = 20
-        text = response.text
-        for i in range(0, len(text), chunk_size):
-            yield StreamToken(delta=text[i:i + chunk_size])
-            await asyncio.sleep(0.015)
-        yield StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out, citations=response.citations)
+        span = start_llm_span("perplexity", model_id, prompt)
+        try:
+            response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content)
+            chunk_size = 20
+            text = response.text
+            for i in range(0, len(text), chunk_size):
+                yield StreamToken(delta=text[i:i + chunk_size])
+                await asyncio.sleep(0.015)
+            token = StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out, citations=response.citations)
+            if span:
+                _set_llm_output(span, response.text, response.tokens_in, response.tokens_out)
+                span.end()
+                span = None
+            yield token
+        except Exception as exc:
+            if span:
+                span.record_exception(exc)
+                span.end()
+            raise
 
 
 # ── Registry por tipo ────────────────────────────────────────
