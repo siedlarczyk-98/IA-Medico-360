@@ -28,7 +28,12 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
 
     try:
         import os
+        import logging as _logging
         from phoenix.otel import register
+
+        # Loga erros de export do SDK OTel (normalmente silenciosos)
+        _logging.getLogger("opentelemetry.exporter.otlp").setLevel(_logging.DEBUG)
+        _logging.getLogger("opentelemetry.sdk.trace.export").setLevel(_logging.DEBUG)
 
         os.environ.setdefault("PHOENIX_API_KEY", api_key)
         os.environ.setdefault("PHOENIX_COLLECTOR_ENDPOINT", endpoint)
