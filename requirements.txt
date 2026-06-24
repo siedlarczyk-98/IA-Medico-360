@@ -41,3 +41,7 @@ openpyxl==3.1.5
 # Utilities
 orjson==3.10.12
 tenacity==9.0.0
+
+# Observabilidade (Arize Phoenix / OpenTelemetry)
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-http==1.29.0
