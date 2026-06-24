@@ -35,8 +35,8 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
         _logging.getLogger("opentelemetry.exporter.otlp").setLevel(_logging.DEBUG)
         _logging.getLogger("opentelemetry.sdk.trace.export").setLevel(_logging.DEBUG)
 
-        os.environ.setdefault("PHOENIX_API_KEY", api_key)
-        os.environ.setdefault("PHOENIX_COLLECTOR_ENDPOINT", endpoint)
+        os.environ.setdefault("PHOENIX_API_KEY", api_key.strip())
+        os.environ.setdefault("PHOENIX_COLLECTOR_ENDPOINT", endpoint.strip())
 
         tracer_provider = register(project_name=project_name)
         _tracer = tracer_provider.get_tracer("medico360.ai_providers")
