@@ -8,12 +8,10 @@ https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
 """
 
 import logging
-from contextlib import asynccontextmanager, contextmanager
-from typing import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,7 @@ _tracer: trace.Tracer | None = None
 
 
 def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
-    """Inicializa o tracer Phoenix. Chame uma vez no startup da aplicação."""
+    """Inicializa o tracer Phoenix via arize-phoenix-otel. Chame uma vez no startup."""
     global _tracer
 
     if not api_key:
@@ -29,24 +27,19 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
         return
 
     try:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk.resources import Resource
+        import os
+        from phoenix.otel import register
 
-        resource = Resource(attributes={"service.name": project_name})
-        provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(
-            endpoint=endpoint,
-            headers={"api_key": api_key},
-        )
-        provider.add_span_processor(BatchSpanProcessor(exporter))
-        trace.set_tracer_provider(provider)
-        _tracer = trace.get_tracer("medico360.ai_providers")
-        logger.info("Phoenix telemetry ativada → projeto '%s'", project_name)
+        os.environ.setdefault("PHOENIX_API_KEY", api_key)
+        os.environ.setdefault("PHOENIX_COLLECTOR_ENDPOINT", endpoint)
+
+        tracer_provider = register(project_name=project_name)
+        _tracer = tracer_provider.get_tracer("medico360.ai_providers")
+        logger.info("Phoenix telemetry ativada → projeto '%s' / endpoint '%s'", project_name, endpoint)
     except ImportError:
-        logger.warning(
-            "Pacotes de telemetria não instalados. "
-            "Execute: pip install arize-phoenix-otel opentelemetry-exporter-otlp-proto-http"
-        )
+        logger.warning("arize-phoenix-otel não instalado. Execute: pip install arize-phoenix-otel")
+    except Exception as exc:
+        logger.warning("Falha ao inicializar Phoenix: %s", exc)
 
 
 def get_tracer() -> trace.Tracer | None:
@@ -59,7 +52,7 @@ def _set_llm_attributes(span: trace.Span, provider: str, model_id: str, prompt: 
     span.set_attribute("openinference.span.kind", "LLM")
     span.set_attribute("llm.provider", provider)
     span.set_attribute("llm.model_name", model_id)
-    span.set_attribute("input.value", prompt[:2000])  # trunca para evitar payloads gigantes
+    span.set_attribute("input.value", prompt[:2000])
 
 
 def _set_llm_output(
@@ -77,27 +70,8 @@ def _set_llm_output(
         span.set_attribute("llm.token_count.total", tokens_in + tokens_out)
 
 
-@contextmanager
-def llm_span(provider: str, model_id: str, prompt: str, operation: str = "complete") -> Iterator[trace.Span]:
-    """Context manager para spans de chamadas LLM síncronas/completas."""
-    tracer = get_tracer()
-    if tracer is None:
-        yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
-        return
-
-    with tracer.start_as_current_span(f"{provider}.{operation}") as span:
-        _set_llm_attributes(span, provider, model_id, prompt)
-        try:
-            yield span
-        except Exception as exc:
-            span.record_exception(exc)
-            span.set_status(trace.StatusCode.ERROR, str(exc))
-            raise
-
-
 @asynccontextmanager
 async def async_llm_span(provider: str, model_id: str, prompt: str, operation: str = "complete") -> AsyncIterator[trace.Span]:
-    """Context manager para spans de chamadas LLM assíncronas."""
     tracer = get_tracer()
     if tracer is None:
         yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
