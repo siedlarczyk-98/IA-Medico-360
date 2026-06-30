@@ -5,6 +5,7 @@ import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { getMe } from './api/auth';
 
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
 const CalculatorsListPage = lazy(() => import('./pages/CalculatorsListPage').then(m => ({ default: m.CalculatorsListPage })));
 const RiscoCvSbc2025Page = lazy(() => import('./pages/RiscoCvSbc2025Page').then(m => ({ default: m.RiscoCvSbc2025Page })));
 
@@ -44,6 +45,7 @@ function App() {
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/embed-auth" element={<EmbedAuthPage />} />
         <Route path="/" element={<RequireAuth><CalculatorsListPage /></RequireAuth>} />
         <Route path="/calculadoras/risco-cv-sbc2025" element={<RequireAuth><RiscoCvSbc2025Page /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />

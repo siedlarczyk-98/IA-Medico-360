@@ -45,6 +45,10 @@ export function verifyOTP(email: string, code: string): Promise<TokenResponse> {
   return post<TokenResponse>('/auth/otp/verify', { email, code });
 }
 
+export function embedToken(email: string): Promise<TokenResponse> {
+  return post<TokenResponse>('/auth/embed/token', { email });
+}
+
 export async function getMe(): Promise<UserResponse> {
   const token = getToken();
   const res = await fetch(`${BASE}/api/v1/auth/me`, {
