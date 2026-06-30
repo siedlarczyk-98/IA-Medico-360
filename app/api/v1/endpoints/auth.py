@@ -129,7 +129,8 @@ async def embed_token(
     # e exige correspondência exata contra a allowlist — evita bypass por subdomínio.
     origin = request.headers.get("origin", "")
     settings = get_settings()
-    if origin not in settings.embed_allowed_origins:
+    allowed_origins = set(settings.embed_allowed_origins) | {settings.calculadoras_url}
+    if origin not in allowed_origins:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
 
     user, _ = await auth_service.get_or_create_embed_user(body.email, db)
