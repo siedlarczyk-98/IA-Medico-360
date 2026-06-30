@@ -14,8 +14,14 @@ medico-360/
 # Scripts de dev local
 scripts/generate_dev_token.py
 
-# Frontend
+# Frontend — agregador
 frontend-app/.env
 frontend-app/.env.production
 frontend-app/node_modules/
 frontend-app/dist/
+
+# Frontend — calculadoras
+calculadoras-app/.env
+calculadoras-app/.env.production
+calculadoras-app/node_modules/
+calculadoras-app/dist/

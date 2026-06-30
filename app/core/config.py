@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     frontend_url: str = "http://localhost:5173"
+    calculadoras_url: str = "http://localhost:5174"
     invite_token_expire_hours: int = 72
     otp_expire_minutes: int = 10
     allow_public_registration: bool = False
