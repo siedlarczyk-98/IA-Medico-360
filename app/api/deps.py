@@ -4,7 +4,7 @@ Extrai usuário autenticado do token JWT.
 """
 
 from uuid import UUID
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import jwt as pyjwt
 from jwt import PyJWTError
@@ -16,21 +16,25 @@ from app.core.database import get_db
 from app.models.models import User
 
 settings = get_settings()
-security = HTTPBearer()
+COOKIE_NAME = "medico360_session"
+security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Extrai e valida o usuário a partir do token JWT."""
-    
-    if not credentials or not credentials.credentials:
+    """Extrai e valida o usuário a partir do token JWT (header Authorization ou cookie SSO)."""
+
+    raw_token = credentials.credentials if credentials else request.cookies.get(COOKIE_NAME)
+
+    if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token não fornecido",
         )
 
-    token = credentials.credentials.strip().replace("\n", "").replace("\r", "")
+    token = raw_token.strip().replace("\n", "").replace("\r", "")
 
     try:
         payload = pyjwt.decode(

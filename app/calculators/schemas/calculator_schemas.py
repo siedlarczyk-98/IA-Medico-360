@@ -55,6 +55,16 @@ class CalculatorExecuteResponse(BaseModel):
     createdat: datetime
 
 
+class CalculatorExtractRequest(BaseModel):
+    text: str
+
+
+class CalculatorExtractResponse(BaseModel):
+    suggested_inputs: dict
+    fields_extracted: list[str]
+    interaction_id: UUID | None = None
+
+
 class CalculatorExecutionHistoryItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

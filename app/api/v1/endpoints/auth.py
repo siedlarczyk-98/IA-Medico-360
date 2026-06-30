@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import delete as sql_delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.limiter import limiter
 
-from app.api.deps import get_current_user
+from app.api.deps import COOKIE_NAME, get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.models import (
@@ -37,6 +37,20 @@ from app.schemas.auth import (
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    """Seta o cookie SSO compartilhado entre apps do mesmo domínio raiz, além do token no body."""
+    settings = get_settings()
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        domain=settings.cookie_domain or None,
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+    )
 
 
 @router.post("/register", status_code=status.HTTP_204_NO_CONTENT)
@@ -84,8 +98,9 @@ async def generate_invite(
 
 @router.post("/invite/accept", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def accept_invite(request: Request, body: InviteAcceptRequest, db: AsyncSession = Depends(get_db)):
+async def accept_invite(request: Request, response: Response, body: InviteAcceptRequest, db: AsyncSession = Depends(get_db)):
     user, token = await auth_service.accept_invite(db, body.token, body.email)
+    _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
@@ -105,6 +120,7 @@ class EmbedTokenRequest(BaseModel):
 @limiter.limit("5/minute")
 async def embed_token(
     request: Request,
+    response: Response,
     body: EmbedTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -118,6 +134,7 @@ async def embed_token(
 
     user, _ = await auth_service.get_or_create_embed_user(body.email, db)
     token = auth_service.create_access_token(user)
+    _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
@@ -129,8 +146,9 @@ async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Dep
 
 @router.post("/otp/verify", response_model=TokenResponse)
 @limiter.limit("5/minute")
-async def verify_otp(request: Request, body: OTPVerify, db: AsyncSession = Depends(get_db)):
+async def verify_otp(request: Request, response: Response, body: OTPVerify, db: AsyncSession = Depends(get_db)):
     user, token = await auth_service.verify_otp(db, body.email, body.code)
+    _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 

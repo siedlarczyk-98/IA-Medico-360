@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     invite_token_expire_hours: int = 72
     otp_expire_minutes: int = 10
     allow_public_registration: bool = False
+    cookie_domain: str | None = None
 
     # --- Embed SSO ---
     embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
