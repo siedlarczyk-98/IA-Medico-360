@@ -5,6 +5,7 @@ import { useExecuteCalculator } from '../hooks/useExecuteCalculator';
 import { DynamicCalculatorForm } from '../components/DynamicCalculatorForm';
 import { AiPrefillBox } from '../components/AiPrefillBox';
 import { ResultPanel } from '../components/ResultPanel';
+import { WizardStepper } from '../components/WizardStepper';
 import { formSpecRegistry } from '../calculators/formSpecs';
 import { ValidationError } from '../api/calculators';
 import type { CalculatorField } from '../api/calculators';
@@ -13,6 +14,26 @@ import type { CalculatorField } from '../api/calculators';
 import '../calculators/riscoCvSbc2025.formSpec';
 
 const SLUG = 'risco_cv_sbc2025';
+
+// Passo máximo do algoritmo de estratificação (backend) que o wizard TENTA cobrir ao
+// final de cada step — usado para decidir se um `passo_determinante` retornado pelo
+// backend já pode encerrar o wizard (early-exit) neste ponto. É "best-effort": como a
+// Triagem só coleta os campos centrais (sem duplicar dados de Diabetes/PREVENT), o
+// early-exit pode ocasionalmente não fechar tão cedo quanto seria teoricamente possível
+// (ex.: exigir o passo Diabetes para confirmar diabetes=true) — isso é intencional,
+// priorizando uma Triagem enxuta sobre a precisão máxima do early-exit.
+// Nota: 'prevent' fica em 4, não 5 — o Passo 5 do backend (PREVENT + fatores
+// agravantes) SEMPRE retorna uma categoria assim que é alcançado, mas o resultado só é
+// definitivo depois que os Agravantes também forem coletados (eles podem elevar BAIXO
+// -> INTERMEDIARIO ou INTERMEDIARIO -> ALTO). Se tratássemos 'prevent' como cobrindo o
+// Passo 5, o wizard nunca chegaria à tela de Agravantes.
+const STEP_MAX_ALGO_STEP: Record<string, number> = {
+  triagem: 1,
+  diabetes: 3,
+  alto_risco: 4,
+  prevent: 4,
+  agravantes: 5,
+};
 
 function buildVisibleInputs(
   values: Record<string, unknown>,
@@ -82,22 +103,115 @@ export function RiscoCvSbc2025Page() {
   const [showErrors, setShowErrors] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(true);
   const [showAiBox, setShowAiBox] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [earlyExitAtStep, setEarlyExitAtStep] = useState<number | null>(null);
 
   const formSpec = formSpecRegistry[SLUG];
+  const steps = formSpec?.steps;
+  const isWizard = !!steps && steps.length > 0;
+  const activeStep = isWizard ? steps![stepIndex] : undefined;
+  const isLastStep = !isWizard || stepIndex === steps!.length - 1;
 
   function handleClear() {
     setValues({});
     setAiFilledKeys(new Set());
     setFieldErrors({});
     setShowErrors(false);
+    setStepIndex(0);
+    setEarlyExitAtStep(null);
     reset();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function keysForStep(stepKey: string): Set<string> {
+    const keys = new Set<string>();
+    if (!formSpec) return keys;
+    for (const section of formSpec.sections) {
+      if (section.step !== stepKey) continue;
+      if (!isVisibleSection(section.visibleWhen, values)) continue;
+      for (const f of section.fields) {
+        if (!f.visibleWhen || f.visibleWhen.every(c => checkVisibleCond(c, values))) {
+          keys.add(f.key);
+        }
+      }
+    }
+    return keys;
+  }
+
+  function checkVisibleCond(cond: { field: string; equals?: unknown; notEquals?: unknown; includes?: unknown }, vals: Record<string, unknown>): boolean {
+    const v = vals[cond.field];
+    if (cond.equals !== undefined)    return v === cond.equals;
+    if (cond.notEquals !== undefined) return v !== cond.notEquals;
+    if (cond.includes !== undefined)  return Array.isArray(v) && (v as unknown[]).includes(cond.includes);
+    return true;
+  }
+
+  function isVisibleSection(conditions: { field: string; equals?: unknown; notEquals?: unknown; includes?: unknown }[] | undefined, vals: Record<string, unknown>): boolean {
+    if (!conditions || conditions.length === 0) return true;
+    return conditions.every(c => checkVisibleCond(c, vals));
+  }
+
+  function advanceStep() {
+    setShowErrors(false);
+    setStepIndex(i => Math.min(i + 1, (steps?.length ?? 1) - 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleNext() {
+    if (!calculator || !activeStep) return;
+    const stepKeys = keysForStep(activeStep.key);
+    const errors = validateRequired(values, calculator.fields, stepKeys);
+    if (Object.keys(errors).length > 0) {
+      setShowErrors(true);
+      setFieldErrors(prev => ({ ...prev, ...errors }));
+      const firstKey = Object.keys(errors)[0];
+      document.querySelector(`[data-field="${firstKey}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    setShowErrors(false);
+
+    const inputs = buildVisibleInputs(values, calculator.fields, formSpec);
+    const maxAlgoStep = STEP_MAX_ALGO_STEP[activeStep.key];
+
+    execute({ inputs, dryRun: true }, {
+      onSuccess: data => {
+        const passo = (data.result as { passo_determinante?: number | null }).passo_determinante;
+        if (passo != null && maxAlgoStep != null && passo <= maxAlgoStep) {
+          setEarlyExitAtStep(passo);
+          setTimeout(() => {
+            document.getElementById('result-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 100);
+        } else {
+          reset();
+          advanceStep();
+        }
+      },
+      onError: err => {
+        if (err instanceof ValidationError) {
+          setFieldErrors(prev => ({ ...prev, ...err.fieldErrors }));
+        }
+      },
+    });
+  }
+
+  function handleBack() {
+    setShowErrors(false);
+    setEarlyExitAtStep(null);
+    setStepIndex(i => Math.max(i - 1, 0));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleComplementMore() {
+    reset();
+    setEarlyExitAtStep(null);
+    advanceStep();
   }
 
   function handleChange(key: string, value: unknown) {
     setValues(prev => ({ ...prev, [key]: value }));
     setAiFilledKeys(prev => { const n = new Set(prev); n.delete(key); return n; });
     setFieldErrors(prev => { const n = { ...prev }; delete n[key]; return n; });
+    setEarlyExitAtStep(null);
     if (result) reset();
   }
 
@@ -135,7 +249,7 @@ export function RiscoCvSbc2025Page() {
 
     setFieldErrors({});
 
-    execute(inputs, {
+    execute({ inputs }, {
       onSuccess: () => {
         setFieldErrors({});
         setTimeout(() => {
@@ -290,6 +404,14 @@ export function RiscoCvSbc2025Page() {
         </div>
       </div>
 
+      {isWizard && steps && (
+        <div style={{ background: '#fff', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ maxWidth: 780, margin: '0 auto' }}>
+            <WizardStepper steps={steps} activeIndex={stepIndex} />
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 780, margin: '0 auto', padding: '24px 16px 60px' }}>
 
         {/* Botão IA Prefill */}
@@ -354,46 +476,105 @@ export function RiscoCvSbc2025Page() {
           </div>
         )}
 
-        {/* Formulário */}
-        <div style={{
-          background: '#fff',
-          border: '1px solid var(--line)',
-          borderRadius: 14,
-          padding: '24px 20px',
-          marginBottom: 24,
-        }}>
-          <DynamicCalculatorForm
-            fields={calculator.fields}
-            formSpec={formSpec}
-            values={values}
-            onChange={handleChange}
-            aiFilledKeys={aiFilledKeys}
-            fieldErrors={fieldErrors}
-            showErrors={showErrors}
-          />
-        </div>
+        {earlyExitAtStep != null ? (
+          <div style={{
+            background: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: 10,
+            padding: '12px 16px',
+            marginBottom: 16,
+            fontSize: 13,
+            color: '#92400e',
+          }}>
+            Risco já determinado no Passo {earlyExitAtStep} do fluxograma — os dados dos passos seguintes não alterariam essa categoria. Você pode complementá-los se quiser registrar mais contexto clínico.
+          </div>
+        ) : (
+          <>
+            {/* Formulário */}
+            <div style={{
+              background: '#fff',
+              border: '1px solid var(--line)',
+              borderRadius: 14,
+              padding: '24px 20px',
+              marginBottom: 24,
+            }}>
+              <DynamicCalculatorForm
+                fields={calculator.fields}
+                formSpec={formSpec}
+                values={values}
+                onChange={handleChange}
+                aiFilledKeys={aiFilledKeys}
+                fieldErrors={fieldErrors}
+                showErrors={showErrors}
+                activeStep={activeStep?.key}
+              />
+            </div>
+          </>
+        )}
 
         {/* Ações */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={executing}
-            style={{
-              width: '100%',
-              padding: '14px',
-              background: executing ? 'var(--fill)' : 'var(--petrol)',
-              color: executing ? 'var(--pen3)' : '#fff',
-              border: 'none',
-              borderRadius: 10,
-              fontSize: 15,
-              fontWeight: 700,
-              cursor: executing ? 'not-allowed' : 'pointer',
-              transition: 'background 0.15s',
-            }}
-          >
-            {executing ? 'Calculando…' : 'Calcular risco cardiovascular'}
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {isWizard && stepIndex > 0 && (
+              <button
+                type="button"
+                onClick={handleBack}
+                style={{
+                  padding: '14px 18px',
+                  background: 'none',
+                  color: 'var(--pen)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ← Voltar
+              </button>
+            )}
+            {earlyExitAtStep != null ? (
+              !isLastStep && (
+                <button
+                  type="button"
+                  onClick={handleComplementMore}
+                  style={{
+                    flex: 1,
+                    padding: '14px',
+                    background: 'var(--petrol)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 10,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Complementar mais dados →
+                </button>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={isLastStep ? handleSubmit : handleNext}
+                disabled={executing}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  background: executing ? 'var(--fill)' : 'var(--petrol)',
+                  color: executing ? 'var(--pen3)' : '#fff',
+                  border: 'none',
+                  borderRadius: 10,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: executing ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {isLastStep ? (executing ? 'Calculando…' : 'Calcular risco cardiovascular') : 'Próximo →'}
+              </button>
+            )}
+          </div>
 
           <button
             type="button"

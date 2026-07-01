@@ -67,19 +67,21 @@ async def main() -> None:
             ]),
 
             # ── Inputs PREVENT (também usados no algoritmo SBC) ──────────
-            _field(cid, "ct_mgdl", "Colesterol total", "number", 3, required=True, unit="mg/dL", min_value=50, max_value=500),
-            _field(cid, "hdl_mgdl", "HDL-c", "number", 4, required=True, unit="mg/dL", min_value=10, max_value=150),
-            _field(cid, "ldl_mgdl", "LDL-c", "number", 5, required=True, unit="mg/dL", min_value=10, max_value=400),
-            _field(cid, "sbp_mmhg", "Pressão arterial sistólica", "number", 6, required=True, unit="mmHg", min_value=70, max_value=250),
-            _field(cid, "bmi", "IMC", "number", 7, required=True, unit="kg/m²", min_value=10, max_value=70),
-            _field(cid, "egfr", "TFGe (eGFR)", "number", 8, required=True, unit="mL/min/1,73m²", min_value=1, max_value=200),
-            _field(cid, "fumante", "Tabagismo atual", "boolean", 9, required=True),
-            _field(cid, "antihtn_use", "Uso de anti-hipertensivo", "boolean", 10, required=True),
-            _field(cid, "statin_use", "Uso de estatina", "boolean", 11, required=True),
-            _field(cid, "hipertensao", "Hipertensão arterial (diagnóstico)", "boolean", 12, required=True),
+            # required=False: lidos via .get()/bloco condicional em calculate() — não
+            # bloqueiam early-exit do wizard antes do passo PREVENT ser alcançado.
+            _field(cid, "ct_mgdl", "Colesterol total", "number", 3, required=False, unit="mg/dL", min_value=50, max_value=500),
+            _field(cid, "hdl_mgdl", "HDL-c", "number", 4, required=False, unit="mg/dL", min_value=10, max_value=150),
+            _field(cid, "ldl_mgdl", "LDL-c", "number", 5, required=False, unit="mg/dL", min_value=10, max_value=400),
+            _field(cid, "sbp_mmhg", "Pressão arterial sistólica", "number", 6, required=False, unit="mmHg", min_value=70, max_value=250),
+            _field(cid, "bmi", "IMC", "number", 7, required=False, unit="kg/m²", min_value=10, max_value=70),
+            _field(cid, "egfr", "TFGe (eGFR)", "number", 8, required=False, unit="mL/min/1,73m²", min_value=1, max_value=200),
+            _field(cid, "fumante", "Tabagismo atual", "boolean", 9, required=False),
+            _field(cid, "antihtn_use", "Uso de anti-hipertensivo", "boolean", 10, required=False),
+            _field(cid, "statin_use", "Uso de estatina", "boolean", 11, required=False),
+            _field(cid, "hipertensao", "Hipertensão arterial (diagnóstico)", "boolean", 12, required=False),
 
             # ── Passo 1: evento CV aterosclerótico prévio ─────────────────
-            _field(cid, "evento_cv_previo", "Evento CV aterosclerótico prévio", "boolean", 13, required=True),
+            _field(cid, "evento_cv_previo", "Evento CV aterosclerótico prévio", "boolean", 13, required=False),
             _field(cid, "tipos_evento_cv", "Tipo(s) de evento CV maior", "multiselect", 14, required=False, options=[
                 {"value": "sca_recente_12m", "label": "Síndrome coronária aguda recente (últimos 12 meses)"},
                 {"value": "iam_antigo", "label": "Infarto do miocárdio prévio"},
@@ -88,7 +90,7 @@ async def main() -> None:
             ]),
 
             # ── Passo 2: doença aterosclerótica significativa ─────────────
-            _field(cid, "doenca_aterosclerotica_significativa", "DCVAt sintomática / revascularização prévia / obstrução ≥ 50%", "boolean", 15, required=True),
+            _field(cid, "doenca_aterosclerotica_significativa", "DCVAt sintomática / revascularização prévia / obstrução ≥ 50%", "boolean", 15, required=False),
             _field(cid, "cac_ua", "Escore de cálcio coronário (CAC)", "number", 16, required=False, unit="UA", min_value=0, max_value=5000),
             _field(cid, "cac_percentil_gt75", "CAC em percentil > 75 para sexo/idade", "boolean", 17, required=False),
 
@@ -98,10 +100,10 @@ async def main() -> None:
             _field(cid, "aaa_conhecido", "Aneurisma de aorta abdominal (AAA)", "boolean", 20, required=False),
             _field(cid, "lpa_mgdl", "Lipoproteína(a)", "number", 21, required=False, unit="mg/dL", min_value=0, max_value=500),
             _field(cid, "lpa_nmol", "Lipoproteína(a) (alternativa)", "number", 22, required=False, unit="nmol/L", min_value=0, max_value=1500),
-            _field(cid, "hipercolesterolemia_familiar", "Hipercolesterolemia familiar", "boolean", 23, required=True),
+            _field(cid, "hipercolesterolemia_familiar", "Hipercolesterolemia familiar", "boolean", 23, required=False),
 
             # ── Diabetes (Passo 3 / sub-árvore) ────────────────────────────
-            _field(cid, "diabetes", "Diabetes mellitus", "boolean", 24, required=True),
+            _field(cid, "diabetes", "Diabetes mellitus", "boolean", 24, required=False),
             _field(cid, "tipo_dm", "Tipo de diabetes", "select", 25, required=False, options=[
                 {"value": "dm1", "label": "Tipo 1"}, {"value": "dm2", "label": "Tipo 2"},
             ]),

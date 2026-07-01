@@ -1,38 +1,25 @@
 import { formSpecRegistry, type FormSpec } from './formSpecs';
 
 const spec: FormSpec = {
+  steps: [
+    { key: 'triagem', title: 'Triagem' },
+    { key: 'diabetes', title: 'Diabetes' },
+    { key: 'alto_risco', title: 'Alto Risco' },
+    { key: 'prevent', title: 'PREVENT' },
+    { key: 'agravantes', title: 'Agravantes' },
+  ],
   sections: [
     {
-      title: 'Demografia',
+      title: 'Dados do paciente',
+      step: 'triagem',
       fields: [
         { key: 'idade' },
         { key: 'sexo' },
       ],
     },
     {
-      title: 'Perfil clínico — PREVENT',
-      fields: [
-        { key: 'ct_mgdl' },
-        { key: 'hdl_mgdl' },
-        { key: 'ldl_mgdl' },
-        { key: 'sbp_mmhg' },
-        { key: 'bmi' },
-        { key: 'egfr' },
-        { key: 'fumante' },
-        { key: 'antihtn_use' },
-        { key: 'statin_use' },
-        { key: 'hipertensao' },
-        { key: 'hipercolesterolemia_familiar' },
-      ],
-    },
-    {
-      title: 'Fluxograma de Estratificação SBC 2025',
-      isDivider: true,
-      fields: [],
-      dividerDescription: 'Os campos abaixo determinam a categoria de risco pelo algoritmo da Diretriz Brasileira (Tabela 4.1 / Figura 4.1).',
-    },
-    {
       title: 'Evento cardiovascular prévio',
+      step: 'triagem',
       fields: [
         { key: 'evento_cv_previo' },
         {
@@ -42,20 +29,17 @@ const spec: FormSpec = {
       ],
     },
     {
-      title: 'Doença aterosclerótica e marcadores',
+      title: 'Critério de risco extremo',
+      step: 'triagem',
       fields: [
-        { key: 'doenca_aterosclerotica_significativa' },
-        { key: 'cac_ua' },
-        { key: 'cac_percentil_gt75' },
-        { key: 'placa_carotidea_lt50' },
-        { key: 'placa_angiotc_lt50' },
-        { key: 'aaa_conhecido' },
-        { key: 'lpa_mgdl' },
-        { key: 'lpa_nmol' },
+        { key: 'cirurgia_revasc_previa_fora_evento' },
+        { key: 'ldl_persistente_ge100_max_tto' },
+        { key: 'evento_agudo_lt2anos' },
       ],
     },
     {
       title: 'Diabetes mellitus',
+      step: 'diabetes',
       fields: [
         { key: 'diabetes' },
         { key: 'tipo_dm',                      visibleWhen: [{ field: 'diabetes', equals: true }] },
@@ -71,17 +55,46 @@ const spec: FormSpec = {
       ],
     },
     {
-      title: 'Critério de risco extremo',
-      collapsible: true,
+      title: 'Doença aterosclerótica e marcadores',
+      step: 'alto_risco',
       fields: [
-        { key: 'cirurgia_revasc_previa_fora_evento' },
-        { key: 'ldl_persistente_ge100_max_tto' },
-        { key: 'evento_agudo_lt2anos' },
+        { key: 'doenca_aterosclerotica_significativa' },
+        { key: 'cac_ua' },
+        { key: 'cac_percentil_gt75' },
+        { key: 'placa_carotidea_lt50' },
+        { key: 'placa_angiotc_lt50' },
+        { key: 'aaa_conhecido' },
+        { key: 'lpa_mgdl' },
+        { key: 'lpa_nmol' },
+        { key: 'ldl_mgdl' },
+        { key: 'hipercolesterolemia_familiar' },
+      ],
+    },
+    {
+      title: 'Fluxograma de Estratificação SBC 2025',
+      step: 'prevent',
+      isDivider: true,
+      fields: [],
+      dividerDescription: 'Os campos abaixo alimentam o escore PREVENT (AHA), usado quando o paciente não se enquadra nas categorias de risco muito alto/extremo já avaliadas.',
+    },
+    {
+      title: 'Perfil clínico — PREVENT',
+      step: 'prevent',
+      fields: [
+        { key: 'ct_mgdl' },
+        { key: 'hdl_mgdl' },
+        { key: 'sbp_mmhg' },
+        { key: 'bmi' },
+        { key: 'egfr' },
+        { key: 'fumante' },
+        { key: 'antihtn_use' },
+        { key: 'statin_use' },
+        { key: 'hipertensao' },
       ],
     },
     {
       title: 'Fatores agravantes',
-      collapsible: true,
+      step: 'agravantes',
       fields: [
         { key: 'historia_familiar_cv_prematura' },
         { key: 'adiposidade_com_param_alterado' },

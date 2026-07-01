@@ -55,6 +55,7 @@ async def execute_calculator(
         inputs=body.inputs,
         user_id=current_user.id,
         company_id=current_user.company_id,
+        dry_run=body.dry_run,
     )
 
 

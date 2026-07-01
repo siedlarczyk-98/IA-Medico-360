@@ -42,17 +42,18 @@ class CalculatorDetailOut(BaseModel):
 
 class CalculatorExecuteRequest(BaseModel):
     inputs: dict
+    dry_run: bool = False
 
 
 class CalculatorExecuteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
-    version_id: UUID
+    id: UUID | None = None
+    version_id: UUID | None = None
     inputs: dict
     result: dict
     interpretation: str | None
-    createdat: datetime
+    createdat: datetime | None = None
 
 
 class CalculatorExtractRequest(BaseModel):

@@ -16,7 +16,9 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(pkill -f \"uvicorn app.main\")",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "Skill(run)",
+      "Skill(run:*)"
     ]
   }
 }

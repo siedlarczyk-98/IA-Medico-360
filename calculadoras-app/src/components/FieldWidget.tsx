@@ -55,7 +55,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
   if (field.field_type === 'boolean') {
     const boolVal = value as boolean | undefined;
     return (
-      <div>
+      <div data-field={field.key}>
         {labelNode}
         <div style={{ display: 'flex', gap: 6 }}>
           {(['true', 'false'] as const).map(opt => {
@@ -95,7 +95,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
 
   if (field.field_type === 'select') {
     return (
-      <div>
+      <div data-field={field.key}>
         {labelNode}
         <select
           value={value != null ? String(value) : ''}
@@ -115,7 +115,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
   if (field.field_type === 'multiselect') {
     const arrVal = (value as string[] | undefined) ?? [];
     return (
-      <div>
+      <div data-field={field.key}>
         {labelNode}
         <div style={{
           border: hasError ? '1px solid var(--red)' : '1px solid var(--line)',
@@ -153,7 +153,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
 
   if (field.field_type === 'number' || field.field_type === 'integer') {
     return (
-      <div>
+      <div data-field={field.key}>
         {labelNode}
         <input
           type="number"
@@ -174,7 +174,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
   }
 
   return (
-    <div>
+    <div data-field={field.key}>
       {labelNode}
       <input
         type="text"

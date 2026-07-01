@@ -49,12 +49,12 @@ export interface RiscoCvResult {
 }
 
 export interface ExecuteResponse {
-  id: string;
-  version_id: string;
+  id: string | null;
+  version_id: string | null;
   inputs: Record<string, unknown>;
   result: Record<string, unknown>;
   interpretation: string | null;
-  createdat: string;
+  createdat: string | null;
 }
 
 export interface ExtractResponse {
@@ -100,9 +100,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     const data = await res.json().catch(() => ({ detail: [] }));
     const fieldErrors: Record<string, string> = {};
     if (Array.isArray(data.detail)) {
+      // Erro de validação padrão do FastAPI/Pydantic (lista de erros por campo)
       for (const e of data.detail) {
         const key = e.loc?.[e.loc.length - 1] as string | undefined;
         if (key) fieldErrors[key] = e.msg as string;
+      }
+    } else if (data.detail && Array.isArray(data.detail.errors)) {
+      // Erro do validate_inputs do engine de calculadoras: { detail: { errors: string[] } }
+      for (const msg of data.detail.errors as string[]) {
+        fieldErrors[`_general_${msg}`] = msg;
       }
     }
     throw new ValidationError(fieldErrors);
@@ -124,8 +130,8 @@ export function getCalculator(slug: string): Promise<CalculatorDetail> {
   return get<CalculatorDetail>(`/calculators/${slug}`);
 }
 
-export function executeCalculator(slug: string, inputs: Record<string, unknown>): Promise<ExecuteResponse> {
-  return post<ExecuteResponse>(`/calculators/${slug}/execute`, { inputs });
+export function executeCalculator(slug: string, inputs: Record<string, unknown>, dryRun = false): Promise<ExecuteResponse> {
+  return post<ExecuteResponse>(`/calculators/${slug}/execute`, { inputs, dry_run: dryRun });
 }
 
 export function extractFields(slug: string, text: string): Promise<ExtractResponse> {

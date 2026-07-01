@@ -24,6 +24,7 @@ async def execute_calculator(
     inputs: dict,
     user_id: UUID,
     company_id: UUID | None,
+    dry_run: bool = False,
 ) -> CalculatorExecution:
     definition = await repo.get_definition_by_slug(db, slug)
     if definition is None:
@@ -49,6 +50,20 @@ async def execute_calculator(
         result = outcome["result"]
         interpretation = outcome.get("interpretation")
         interaction_id = None
+
+    if dry_run:
+        # Chamada intermediária (checagem de early-exit do wizard): não persiste
+        # execução nem consome cota de uso.
+        return CalculatorExecution(
+            calculator_id=definition.id,
+            version_id=version.id,
+            user_id=user_id,
+            company_id=company_id,
+            interaction_id=interaction_id,
+            inputs=validated_inputs,
+            result=result,
+            interpretation=interpretation,
+        )
 
     execution = CalculatorExecution(
         calculator_id=definition.id,

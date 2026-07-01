@@ -46,10 +46,10 @@ async def get_calculator_detail(db: AsyncSession, slug: str) -> CalculatorDetail
 
 
 async def run_calculator(
-    db: AsyncSession, *, slug: str, inputs: dict, user_id: UUID, company_id: UUID | None
+    db: AsyncSession, *, slug: str, inputs: dict, user_id: UUID, company_id: UUID | None, dry_run: bool = False
 ) -> CalculatorExecuteResponse:
     execution = await execute_calculator(
-        db, slug=slug, inputs=inputs, user_id=user_id, company_id=company_id
+        db, slug=slug, inputs=inputs, user_id=user_id, company_id=company_id, dry_run=dry_run
     )
     return CalculatorExecuteResponse.model_validate(execution)
 

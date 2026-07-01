@@ -25,3 +25,5 @@ calculadoras-app/.env
 calculadoras-app/.env.production
 calculadoras-app/node_modules/
 calculadoras-app/dist/
+calculadoras-app/test-results/
+calculadoras-app/playwright-report/

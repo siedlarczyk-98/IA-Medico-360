@@ -11,6 +11,8 @@ interface Props {
   aiFilledKeys?: Set<string>;
   fieldErrors?: Record<string, string>;
   showErrors?: boolean;
+  /** Se o formSpec define `steps`, restringe a renderização às seções do passo indicado. */
+  activeStep?: string;
 }
 
 function checkCondition(cond: VisibleWhen, values: Record<string, unknown>): boolean {
@@ -42,7 +44,7 @@ const sectionHeaderStyle: React.CSSProperties = {
   userSelect: 'none',
 };
 
-export function DynamicCalculatorForm({ fields, formSpec, values, onChange, aiFilledKeys, fieldErrors, showErrors }: Props) {
+export function DynamicCalculatorForm({ fields, formSpec, values, onChange, aiFilledKeys, fieldErrors, showErrors, activeStep }: Props) {
   const fieldMap = new Map(fields.map(f => [f.key, f]));
 
   const [collapsed, setCollapsed] = useState<Set<number>>(
@@ -79,6 +81,7 @@ export function DynamicCalculatorForm({ fields, formSpec, values, onChange, aiFi
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {formSpec.sections.map((section, si) => {
+        if (activeStep !== undefined && section.step !== activeStep) return null;
         if (!isVisible(section.visibleWhen, values)) return null;
 
         if (section.isDivider) {
