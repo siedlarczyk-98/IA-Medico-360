@@ -14,8 +14,9 @@ from app.calculators.schemas.calculator_schemas import (
 )
 
 
-async def list_calculators(db: AsyncSession, *, specialty: str | None) -> list[CalculatorListItem]:
+async def list_calculators(db: AsyncSession, *, specialty: str | None, user_id: UUID) -> list[CalculatorListItem]:
     definitions = await repo.list_definitions(db, specialty_slug=specialty)
+    favorite_ids = await repo.list_favorite_calculator_ids(db, user_id=user_id)
     return [
         CalculatorListItem(
             id=d.id,
@@ -23,6 +24,7 @@ async def list_calculators(db: AsyncSession, *, specialty: str | None) -> list[C
             name=d.name,
             description=d.description,
             specialty_slug=d.specialty.slug,
+            is_favorite=d.id in favorite_ids,
         )
         for d in definitions
     ]
@@ -43,6 +45,17 @@ async def get_calculator_detail(db: AsyncSession, slug: str) -> CalculatorDetail
         specialty_slug=definition.specialty.slug,
         fields=[CalculatorFieldOut.model_validate(f) for f in fields],
     )
+
+
+async def set_favorite(db: AsyncSession, *, slug: str, user_id: UUID, favorite: bool) -> None:
+    definition = await repo.get_definition_by_slug(db, slug)
+    if definition is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+
+    if favorite:
+        await repo.add_favorite(db, user_id=user_id, calculator_id=definition.id)
+    else:
+        await repo.remove_favorite(db, user_id=user_id, calculator_id=definition.id)
 
 
 async def run_calculator(

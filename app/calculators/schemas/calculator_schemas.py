@@ -12,6 +12,7 @@ class CalculatorListItem(BaseModel):
     name: str
     description: str | None
     specialty_slug: str
+    is_favorite: bool = False
 
 
 class CalculatorFieldOut(BaseModel):

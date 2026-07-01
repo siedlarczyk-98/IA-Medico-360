@@ -22,6 +22,7 @@ export interface CalculatorListItem {
   name: string;
   description: string | null;
   specialty_slug: string;
+  is_favorite: boolean;
 }
 
 export interface CalculatorDetail {
@@ -136,4 +137,24 @@ export function executeCalculator(slug: string, inputs: Record<string, unknown>,
 
 export function extractFields(slug: string, text: string): Promise<ExtractResponse> {
   return post<ExtractResponse>(`/calculators/${slug}/extract`, { text });
+}
+
+async function withoutBody(method: 'PUT' | 'DELETE', path: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/v1${path}`, {
+    method,
+    credentials: 'include',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
+  }
+}
+
+export function favoriteCalculator(slug: string): Promise<void> {
+  return withoutBody('PUT', `/calculators/${slug}/favorite`);
+}
+
+export function unfavoriteCalculator(slug: string): Promise<void> {
+  return withoutBody('DELETE', `/calculators/${slug}/favorite`);
 }

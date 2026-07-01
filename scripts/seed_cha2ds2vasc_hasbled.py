@@ -50,7 +50,7 @@ async def main() -> None:
             name="CHA2DS2-VASc + HAS-BLED",
             description=(
                 "Risco de AVC (CHA2DS2-VASc) e risco de sangramento (HAS-BLED) em fibrilação "
-                "atrial não valvar — sempre exibidos juntos."
+                "atrial não valvar"
             ),
             engine_type="formula",
             status="active",

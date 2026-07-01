@@ -28,7 +28,7 @@ async def list_calculators(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await calculators_service.list_calculators(db, specialty=specialty)
+    return await calculators_service.list_calculators(db, specialty=specialty, user_id=current_user.id)
 
 
 @router.get("/{slug}", response_model=CalculatorDetailOut)
@@ -83,6 +83,24 @@ async def extract_calculator_fields(
         fields_extracted=fields_extracted,
         interaction_id=None,
     )
+
+
+@router.put("/{slug}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+async def favorite_calculator(
+    slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await calculators_service.set_favorite(db, slug=slug, user_id=current_user.id, favorite=True)
+
+
+@router.delete("/{slug}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+async def unfavorite_calculator(
+    slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await calculators_service.set_favorite(db, slug=slug, user_id=current_user.id, favorite=False)
 
 
 @router.get("/{slug}/history", response_model=list[CalculatorExecutionHistoryItem])

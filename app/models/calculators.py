@@ -118,6 +118,24 @@ class CalculatorVersion(Base):
     executions: Mapped[list["CalculatorExecution"]] = relationship(back_populates="version")
 
 
+class CalculatorFavorite(Base):
+    __tablename__ = "calculator_favorites"
+    __table_args__ = (
+        UniqueConstraint("user_id", "calculator_id", name="uq_calculator_favorites_user_calculator"),
+        Index("ix_calculator_favorites_user", "user_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    calculator_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.calculator_definitions.id", ondelete="CASCADE"), nullable=False
+    )
+    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    calculator: Mapped["CalculatorDefinition"] = relationship()
+
+
 class CalculatorExecution(Base):
     __tablename__ = "calculator_executions"
     __table_args__ = (

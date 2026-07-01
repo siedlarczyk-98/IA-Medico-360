@@ -48,9 +48,8 @@ async def main() -> None:
             slug="risco_cv_sbc2025",
             name="Risco Cardiovascular (SBC 2025)",
             description=(
-                "Estratificação de risco cardiovascular para prevenção de aterosclerose, "
-                "conforme Diretriz Brasileira de Dislipidemias e Prevenção da Aterosclerose "
-                "(SBC, 2025). Inclui o escore PREVENT (AHA) como input do algoritmo."
+                "Estratificação de risco cardiovascular conforme Diretriz Brasileira de "
+                "Dislipidemias e Prevenção da Aterosclerose."
             ),
             engine_type="formula",
             status="active",

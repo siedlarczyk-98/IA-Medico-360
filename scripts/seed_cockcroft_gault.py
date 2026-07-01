@@ -46,7 +46,7 @@ async def main() -> None:
         definition = CalculatorDefinition(
             specialty_id=specialty.id,
             slug="cockcroft_gault",
-            name="Cockcroft-Gault (Clearance de Creatinina)",
+            name="Clearance de Creatinina (Cockcroft-Gault)",
             description=(
                 "Estimativa de clearance de creatinina para ajuste de dose em função renal, "
                 "com opção de peso real, ideal ou ajustado."

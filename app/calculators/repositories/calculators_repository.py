@@ -1,12 +1,14 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.calculators import (
     CalculatorDefinition,
     CalculatorExecution,
+    CalculatorFavorite,
     CalculatorVersion,
     Specialty,
 )
@@ -45,6 +47,31 @@ async def get_active_version(db: AsyncSession, calculator_id: UUID) -> Calculato
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def list_favorite_calculator_ids(db: AsyncSession, *, user_id: UUID) -> set[UUID]:
+    stmt = select(CalculatorFavorite.calculator_id).where(CalculatorFavorite.user_id == user_id)
+    result = await db.execute(stmt)
+    return set(result.scalars().all())
+
+
+async def add_favorite(db: AsyncSession, *, user_id: UUID, calculator_id: UUID) -> None:
+    stmt = (
+        pg_insert(CalculatorFavorite)
+        .values(user_id=user_id, calculator_id=calculator_id)
+        .on_conflict_do_nothing(constraint="uq_calculator_favorites_user_calculator")
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def remove_favorite(db: AsyncSession, *, user_id: UUID, calculator_id: UUID) -> None:
+    stmt = delete(CalculatorFavorite).where(
+        CalculatorFavorite.user_id == user_id,
+        CalculatorFavorite.calculator_id == calculator_id,
+    )
+    await db.execute(stmt)
+    await db.commit()
 
 
 async def list_executions(
