@@ -4,10 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { getMe } from './api/auth';
 
+// Side-effect: registra os formSpecs das calculadoras genéricas.
+import './calculators';
+
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
 const CalculatorsListPage = lazy(() => import('./pages/CalculatorsListPage').then(m => ({ default: m.CalculatorsListPage })));
 const RiscoCvSbc2025Page = lazy(() => import('./pages/RiscoCvSbc2025Page').then(m => ({ default: m.RiscoCvSbc2025Page })));
+const GenericCalculatorPage = lazy(() => import('./pages/GenericCalculatorPage').then(m => ({ default: m.GenericCalculatorPage })));
 
 function LoadingScreen() {
   return (
@@ -48,6 +52,7 @@ function App() {
         <Route path="/embed-auth" element={<EmbedAuthPage />} />
         <Route path="/" element={<RequireAuth><CalculatorsListPage /></RequireAuth>} />
         <Route path="/calculadoras/risco-cv-sbc2025" element={<RequireAuth><RiscoCvSbc2025Page /></RequireAuth>} />
+        <Route path="/calculadoras/:slug" element={<RequireAuth><GenericCalculatorPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

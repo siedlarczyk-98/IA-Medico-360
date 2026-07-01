@@ -11,7 +11,7 @@ interface Props {
 
 export function CalculatorCard({ calculator }: Props) {
   const navigate = useNavigate();
-  const path = SLUG_TO_PATH[calculator.slug];
+  const path = SLUG_TO_PATH[calculator.slug] ?? `/calculadoras/${calculator.slug}`;
 
   return (
     <button

@@ -1,13 +1,24 @@
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
 import { useCalculators } from '../hooks/useCalculators';
 import { CalculatorCard } from '../components/CalculatorCard';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { logout } from '../lib/auth';
 
 export function CalculatorsListPage() {
-  const { data: calculators, isLoading, error } = useCalculators('cardiologia');
+  const { data: allCalculators, isLoading, error } = useCalculators();
   const user = useCurrentUser();
-  const navigate = useNavigate();
+  const [specialtyFilter, setSpecialtyFilter] = useState<string | null>(null);
+
+  const specialties = useMemo(() => {
+    const slugs = new Set((allCalculators ?? []).map(c => c.specialty_slug));
+    return Array.from(slugs).sort();
+  }, [allCalculators]);
+
+  const calculators = useMemo(() => {
+    if (!allCalculators) return allCalculators;
+    if (!specialtyFilter) return allCalculators;
+    return allCalculators.filter(c => c.specialty_slug === specialtyFilter);
+  }, [allCalculators, specialtyFilter]);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--fill2)' }}>
@@ -75,23 +86,44 @@ export function CalculatorsListPage() {
         </div>
 
         {/* Filtro de especialidade */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={() => setSpecialtyFilter(null)}
             style={{
               padding: '6px 14px',
               borderRadius: 20,
               border: '1px solid var(--petrol)',
-              background: 'var(--petrol)',
-              color: '#fff',
+              background: specialtyFilter === null ? 'var(--petrol)' : 'none',
+              color: specialtyFilter === null ? '#fff' : 'var(--petrol)',
               fontSize: 12,
               fontWeight: 600,
               cursor: 'pointer',
+              textTransform: 'capitalize',
             }}
           >
-            Cardiologia
+            Todas
           </button>
+          {specialties.map(slug => (
+            <button
+              key={slug}
+              type="button"
+              onClick={() => setSpecialtyFilter(slug)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 20,
+                border: '1px solid var(--petrol)',
+                background: specialtyFilter === slug ? 'var(--petrol)' : 'none',
+                color: specialtyFilter === slug ? '#fff' : 'var(--petrol)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+              }}
+            >
+              {slug}
+            </button>
+          ))}
         </div>
 
         {isLoading && (
