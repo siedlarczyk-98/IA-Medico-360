@@ -40,6 +40,8 @@ INDEX_RENAMES = [
     (None, "ix_folders_user_createdat", "ix_folders_user_created_at"),
     (None, "ix_interactions_user_createdat", "ix_interactions_user_created_at"),
     (None, "ix_conversations_user_status_updatedat", "ix_conversations_user_status_updated_at"),
+    # Índice criado por migration de performance antiga (não declarado no model).
+    (None, "ix_audit_logs_createdat", "ix_audit_logs_created_at"),
     (CALC_SCHEMA, "ix_calculator_executions_user_createdat", "ix_calculator_executions_user_created_at"),
 ]
 
