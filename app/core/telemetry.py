@@ -8,8 +8,8 @@ https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
 """
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from opentelemetry import trace
 
@@ -27,8 +27,9 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
         return
 
     try:
-        import os
         import logging as _logging
+        import os
+
         from phoenix.otel import register
 
         # Loga erros de export do SDK OTel (normalmente silenciosos)
@@ -40,7 +41,7 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
 
         tracer_provider = register(project_name=project_name)
         _tracer = tracer_provider.get_tracer("medico360.ai_providers")
-        print(f"[TELEMETRY] Phoenix ativado → projeto='{project_name}' endpoint='{endpoint}' tracer={_tracer}", flush=True)
+        logger.info("Phoenix ativado → projeto='%s' endpoint='%s' tracer=%s", project_name, endpoint, _tracer)
     except ImportError:
         logger.warning("arize-phoenix-otel não instalado. Execute: pip install arize-phoenix-otel")
     except Exception as exc:
@@ -80,10 +81,10 @@ def start_llm_span(provider: str, model_id: str, prompt: str, operation: str = "
     Chame span.end() quando o stream terminar."""
     tracer = get_tracer()
     if tracer is None:
-        print(f"[TELEMETRY] start_llm_span: tracer é None — Phoenix não inicializado", flush=True)
+        logger.debug("start_llm_span: tracer é None — Phoenix não inicializado")
         return None
     span = tracer.start_span(f"{provider}.{operation}")
-    print(f"[TELEMETRY] span criado: {provider}.{operation} recording={span.is_recording()}", flush=True)
+    logger.debug("span criado: %s.%s recording=%s", provider, operation, span.is_recording())
     _set_llm_attributes(span, provider, model_id, prompt)
     return span
 

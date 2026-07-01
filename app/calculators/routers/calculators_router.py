@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.database import get_db
-from app.core.limiter import limiter
-from app.models.models import User
 from app.calculators.repositories import calculators_repository
 from app.calculators.schemas.calculator_schemas import (
     CalculatorDetailOut,
@@ -15,7 +13,9 @@ from app.calculators.schemas.calculator_schemas import (
     CalculatorListItem,
 )
 from app.calculators.services import calculators_service, extraction_service
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import get_db
+from app.core.limiter import limiter
+from app.models.models import User
 
 router = APIRouter(prefix="/calculators", tags=["calculators"])
 
@@ -68,9 +68,7 @@ async def extract_calculator_fields(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    definition = await calculators_repository.get_definition_by_slug(db, slug)
-    if definition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    definition = await calculators_repository.get_definition_or_404(db, slug)
 
     suggested_inputs, fields_extracted = await extraction_service.extract_calculator_inputs(
         db,

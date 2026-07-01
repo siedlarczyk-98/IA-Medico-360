@@ -101,15 +101,10 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     const data = await res.json().catch(() => ({ detail: [] }));
     const fieldErrors: Record<string, string> = {};
     if (Array.isArray(data.detail)) {
-      // Erro de validação padrão do FastAPI/Pydantic (lista de erros por campo)
+      // Erro de validação por campo (FastAPI/Pydantic e o engine de calculadoras usam o mesmo formato)
       for (const e of data.detail) {
         const key = e.loc?.[e.loc.length - 1] as string | undefined;
         if (key) fieldErrors[key] = e.msg as string;
-      }
-    } else if (data.detail && Array.isArray(data.detail.errors)) {
-      // Erro do validate_inputs do engine de calculadoras: { detail: { errors: string[] } }
-      for (const msg of data.detail.errors as string[]) {
-        fieldErrors[`_general_${msg}`] = msg;
       }
     }
     throw new ValidationError(fieldErrors);

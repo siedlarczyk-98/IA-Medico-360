@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,13 @@ async def get_definition_by_slug(db: AsyncSession, slug: str) -> CalculatorDefin
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def get_definition_or_404(db: AsyncSession, slug: str) -> CalculatorDefinition:
+    definition = await get_definition_by_slug(db, slug)
+    if definition is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    return definition
 
 
 async def get_active_version(db: AsyncSession, calculator_id: UUID) -> CalculatorVersion | None:

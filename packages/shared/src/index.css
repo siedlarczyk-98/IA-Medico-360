@@ -16,6 +16,12 @@
   --red:    #c8434b;
   --red-bg: #fdf2f3;
   --red-fg: #7a2a30;
+  --info:        #1d4ed8;
+  --info-bg:     #eff6ff;
+  --info-border: #bfdbfe;
+  --warning:        #92400e;
+  --warning-bg:     #fffbeb;
+  --warning-border: #fde68a;
 }
 
 html, body, #root {

@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useCalculatorDetail } from '../hooks/useCalculatorDetail';
 import { useExecuteCalculator } from '../hooks/useExecuteCalculator';
 import { DynamicCalculatorForm } from '../components/DynamicCalculatorForm';
-import { AiPrefillBox } from '../components/AiPrefillBox';
+import { AiPrefillSection } from '../components/AiPrefillSection';
+import { CalculatorTopbar } from '../components/CalculatorTopbar';
 import { ResultPanel } from '../components/ResultPanel';
 import { WizardStepper } from '../components/WizardStepper';
 import { formSpecRegistry } from '../calculators/formSpecs';
+import { buildVisibleInputs, checkVisibleCond, isVisibleSection, validateRequired } from '../calculators/formHelpers';
 import { ValidationError } from '../api/calculators';
-import type { CalculatorField } from '../api/calculators';
 
 // Side-effect: registers the formSpec for this slug.
 import '../calculators/riscoCvSbc2025.formSpec';
@@ -35,63 +36,6 @@ const STEP_MAX_ALGO_STEP: Record<string, number> = {
   agravantes: 5,
 };
 
-function buildVisibleInputs(
-  values: Record<string, unknown>,
-  fields: CalculatorField[],
-  formSpec: import('../calculators/formSpecs').FormSpec | undefined
-): Record<string, unknown> {
-  if (!formSpec) {
-    const out: Record<string, unknown> = {};
-    for (const f of fields) {
-      if (values[f.key] !== undefined) out[f.key] = values[f.key];
-    }
-    return out;
-  }
-
-  const visibleKeys = new Set<string>();
-  const vals = values;
-
-  function checkCond(cond: { field: string; equals?: unknown; notEquals?: unknown; includes?: unknown }): boolean {
-    const v = vals[cond.field];
-    if (cond.equals !== undefined)    return v === cond.equals;
-    if (cond.notEquals !== undefined) return v !== cond.notEquals;
-    if (cond.includes !== undefined)  return Array.isArray(v) && (v as unknown[]).includes(cond.includes);
-    return true;
-  }
-
-  for (const section of formSpec.sections) {
-    if (section.visibleWhen && !section.visibleWhen.every(checkCond)) continue;
-    for (const f of section.fields) {
-      if (!f.visibleWhen || f.visibleWhen.every(checkCond)) {
-        visibleKeys.add(f.key);
-      }
-    }
-  }
-
-  const out: Record<string, unknown> = {};
-  for (const key of visibleKeys) {
-    if (values[key] !== undefined) out[key] = values[key];
-  }
-  return out;
-}
-
-function validateRequired(
-  values: Record<string, unknown>,
-  fields: CalculatorField[],
-  visibleKeys: Set<string>
-): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const f of fields) {
-    if (!f.required) continue;
-    if (!visibleKeys.has(f.key)) continue;
-    const v = values[f.key];
-    if (v === undefined || v === null || v === '') {
-      errors[f.key] = 'Campo obrigatório';
-    }
-  }
-  return errors;
-}
-
 export function RiscoCvSbc2025Page() {
   const navigate = useNavigate();
   const { data: calculator, isLoading } = useCalculatorDetail(SLUG);
@@ -102,7 +46,6 @@ export function RiscoCvSbc2025Page() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(true);
-  const [showAiBox, setShowAiBox] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [earlyExitAtStep, setEarlyExitAtStep] = useState<number | null>(null);
 
@@ -136,19 +79,6 @@ export function RiscoCvSbc2025Page() {
       }
     }
     return keys;
-  }
-
-  function checkVisibleCond(cond: { field: string; equals?: unknown; notEquals?: unknown; includes?: unknown }, vals: Record<string, unknown>): boolean {
-    const v = vals[cond.field];
-    if (cond.equals !== undefined)    return v === cond.equals;
-    if (cond.notEquals !== undefined) return v !== cond.notEquals;
-    if (cond.includes !== undefined)  return Array.isArray(v) && (v as unknown[]).includes(cond.includes);
-    return true;
-  }
-
-  function isVisibleSection(conditions: { field: string; equals?: unknown; notEquals?: unknown; includes?: unknown }[] | undefined, vals: Record<string, unknown>): boolean {
-    if (!conditions || conditions.length === 0) return true;
-    return conditions.every(c => checkVisibleCond(c, vals));
   }
 
   function advanceStep() {
@@ -372,37 +302,12 @@ export function RiscoCvSbc2025Page() {
         </div>
       )}
 
-      {/* Topbar */}
-      <div style={{
-        background: '#fff',
-        borderBottom: '1px solid var(--line)',
-        padding: '0 20px',
-        height: 56,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}>
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen2)', fontSize: 18, lineHeight: 1, padding: '4px 6px' }}
-        >
-          ←
-        </button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {calculator.name}
-          </p>
-          <p style={{ fontSize: 11, color: 'var(--pen2)' }}>SBC 2025 · {filledRequired}/{requiredCount} obrigatórios</p>
-        </div>
-        {/* Progress bar */}
-        <div style={{ width: 80, height: 4, background: 'var(--line2)', borderRadius: 2, flexShrink: 0 }}>
-          <div style={{ height: '100%', width: `${progress}%`, background: 'var(--petrol)', borderRadius: 2, transition: 'width 0.3s' }} />
-        </div>
-      </div>
+      <CalculatorTopbar
+        title={calculator.name}
+        subtitle={`SBC 2025 · ${filledRequired}/${requiredCount} obrigatórios`}
+        progress={progress}
+        onBack={() => navigate('/')}
+      />
 
       {isWizard && steps && (
         <div style={{ background: '#fff', borderBottom: '1px solid var(--line)' }}>
@@ -414,77 +319,17 @@ export function RiscoCvSbc2025Page() {
 
       <div style={{ maxWidth: 780, margin: '0 auto', padding: '24px 16px 60px' }}>
 
-        {/* Botão IA Prefill */}
-        <div style={{ marginBottom: 20 }}>
-          {!showAiBox ? (
-            <button
-              type="button"
-              onClick={() => setShowAiBox(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 16px',
-                background: '#fff',
-                border: '1px solid var(--line)',
-                borderRadius: 10,
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'var(--pen)',
-                cursor: 'pointer',
-                transition: 'border-color 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--petrol)')}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--line)')}
-            >
-              <span style={{ fontSize: 14 }}>✦</span>
-              Preencher a partir de uma evolução
-            </button>
-          ) : (
-            <div>
-              <AiPrefillBox slug={SLUG} onPrefill={(s, e) => { handlePrefill(s, e); setShowAiBox(false); }} />
-              <button
-                type="button"
-                onClick={() => setShowAiBox(false)}
-                style={{ marginTop: 8, fontSize: 12, color: 'var(--pen3)', background: 'none', border: 'none', cursor: 'pointer' }}
-              >
-                ← Cancelar
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Aviso de campos IA preenchidos */}
-        {aiFilledKeys.size > 0 && (
-          <div style={{
-            background: '#eff6ff',
-            border: '1px solid #bfdbfe',
-            borderRadius: 10,
-            padding: '10px 14px',
-            marginBottom: 16,
-            fontSize: 12,
-            color: '#1d4ed8',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <span>✦</span>
-            <span>
-              <strong>{aiFilledKeys.size} {aiFilledKeys.size === 1 ? 'campo preenchido' : 'campos preenchidos'} pela IA.</strong>
-              {' '}Revise e confirme os valores antes de calcular.
-            </span>
-          </div>
-        )}
+        <AiPrefillSection slug={SLUG} aiFilledCount={aiFilledKeys.size} onPrefill={handlePrefill} />
 
         {earlyExitAtStep != null ? (
           <div style={{
-            background: '#fffbeb',
-            border: '1px solid #fde68a',
+            background: 'var(--warning-bg)',
+            border: '1px solid var(--warning-border)',
             borderRadius: 10,
             padding: '12px 16px',
             marginBottom: 16,
             fontSize: 13,
-            color: '#92400e',
+            color: 'var(--warning)',
           }}>
             Risco já determinado no Passo {earlyExitAtStep} do fluxograma — os dados dos passos seguintes não alterariam essa categoria. Você pode complementá-los se quiser registrar mais contexto clínico.
           </div>

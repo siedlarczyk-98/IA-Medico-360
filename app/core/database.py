@@ -24,6 +24,11 @@ engine = create_async_engine(
 async_session_factory = async_sessionmaker(
     engine,
     class_=AsyncSession,
+    # Necessário em SQLAlchemy async: com expire_on_commit=True, acessar um atributo
+    # após o commit dispara lazy-load implícito, que é proibido em contexto async
+    # (MissingGreenlet). Efeito colateral: objetos podem ficar com dados stale após
+    # commit se o mesmo objeto for reutilizado sem `db.refresh()` — mitigar chamando
+    # `await db.refresh(obj)` explicitamente quando o valor pós-commit importar.
     expire_on_commit=False,
 )
 

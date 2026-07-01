@@ -1,5 +1,5 @@
 import type { ExecuteResponse, RiscoCvResult } from '../api/calculators';
-import { DISCLAIMER } from '../tokens';
+import { DISCLAIMER } from '@medico360/shared/tokens';
 
 interface Props {
   result: ExecuteResponse;

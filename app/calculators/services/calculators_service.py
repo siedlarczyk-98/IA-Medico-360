@@ -1,6 +1,5 @@
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculators.engine.calculator_engine import execute_calculator
@@ -31,9 +30,7 @@ async def list_calculators(db: AsyncSession, *, specialty: str | None, user_id: 
 
 
 async def get_calculator_detail(db: AsyncSession, slug: str) -> CalculatorDetailOut:
-    definition = await repo.get_definition_by_slug(db, slug)
-    if definition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    definition = await repo.get_definition_or_404(db, slug)
 
     fields = sorted(definition.fields, key=lambda f: f.display_order)
     return CalculatorDetailOut(
@@ -48,9 +45,7 @@ async def get_calculator_detail(db: AsyncSession, slug: str) -> CalculatorDetail
 
 
 async def set_favorite(db: AsyncSession, *, slug: str, user_id: UUID, favorite: bool) -> None:
-    definition = await repo.get_definition_by_slug(db, slug)
-    if definition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    definition = await repo.get_definition_or_404(db, slug)
 
     if favorite:
         await repo.add_favorite(db, user_id=user_id, calculator_id=definition.id)
@@ -70,9 +65,7 @@ async def run_calculator(
 async def get_calculator_history(
     db: AsyncSession, *, slug: str, user_id: UUID
 ) -> list[CalculatorExecutionHistoryItem]:
-    definition = await repo.get_definition_by_slug(db, slug)
-    if definition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    definition = await repo.get_definition_or_404(db, slug)
 
     executions = await repo.list_executions(db, calculator_id=definition.id, user_id=user_id)
     return [CalculatorExecutionHistoryItem.model_validate(e) for e in executions]

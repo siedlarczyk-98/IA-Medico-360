@@ -39,9 +39,9 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
         <span style={{
           fontSize: 10,
           fontWeight: 600,
-          background: '#eff6ff',
-          color: '#1d4ed8',
-          border: '1px solid #bfdbfe',
+          background: 'var(--info-bg)',
+          color: 'var(--info)',
+          border: '1px solid var(--info-border)',
           borderRadius: 4,
           padding: '1px 5px',
           letterSpacing: '0.02em',

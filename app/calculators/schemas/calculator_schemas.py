@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CalculatorListItem(BaseModel):
@@ -58,7 +58,7 @@ class CalculatorExecuteResponse(BaseModel):
 
 
 class CalculatorExtractRequest(BaseModel):
-    text: str
+    text: str = Field(max_length=8000)
 
 
 class CalculatorExtractResponse(BaseModel):

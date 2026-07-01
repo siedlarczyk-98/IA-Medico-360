@@ -1,5 +1,5 @@
 import type { ExecuteResponse } from '../api/calculators';
-import { DISCLAIMER } from '../tokens';
+import { DISCLAIMER } from '@medico360/shared/tokens';
 
 interface ScoreEntry {
   key: string;
@@ -27,9 +27,9 @@ interface GenericResult {
 }
 
 const ALERT_STYLE: Record<Alert['level'], { bg: string; border: string; color: string }> = {
-  warning: { bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
-  danger:  { bg: 'var(--redBg)', border: '#f5b5ba', color: 'var(--redFg)' },
-  info:    { bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8' },
+  warning: { bg: 'var(--warning-bg)', border: 'var(--warning-border)', color: 'var(--warning)' },
+  danger:  { bg: 'var(--red-bg)', border: '#f5b5ba', color: 'var(--red-fg)' },
+  info:    { bg: 'var(--info-bg)', border: 'var(--info-border)', color: 'var(--info)' },
 };
 
 interface Props {

@@ -17,7 +17,8 @@ from typing import AsyncIterator
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
-from app.core.telemetry import async_llm_span, start_llm_span, _set_llm_output
+from app.core.telemetry import _set_llm_output, async_llm_span, start_llm_span
+from app.middleware.dlp import sanitize_prompt
 
 settings = get_settings()
 
@@ -639,9 +640,32 @@ PROVIDER_TYPE_REGISTRY: dict[str, BaseProvider] = {
 }
 
 
+class DlpEnforcingProvider(BaseProvider):
+    """Envolve um provider real e sanitiza `prompt` (DLP) antes de repassar.
+
+    Os serviços que montam prompts (Agregador, Orquestrador) já chamam
+    `sanitize_prompt` manualmente antes de persistir o texto no banco — este
+    wrapper é a rede de segurança que garante que, mesmo que um chamador futuro
+    esqueça esse passo, nenhum texto não sanitizado saia para um provider
+    externo. Sanitizar um texto já sanitizado é idempotente (no-op).
+    """
+
+    def __init__(self, inner: BaseProvider):
+        self._inner = inner
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> ProviderResponse:
+        safe_prompt = sanitize_prompt(prompt).sanitized_text
+        return await self._inner.complete(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content)
+
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None) -> AsyncIterator[StreamToken]:
+        safe_prompt = sanitize_prompt(prompt).sanitized_text
+        async for token in self._inner.stream(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content):
+            yield token
+
+
 def get_provider_by_type(provider_type: str) -> BaseProvider:
-    """Retorna o provider correspondente ao tipo."""
+    """Retorna o provider correspondente ao tipo, envolvido pela rede de segurança DLP."""
     provider = PROVIDER_TYPE_REGISTRY.get(provider_type)
     if not provider:
         raise ValueError(f"Provider type não suportado: {provider_type}")
-    return provider
+    return DlpEnforcingProvider(provider)

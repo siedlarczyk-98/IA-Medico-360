@@ -8,6 +8,7 @@ dist/
 build/
 .pytest_cache/
 *.log
+node_modules/
 
 # Design bundle (Claude Design export — não é código de produção)
 medico-360/
@@ -18,13 +19,9 @@ scripts/generate_dev_token.py
 # Frontend — agregador
 frontend-app/.env
 frontend-app/.env.production
-frontend-app/node_modules/
-frontend-app/dist/
 
 # Frontend — calculadoras
 calculadoras-app/.env
 calculadoras-app/.env.production
-calculadoras-app/node_modules/
-calculadoras-app/dist/
 calculadoras-app/test-results/
 calculadoras-app/playwright-report/

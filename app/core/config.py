@@ -4,6 +4,8 @@ Carrega variáveis de .env ou variáveis de ambiente do Railway.
 """
 
 from functools import lru_cache
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +51,8 @@ class Settings(BaseSettings):
     cookie_domain: str | None = None
 
     # --- Embed SSO ---
+    # Default cobre o único parceiro atual; sobrescrever via env EMBED_ALLOWED_ORIGINS
+    # (lista JSON, ex.: '["https://a.com","https://b.com"]') para adicionar parceiros sem alterar código.
     embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
 
     # --- Intercom (Identity Verification / Messenger Security) ---
@@ -71,6 +75,26 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        """Falha rápido no startup se chaves de segurança essenciais estiverem vazias em produção,
+        em vez de deixar auth/JWT ou o SendGrid falharem silenciosamente em runtime."""
+        if not self.is_production:
+            return self
+
+        missing = [
+            name
+            for name, value in (
+                ("jwt_secret_key", self.jwt_secret_key),
+                ("database_url", self.database_url),
+                ("sendgrid_api_key", self.sendgrid_api_key),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(f"Variáveis obrigatórias vazias em produção: {', '.join(missing)}")
+        return self
 
 
 @lru_cache

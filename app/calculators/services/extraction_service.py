@@ -10,15 +10,15 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.calculators.engine.field_coercion import NUMERIC_TYPES, valid_options
 from app.core.config import get_settings
 from app.core.http_client import get_client
+from app.middleware.dlp import sanitize_prompt
 from app.models.calculators import CalculatorField
 from app.models.models import AuditLog
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-_NUMERIC_TYPES = {"number", "integer"}
 
 
 def _build_prompt(fields: list[CalculatorField], text: str) -> str:
@@ -28,8 +28,7 @@ def _build_prompt(fields: list[CalculatorField], text: str) -> str:
         if f.unit:
             descriptor += f", unidade: {f.unit}"
         if f.options:
-            values = [opt.get("value") for opt in f.options if isinstance(opt, dict)]
-            descriptor += f", valores possíveis: {values}"
+            descriptor += f", valores possíveis: {sorted(valid_options(f))}"
         field_lines.append(descriptor)
 
     fields_block = "\n".join(field_lines)
@@ -54,7 +53,7 @@ def _coerce_value(field: CalculatorField, value):
     if value is None:
         return None
 
-    if field.field_type in _NUMERIC_TYPES:
+    if field.field_type in NUMERIC_TYPES:
         try:
             return int(value) if field.field_type == "integer" else float(value)
         except (TypeError, ValueError):
@@ -64,14 +63,13 @@ def _coerce_value(field: CalculatorField, value):
         return value if isinstance(value, bool) else None
 
     if field.field_type == "select":
-        valid_options = {opt.get("value") for opt in (field.options or []) if isinstance(opt, dict)}
-        return value if value in valid_options else None
+        return value if value in valid_options(field) else None
 
     if field.field_type == "multiselect":
         if not isinstance(value, list):
             return None
-        valid_options = {opt.get("value") for opt in (field.options or []) if isinstance(opt, dict)}
-        filtered = [v for v in value if v in valid_options]
+        options = valid_options(field)
+        filtered = [v for v in value if v in options]
         return filtered or None
 
     if field.field_type == "text":
@@ -92,6 +90,7 @@ async def extract_calculator_inputs(
     """
     fields_by_key = {f.key: f for f in fields}
     suggested_inputs: dict = {}
+    sanitized_text = sanitize_prompt(text).sanitized_text
 
     try:
         client = get_client()
@@ -104,7 +103,7 @@ async def extract_calculator_inputs(
             json={
                 "model": "gpt-5.4-mini",
                 "messages": [
-                    {"role": "user", "content": _build_prompt(fields, text)},
+                    {"role": "user", "content": _build_prompt(fields, sanitized_text)},
                 ],
                 "max_completion_tokens": 800,
                 "temperature": 0,

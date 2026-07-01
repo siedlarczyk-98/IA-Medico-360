@@ -22,17 +22,17 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
 
   return (
     <div style={{
-      border: '1px solid #bfdbfe',
+      border: '1px solid var(--info-border)',
       borderRadius: 12,
-      background: '#eff6ff',
+      background: 'var(--info-bg)',
       padding: '16px 18px',
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>✦ Preencher com IA</span>
-        <span style={{ fontSize: 12, color: '#3b82f6' }}>Cole um trecho da evolução e a IA extrai os campos</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--info)' }}>✦ Preencher com IA</span>
+        <span style={{ fontSize: 12, color: 'var(--info)' }}>Cole um trecho da evolução e a IA extrai os campos</span>
       </div>
 
       <textarea
@@ -43,7 +43,7 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
         style={{
           width: '100%',
           padding: '10px 12px',
-          border: '1px solid #bfdbfe',
+          border: '1px solid var(--info-border)',
           borderRadius: 8,
           fontSize: 13,
           color: 'var(--ink)',
@@ -68,7 +68,7 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
         style={{
           alignSelf: 'flex-start',
           padding: '9px 18px',
-          background: isPending || !text.trim() ? 'var(--fill)' : '#1d4ed8',
+          background: isPending || !text.trim() ? 'var(--fill)' : 'var(--info)',
           color: isPending || !text.trim() ? 'var(--pen3)' : '#fff',
           border: 'none',
           borderRadius: 8,

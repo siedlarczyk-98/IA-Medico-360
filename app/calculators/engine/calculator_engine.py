@@ -26,9 +26,7 @@ async def execute_calculator(
     company_id: UUID | None,
     dry_run: bool = False,
 ) -> CalculatorExecution:
-    definition = await repo.get_definition_by_slug(db, slug)
-    if definition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Calculadora '{slug}' não encontrada")
+    definition = await repo.get_definition_or_404(db, slug)
 
     version = await repo.get_active_version(db, definition.id)
     if version is None:
@@ -37,7 +35,7 @@ async def execute_calculator(
     try:
         validated_inputs = validate_inputs(definition.fields, inputs)
     except CalculatorValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"errors": exc.errors})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.errors)
 
     if definition.engine_type == "orchestrator":
         result, interpretation, interaction_id = await _delegate_to_orchestrator(

@@ -1,0 +1,9 @@
+{
+  "name": "medico-360",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "frontend-app",
+    "calculadoras-app"
+  ]
+}

@@ -4,13 +4,13 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException, status
 import jwt as pyjwt
-from sqlalchemy import select, update
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.models import InviteToken, OtpCode, User
+from app.repositories import auth_repository as repo
 from app.services import email_service
 
 
@@ -73,10 +73,7 @@ async def _get_valid_invite(db: AsyncSession, token_str: str) -> InviteToken:
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token de convite inválido")
 
-    result = await db.execute(
-        select(InviteToken).where(InviteToken.token == token_uuid)
-    )
-    invite = result.scalar_one_or_none()
+    invite = await repo.get_invite_by_token(db, token_uuid)
     if not invite or invite.used or invite.expires_at < _utcnow():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Link de convite inválido ou expirado")
     return invite
@@ -91,8 +88,7 @@ async def accept_invite(
     if not resolved_email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email é obrigatório")
 
-    result = await db.execute(select(User).where(User.email == resolved_email))
-    user = result.scalar_one_or_none()
+    user = await repo.get_user_by_email(db, resolved_email)
 
     # Open invites (no pre-bound email) must never grant access to existing accounts —
     # that would allow any token holder to take over arbitrary accounts by supplying their email.
@@ -117,8 +113,7 @@ async def accept_invite(
 async def register_and_send_invite(db: AsyncSession, email: str) -> None:
     """Auto-cadastro: cria usuário (se não existir) e envia link de convite por email."""
     settings = get_settings()
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+    user = await repo.get_user_by_email(db, email)
     if not user:
         user = User(email=email, role="beta_user", status=True, onboarding_complete=False)
         db.add(user)
@@ -141,8 +136,7 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
     """Retorna (user, created). created=True se o usuário foi criado agora."""
     from sqlalchemy.exc import IntegrityError
 
-    result = await db.execute(select(User).where(User.email == email, User.status == True))
-    user = result.scalar_one_or_none()
+    user = await repo.get_user_by_email(db, email, active_only=True)
     if user:
         return user, False
     try:
@@ -153,23 +147,17 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
         return user, True
     except IntegrityError:
         await db.rollback()
-        result = await db.execute(select(User).where(User.email == email, User.status == True))
-        user = result.scalar_one()
+        user = await repo.get_user_by_email(db, email, active_only=True)
+        assert user is not None, "IntegrityError implica que o usuário já existe"
         return user, False
 
 
 async def request_otp(db: AsyncSession, email: str) -> None:
-    result = await db.execute(select(User).where(User.email == email, User.status == True))
-    user = result.scalar_one_or_none()
+    user = await repo.get_user_by_email(db, email, active_only=True)
     if not user:
         return  # silencioso — não revelar se email existe
 
-    # Invalidate existing unused OTPs for this email
-    await db.execute(
-        update(OtpCode)
-        .where(OtpCode.email == email, OtpCode.used == False)
-        .values(used=True)
-    )
+    await repo.invalidate_unused_otps(db, email)
 
     settings = get_settings()
     code = str(secrets.randbelow(900000) + 100000)
@@ -189,14 +177,7 @@ _OTP_MAX_ATTEMPTS = 5
 
 async def verify_otp(db: AsyncSession, email: str, code: str) -> tuple[User, str]:
     now = _utcnow()
-    result = await db.execute(
-        select(OtpCode).where(
-            OtpCode.email == email,
-            OtpCode.used == False,
-            OtpCode.expires_at > now,
-        )
-    )
-    otp = result.scalar_one_or_none()
+    otp = await repo.get_active_otp(db, email, now=now)
     if not otp:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
 
@@ -214,8 +195,7 @@ async def verify_otp(db: AsyncSession, email: str, code: str) -> tuple[User, str
 
     otp.used = True
 
-    result = await db.execute(select(User).where(User.email == email, User.status == True))
-    user = result.scalar_one_or_none()
+    user = await repo.get_user_by_email(db, email, active_only=True)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
 
