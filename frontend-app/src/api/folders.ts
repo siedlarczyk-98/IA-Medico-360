@@ -13,8 +13,8 @@ function authHeaders(): HeadersInit {
 export interface Folder {
   id: string;
   name: string;
-  createdat: string;
-  updatedat: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export async function listFolders(): Promise<Folder[]> {

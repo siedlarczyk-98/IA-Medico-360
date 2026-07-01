@@ -44,8 +44,8 @@ class Specialty(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     calculators: Mapped[list["CalculatorDefinition"]] = relationship(back_populates="specialty")
 
@@ -64,8 +64,8 @@ class CalculatorDefinition(Base):
     description: Mapped[str | None] = mapped_column(Text)
     engine_type: Mapped[str] = mapped_column(String(20), nullable=False, default=EngineTypeEnum.FORMULA.value)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=CalculatorStatusEnum.ACTIVE.value)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     specialty: Mapped["Specialty"] = relationship(back_populates="calculators")
     fields: Mapped[list["CalculatorField"]] = relationship(back_populates="calculator", cascade="all, delete-orphan")
@@ -91,8 +91,8 @@ class CalculatorField(Base):
     max_value: Mapped[float | None] = mapped_column()
     options: Mapped[list | None] = mapped_column(JSONB)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     calculator: Mapped["CalculatorDefinition"] = relationship(back_populates="fields")
 
@@ -112,7 +112,7 @@ class CalculatorVersion(Base):
     interpretation_rules: Mapped[dict | None] = mapped_column(JSONB)
     clinical_reference: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     calculator: Mapped["CalculatorDefinition"] = relationship(back_populates="versions")
     executions: Mapped[list["CalculatorExecution"]] = relationship(back_populates="version")
@@ -131,7 +131,7 @@ class CalculatorFavorite(Base):
     calculator_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey(f"{SCHEMA}.calculator_definitions.id", ondelete="CASCADE"), nullable=False
     )
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     calculator: Mapped["CalculatorDefinition"] = relationship()
 
@@ -139,7 +139,7 @@ class CalculatorFavorite(Base):
 class CalculatorExecution(Base):
     __tablename__ = "calculator_executions"
     __table_args__ = (
-        Index("ix_calculator_executions_user_createdat", "user_id", "createdat"),
+        Index("ix_calculator_executions_user_created_at", "user_id", "created_at"),
         Index("ix_calculator_executions_calculator_user", "calculator_id", "user_id"),
         {"schema": SCHEMA},
     )
@@ -153,7 +153,7 @@ class CalculatorExecution(Base):
     inputs: Mapped[dict] = mapped_column(JSONB, nullable=False)
     result: Mapped[dict] = mapped_column(JSONB, nullable=False)
     interpretation: Mapped[str | None] = mapped_column(Text)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     calculator: Mapped["CalculatorDefinition"] = relationship(back_populates="executions")
     version: Mapped["CalculatorVersion"] = relationship(back_populates="executions")

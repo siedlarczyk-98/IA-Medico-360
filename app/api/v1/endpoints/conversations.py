@@ -26,7 +26,7 @@ async def list_conversations(
     result = await db.execute(
         select(Conversation)
         .where(Conversation.user_id == current_user.id, Conversation.status == True)
-        .order_by(Conversation.updatedat.desc())
+        .order_by(Conversation.updated_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -70,7 +70,7 @@ async def get_conversation(
         messages.append(ConversationMessage(role="user", content=interaction.prompt_text))
 
         if conv.feature == "AGREGADOR":
-            for resp in sorted(interaction.responses, key=lambda r: r.createdat):
+            for resp in sorted(interaction.responses, key=lambda r: r.created_at):
                 if not resp.error_message:
                     messages.append(ConversationMessage(
                         role="assistant",
@@ -79,7 +79,7 @@ async def get_conversation(
                     ))
         else:
             # ORQUESTRADOR — single response, mode comes from interaction
-            for resp in sorted(interaction.responses, key=lambda r: r.createdat):
+            for resp in sorted(interaction.responses, key=lambda r: r.created_at):
                 if not resp.error_message:
                     messages.append(ConversationMessage(
                         role="assistant",
@@ -93,6 +93,6 @@ async def get_conversation(
         title=conv.title,
         feature=conv.feature,
         messages=messages,
-        createdat=conv.createdat,
-        updatedat=conv.updatedat,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
     )

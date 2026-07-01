@@ -41,7 +41,7 @@ async def list_folders(
     result = await db.execute(
         select(Folder)
         .where(Folder.user_id == current_user.id)
-        .order_by(Folder.createdat)
+        .order_by(Folder.created_at)
     )
     return result.scalars().all()
 

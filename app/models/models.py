@@ -70,8 +70,8 @@ class Company(Base):
     settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     company_status: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy_company_id: Mapped[str | None] = mapped_column(String(255))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     users: Mapped[list["User"]] = relationship(back_populates="company")
@@ -96,8 +96,8 @@ class User(Base):
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy_user_id: Mapped[str | None] = mapped_column(String(255))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     company: Mapped["Company | None"] = relationship(back_populates="users")
@@ -116,7 +116,7 @@ class UserPreference(Base):
     selected_models: Mapped[dict | None] = mapped_column(JSONB, default=list)
     ui_settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     notification_prefs: Mapped[dict | None] = mapped_column(JSONB, default=dict)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="preferences")
@@ -143,14 +143,14 @@ class UserWeeklyUsage(Base):
 class Folder(Base):
     __tablename__ = "folders"
     __table_args__ = (
-        Index("ix_folders_user_createdat", "user_id", "createdat"),
+        Index("ix_folders_user_created_at", "user_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="folder")
@@ -161,7 +161,7 @@ class Folder(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
-        Index("ix_conversations_user_status_updatedat", "user_id", "status", "updatedat"),
+        Index("ix_conversations_user_status_updated_at", "user_id", "status", "updated_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -170,8 +170,8 @@ class Conversation(Base):
     title: Mapped[str | None] = mapped_column(String(500))
     feature: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="conversations")
@@ -187,7 +187,7 @@ class Interaction(Base):
         Index("ix_interactions_user_feature", "user_id", "feature"),
         Index("ix_interactions_conversation_feature", "conversation_id", "feature"),
         Index("ix_interactions_conversation_user_status", "conversation_id", "user_id", "status"),
-        Index("ix_interactions_user_createdat", "user_id", "createdat"),
+        Index("ix_interactions_user_created_at", "user_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -211,7 +211,7 @@ class Interaction(Base):
     clarification_questions: Mapped[list | None] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(back_populates="interactions")
@@ -237,7 +237,7 @@ class InteractionResponse(Base):
     is_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
     error_message: Mapped[str | None] = mapped_column(Text)
     extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Relationships
     interaction: Mapped["Interaction"] = relationship(back_populates="responses")
@@ -256,7 +256,7 @@ class PharmaAlert(Base):
     source_api: Mapped[str] = mapped_column(String(50))
     doctor_justification: Mapped[str | None] = mapped_column(Text)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Relationships
     interaction: Mapped["Interaction"] = relationship(back_populates="pharma_alerts")
@@ -272,7 +272,7 @@ class InteractionMedication(Base):
     medication_raw: Mapped[str] = mapped_column(String(255), nullable=False)
     medication_normalized: Mapped[str | None] = mapped_column(String(255))
     atc_code: Mapped[str | None] = mapped_column(String(50))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     source: Mapped[str] = mapped_column(String(20), default="prompt")
 
     # Relationships
@@ -290,7 +290,7 @@ class PubmedValidation(Base):
     article_title: Mapped[str | None] = mapped_column(Text)
     abstract_snippet: Mapped[str | None] = mapped_column(Text)
     relevance_score: Mapped[float | None] = mapped_column(Float)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # Relationships
     interaction: Mapped["Interaction"] = relationship(back_populates="pubmed_validations")
@@ -310,7 +310,7 @@ class AuditLog(Base):
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 # ── Consent Log ──────────────────────────────────────────────
@@ -326,7 +326,7 @@ class ConsentLog(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 # ── Pricing AI Models ──────────────────────────────────────────────
 
@@ -341,8 +341,8 @@ class ModelPricing(Base):
     input_per_million: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     output_per_million: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
-    updatedat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-    createdat: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 # ── Semantic Cache ────────────────────────────────────────────

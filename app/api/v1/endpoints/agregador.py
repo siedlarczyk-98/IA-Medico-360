@@ -311,7 +311,7 @@ async def get_history(
                 models_used=models_used,
                 response_time_ms=i.response_time_ms,
                 cache_hit=i.cache_hit,
-                created_at=i.createdat,
+                created_at=i.created_at,
             )
         )
     return items

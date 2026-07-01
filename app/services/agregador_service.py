@@ -274,7 +274,7 @@ class AgregadorService:
             responses=final_responses,
             disclaimer=DISCLAIMER_RESPOSTA,
             total_response_time_ms=elapsed_ms,
-            created_at=interaction.createdat,
+            created_at=interaction.created_at,
             specialty_detected=classification["specialty"],
             topic_detected=classification["topic"],
         )
@@ -506,7 +506,7 @@ class AgregadorService:
                 Interaction.conversation_id == conversation_id,
                 Interaction.feature == "AGREGADOR",
             )
-            .order_by(Interaction.createdat.desc())
+            .order_by(Interaction.created_at.desc())
             .limit(limit)
         )
         result = await self.db.execute(stmt)
@@ -546,15 +546,15 @@ class AgregadorService:
                 Interaction.user_id == self.user_id,
                 Interaction.feature == "AGREGADOR",
             )
-            .order_by(Interaction.createdat.desc())
+            .order_by(Interaction.created_at.desc())
         )
 
         if query:
             stmt = stmt.where(Interaction.prompt_text.ilike(f"%{query}%"))
         if date_from:
-            stmt = stmt.where(Interaction.createdat >= date_from)
+            stmt = stmt.where(Interaction.created_at >= date_from)
         if date_to:
-            stmt = stmt.where(Interaction.createdat <= date_to)
+            stmt = stmt.where(Interaction.created_at <= date_to)
         if model_filter:
             stmt = stmt.where(
                 Interaction.responses.any(

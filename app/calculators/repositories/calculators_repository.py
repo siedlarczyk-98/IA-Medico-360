@@ -91,7 +91,7 @@ async def list_executions(
             CalculatorExecution.calculator_id == calculator_id,
             CalculatorExecution.user_id == user_id,
         )
-        .order_by(CalculatorExecution.createdat.desc())
+        .order_by(CalculatorExecution.created_at.desc())
         .limit(limit)
     )
     result = await db.execute(stmt)

@@ -54,7 +54,7 @@ class CalculatorExecuteResponse(BaseModel):
     inputs: dict
     result: dict
     interpretation: str | None
-    createdat: datetime | None = None
+    created_at: datetime | None = None
 
 
 class CalculatorExtractRequest(BaseModel):
@@ -74,4 +74,4 @@ class CalculatorExecutionHistoryItem(BaseModel):
     inputs: dict
     result: dict
     interpretation: str | None
-    createdat: datetime
+    created_at: datetime
