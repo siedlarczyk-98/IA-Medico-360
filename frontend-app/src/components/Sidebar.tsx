@@ -32,7 +32,7 @@ function groupByDate(conversations: ConversationSummary[]) {
 
   for (const conv of conversations) {
     if (conv.folder_id) continue; // pastas tratadas separadamente
-    const d = new Date(conv.updatedat);
+    const d = new Date(conv.updated_at);
     d.setHours(0, 0, 0, 0);
     if (d >= today) groups[0].items.push(conv);
     else if (d >= weekAgo) groups[1].items.push(conv);

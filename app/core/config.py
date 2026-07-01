@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # (lista JSON, ex.: '["https://a.com","https://b.com"]') para adicionar parceiros sem alterar código.
     embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
 
+    # Validação server-to-server de membro Curseduca (plano 2.1). Fail-closed quando
+    # habilitada: sem base+key configuradas, o embed retorna 503 em vez de abrir.
+    curseduca_validation_enabled: bool = False
+    curseduca_api_base: str = "https://prof.curseduca.pro"
+    curseduca_api_key: str = ""
+    curseduca_access_token: str = ""  # Bearer estático (o endpoint members/by exige, além da api_key)
+
     # --- Intercom (Identity Verification / Messenger Security) ---
     # Secret do Web SDK; usado para gerar o user_hash (HMAC) do Messenger.
     intercom_identity_secret: str = ""

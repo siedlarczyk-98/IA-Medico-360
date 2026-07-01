@@ -55,7 +55,7 @@ export interface ExecuteResponse {
   inputs: Record<string, unknown>;
   result: Record<string, unknown>;
   interpretation: string | null;
-  createdat: string | null;
+  created_at: string | null;
 }
 
 export interface ExtractResponse {

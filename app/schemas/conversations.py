@@ -9,8 +9,8 @@ class FolderOut(BaseModel):
 
     id: UUID
     name: str
-    createdat: datetime
-    updatedat: datetime
+    created_at: datetime
+    updated_at: datetime
 
 
 class ConversationSummary(BaseModel):
@@ -20,8 +20,8 @@ class ConversationSummary(BaseModel):
     title: str | None
     feature: str  # "ORQUESTRADOR" | "AGREGADOR"
     folder_id: UUID | None = None
-    updatedat: datetime
-    createdat: datetime
+    updated_at: datetime
+    created_at: datetime
 
 
 class ConversationMessage(BaseModel):
@@ -37,5 +37,5 @@ class ConversationDetail(BaseModel):
     title: str | None
     feature: str
     messages: list[ConversationMessage]
-    createdat: datetime
-    updatedat: datetime
+    created_at: datetime
+    updated_at: datetime

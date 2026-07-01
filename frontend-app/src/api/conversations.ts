@@ -16,8 +16,8 @@ export interface ConversationSummary {
   title: string | null;
   feature: 'ORQUESTRADOR' | 'AGREGADOR';
   folder_id: string | null;
-  updatedat: string;
-  createdat: string;
+  updated_at: string;
+  created_at: string;
 }
 
 export interface ConversationDetail {
@@ -25,8 +25,8 @@ export interface ConversationDetail {
   title: string | null;
   feature: 'ORQUESTRADOR' | 'AGREGADOR';
   messages: Message[];
-  createdat: string;
-  updatedat: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export async function listConversations(): Promise<ConversationSummary[]> {
