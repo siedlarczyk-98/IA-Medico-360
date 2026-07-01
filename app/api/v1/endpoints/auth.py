@@ -34,7 +34,7 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     UserResponse,
 )
-from app.services import auth_service
+from app.services import auth_service, curseduca_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -124,14 +124,25 @@ async def embed_token(
     body: EmbedTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Autenticação para embeds externos (ex: Curseduca). Cria usuário se não existir."""
-    # Usa apenas o header Origin (definido pelo browser, não forjável via JS no cliente)
-    # e exige correspondência exata contra a allowlist — evita bypass por subdomínio.
+    """Autenticação para embeds externos (ex: Curseduca). Cria usuário se não existir.
+
+    SEGURANÇA: o header Origin é definido pelo browser em requisições cross-site, mas
+    NÃO é prova de identidade — um cliente server-side (curl/script) pode forjá-lo. Por
+    isso o Origin é apenas defesa em profundidade. A prova real de que o e-mail pertence
+    a um membro matriculado vem da validação server-to-server na API da Curseduca
+    (ver `curseduca_service.verify_active_member`), ativada por config. Enquanto essa
+    validação não estiver habilitada, este endpoint confia apenas no Origin — mantê-lo
+    exposto a parceiros não confiáveis permite impersonar qualquer e-mail (ver plano 2.1).
+    """
     origin = request.headers.get("origin", "")
     settings = get_settings()
     allowed_origins = set(settings.embed_allowed_origins) | {settings.calculadoras_url}
     if origin not in allowed_origins:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
+
+    # Validação server-to-server (fail-closed quando habilitada): confirma que o e-mail
+    # é de um membro ativo antes de emitir token. No-op enquanto não configurada.
+    await curseduca_service.verify_active_member(body.email)
 
     user, _ = await auth_service.get_or_create_embed_user(body.email, db)
     token = auth_service.create_access_token(user)
