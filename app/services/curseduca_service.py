@@ -6,44 +6,61 @@ assinatura. O header Origin é forjável server-side, então NÃO prova identida
 reduzir a superfície de "qualquer e-mail" → "e-mail de membro matriculado", validamos
 o e-mail contra a API da Curseduca (credenciais server-side) antes de emitir o token.
 
-Estado atual: ESQUELETO fail-closed. A chamada HTTP concreta depende da doc/credenciais
-da Curseduca (endpoint de consulta de membro + formato da resposta), que ainda não temos.
-Enquanto `curseduca_validation_enabled` for False (default), `verify_active_member` é no-op
-e o comportamento do embed não muda. Ao habilitar sem implementar a chamada, o endpoint
-falha fechado (503) — nunca abre a autenticação com base em validação inexistente.
+Contrato (Swagger Curseduca):
+  GET {api_base}/api/v1/members/by?email=<email>
+  Headers: api_key: <key>   e   Authorization: Bearer <access_token>
+  200 -> objeto do membro ({id, name, email, ...})  => membro existe
+  401 -> API Key inválida        (fail-closed: configuração errada)
+  400 -> query não fornecida     (fail-closed: bug nosso)
+  403 -> token ausente/negado    (fail-closed: configuração errada)
 
-Para ativar:
-1. Preencher CURSEDUCA_API_BASE / CURSEDUCA_API_KEY no ambiente.
-2. Implementar `_fetch_member_status` com o endpoint real.
-3. Setar CURSEDUCA_VALIDATION_ENABLED=true.
+Fail-closed: enquanto a validação está ligada mas algo impede confirmar a matrícula
+(credencial errada, API fora do ar), o embed é negado — nunca abre com base em dúvida.
+No-op enquanto `curseduca_validation_enabled` for False (default).
 """
 
+import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
 
+_TIMEOUT_SECONDS = 8.0
+
 
 class CurseducaNotConfigured(Exception):
-    """Validação habilitada mas a integração ainda não foi implementada/configurada."""
+    """Validação habilitada mas a integração respondeu erro de configuração/indisponibilidade."""
 
 
-async def _fetch_member_status(email: str, api_base: str, api_key: str) -> bool:
-    """Consulta a API da Curseduca e retorna True se `email` é membro ativo.
+async def _fetch_member_status(email: str, api_base: str, api_key: str, access_token: str) -> bool:
+    """Consulta a API da Curseduca e retorna True se `email` é membro. Fail-closed em erro."""
+    url = f"{api_base.rstrip('/')}/api/v1/members/by"
+    headers = {"api_key": api_key, "accept": "application/json"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
 
-    TODO(2.1): implementar com o endpoint real assim que a doc/credenciais chegarem.
-    Sugerido: httpx.AsyncClient com timeout curto, autenticação por api_key,
-    e mapear a resposta para um booleano de "matrícula ativa".
-    """
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            resp = await client.get(url, params={"email": email}, headers=headers)
+    except httpx.HTTPError as exc:
+        raise CurseducaNotConfigured(f"Falha ao contatar a API da Curseduca: {exc}") from exc
+
+    if resp.status_code == 200:
+        data = resp.json()
+        # Membro encontrado quando a resposta traz o e-mail do próprio membro.
+        return bool(isinstance(data, dict) and data.get("email"))
+    if resp.status_code == 404:
+        return False  # e-mail não corresponde a nenhum membro
+    # 400 (query), 401 (api_key), 403 (token), 5xx -> não dá para confirmar => fail-closed.
     raise CurseducaNotConfigured(
-        "Validação Curseduca habilitada, mas _fetch_member_status ainda não foi implementada."
+        f"Curseduca respondeu {resp.status_code} ao validar membro: {resp.text[:200]}"
     )
 
 
 async def verify_active_member(email: str) -> None:
-    """Levanta 403 se o e-mail não for membro ativo; no-op quando a validação está desligada.
+    """Levanta 403 se o e-mail não for membro; no-op quando a validação está desligada.
 
-    Fail-closed: se a validação está ligada mas a integração não está pronta/configurada,
-    levanta 503 em vez de deixar passar.
+    Fail-closed: se a validação está ligada mas a integração não está pronta/configurada
+    ou a API não respondeu OK, levanta 503 em vez de deixar passar.
     """
     settings = get_settings()
     if not settings.curseduca_validation_enabled:
@@ -57,12 +74,15 @@ async def verify_active_member(email: str) -> None:
 
     try:
         is_member = await _fetch_member_status(
-            email, settings.curseduca_api_base, settings.curseduca_api_key
+            email,
+            settings.curseduca_api_base,
+            settings.curseduca_api_key,
+            settings.curseduca_access_token,
         )
     except CurseducaNotConfigured as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Validação de membro Curseduca habilitada mas não implementada.",
+            "Não foi possível validar o membro na Curseduca no momento.",
         ) from exc
 
     if not is_member:

@@ -58,8 +58,9 @@ class Settings(BaseSettings):
     # Validação server-to-server de membro Curseduca (plano 2.1). Fail-closed quando
     # habilitada: sem base+key configuradas, o embed retorna 503 em vez de abrir.
     curseduca_validation_enabled: bool = False
-    curseduca_api_base: str = ""
+    curseduca_api_base: str = "https://prof.curseduca.pro"
     curseduca_api_key: str = ""
+    curseduca_access_token: str = ""  # Bearer estático (o endpoint members/by exige, além da api_key)
 
     # --- Intercom (Identity Verification / Messenger Security) ---
     # Secret do Web SDK; usado para gerar o user_hash (HMAC) do Messenger.
