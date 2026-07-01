@@ -1,5 +1,5 @@
 import type { ExecuteResponse } from '../api/calculators';
-import { DISCLAIMER } from '@medico360/shared/tokens';
+import { DISCLAIMER } from '../tokens';
 
 interface ScoreEntry {
   key: string;
