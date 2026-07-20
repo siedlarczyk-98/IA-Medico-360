@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Logo } from './Logo';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
 import { listConversations, type ConversationSummary } from '../api/conversations';
@@ -572,18 +571,17 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         boxShadow: '2px 0 20px rgba(0,0,0,0.15)',
       } : {}),
     }}>
-      <div style={{ padding: '18px 18px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Logo />
-        {isMobile && (
+      {isMobile && (
+        <div style={{ padding: '14px 14px 0', display: 'flex', justifyContent: 'flex-end' }}>
           <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--pen3)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div style={{ padding: '10px 14px' }}>
+      <div style={{ padding: '18px 14px 10px' }}>
         <button
           onClick={closeAfter(onNew)}
           style={{
