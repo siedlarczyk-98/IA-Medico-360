@@ -428,7 +428,7 @@ function MainApp() {
             mode === 'agregador' ? (
               <>
                 <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} hasImageAttached={currentAttachment?.fileType === 'image'} />
-                <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked}
+                <InputBar onSend={sendMessage} disabled={streaming} sendBlocked={agregadorBlocked}
                   placeholder={agregadorBlocked ? 'Selecione um modelo acima para começar.' : undefined}
                   onAttachmentChange={setCurrentAttachment}
                   webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
@@ -446,7 +446,7 @@ function MainApp() {
               <ChatView messages={messages} streaming={streaming} streamingMode={mode === 'orquestrador' ? selectedMode : undefined} scrollToBottomTrigger={scrollTrigger} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
-                : <InputBar onSend={sendMessage} disabled={streaming || agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined}
+                : <InputBar onSend={sendMessage} disabled={streaming} sendBlocked={agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined}
                     onAttachmentChange={setCurrentAttachment}
                     webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
                     onWebSearchToggle={showWebSearch ? handleWebSearchToggle : undefined} />

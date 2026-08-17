@@ -36,6 +36,8 @@ const isImageFile = (file: File) => file.type.startsWith('image/');
 interface Props {
   onSend: (text: string, effort: Effort, attachment?: Attachment) => void;
   disabled?: boolean;
+  /** Bloqueia só o envio (ex: nenhum modelo selecionado no Agregador) — o texto continua editável. */
+  sendBlocked?: boolean;
   placeholder?: string;
   mode?: OrchestratorMode;
   onModeChange?: (mode: OrchestratorMode) => void;
@@ -44,7 +46,7 @@ interface Props {
   onWebSearchToggle?: () => void;
 }
 
-export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH', onModeChange, onAttachmentChange, webSearchEnabled, onWebSearchToggle }: Props) {
+export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'QUICK_SEARCH', onModeChange, onAttachmentChange, webSearchEnabled, onWebSearchToggle }: Props) {
   const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const [effort, setEffort] = useState<Effort>('detalhado');
@@ -129,7 +131,7 @@ export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH',
   }
 
   function submit() {
-    if (!filled || disabled) return;
+    if (!filled || disabled || sendBlocked) return;
     onSend(value.trim(), effort, attachment ?? undefined);
     setValue('');
     setAttachment(null);
@@ -358,11 +360,11 @@ export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH',
           {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>}
           <button
             onClick={submit}
-            disabled={!filled || disabled}
+            disabled={!filled || disabled || sendBlocked}
             style={{
               height: 32, padding: '0 14px', borderRadius: 10, border: 'none',
-              background: filled ? 'var(--green)' : 'var(--fill)',
-              color: filled ? 'var(--ink)' : 'var(--pen3)',
+              background: filled && !sendBlocked ? 'var(--green)' : 'var(--fill)',
+              color: filled && !sendBlocked ? 'var(--ink)' : 'var(--pen3)',
               fontWeight: 700, fontSize: 12,
               display: 'flex', alignItems: 'center', gap: 6,
               transition: 'background 0.15s, color 0.15s',
