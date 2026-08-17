@@ -26,6 +26,7 @@ const FILE_TYPE_ICON: Record<string, string> = {
   image: '🖼',
 };
 
+const TEXTAREA_MAX_HEIGHT = 240;            // px — acima disso, rola dentro do textarea em vez de empurrar o botão Enviar para fora
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;   // 5 MB
 const MAX_FILE_BYTES = 10 * 1024 * 1024;    // 10 MB
 const IMAGE_DLP_ACK_KEY = 'img_dlp_ack';    // consentimento (1x por sessão)
@@ -59,8 +60,9 @@ export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH',
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setValue(e.target.value);
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+      const el = textareaRef.current;
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT) + 'px';
     }
   }
 
@@ -275,7 +277,8 @@ export function InputBar({ onSend, disabled, placeholder, mode = 'QUICK_SEARCH',
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
             background: 'transparent', fontSize: 13.5, color: 'var(--ink)',
-            lineHeight: 1.5, minHeight: 36,
+            lineHeight: 1.5, minHeight: 36, maxHeight: TEXTAREA_MAX_HEIGHT,
+            overflowY: 'auto',
           }}
         />
 

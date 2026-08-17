@@ -1,6 +1,8 @@
 
 import json
 import logging
+import re
+import unicodedata
 
 from app.core.config import get_settings
 from app.core.http_client import get_client
@@ -9,6 +11,37 @@ from app.services import cache_service
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# Saudações e mensagens sem conteúdo clínico — detectadas localmente (sem
+# chamar o modelo de triagem) para evitar que "Oi"/"Olá" virem uma busca
+# médica em QUICK_SEARCH quando o médico já está com um modo fixado na UI.
+_GREETING_PHRASES = {
+    "oi", "ola", "opa", "eae", "e ai", "eai", "salve",
+    "bom dia", "boa tarde", "boa noite",
+    "tudo bem", "tudo bom", "tudo certo", "como vai",
+    "teste", "testando", "test",
+    "obrigado", "obrigada", "valeu", "vlw", "blz", "beleza",
+    "tchau", "ate mais", "ate logo",
+}
+
+
+def _normalize_for_greeting_check(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower().strip()
+    normalized = re.sub(r"[!?.,;]+$", "", normalized).strip()
+    return normalized
+
+
+def is_off_topic_greeting(prompt: str) -> bool:
+    """Heurística local (sem custo de API) para saudações/mensagens triviais.
+
+    Só considera mensagens curtas — evita falso-positivo em perguntas
+    clínicas legítimas que por acaso comecem com uma saudação.
+    """
+    if len(prompt) > 40:
+        return False
+    normalized = _normalize_for_greeting_check(prompt)
+    return normalized in _GREETING_PHRASES
 
 TRIAGE_PROMPT = """Você é o sistema de triagem da plataforma Médico 360. Classifique a pergunta do médico em EXATAMENTE uma categoria.
 
@@ -20,9 +53,10 @@ Categorias:
 - PHARMA_RECEITA: dúvida sobre receituário, tipo de receita, retenção, Portaria 344 ou dispensação de UM medicamento nomeado. Exemplos: "Rivotril precisa de receita?", "qual receita para codeína", "posso vender clonazepam sem retenção?".
 - PHARMA_GENERICO: busca de genérico, similar intercambiável ou comparação de preço de UM medicamento nomeado. Exemplos: "tem genérico do Tylenol?", "similar mais barato para Crestor", "intercambiável do Rivotril".
 - PRODUCTIVITY: tarefas não clínicas — gerar email, resumir prontuário, redigir laudo, gestão, finanças, carreira
+- OFF_TOPIC: saudações, agradecimentos, testes ou mensagens sem nenhum conteúdo clínico/administrativo identificável — não é uma pergunta de verdade. Exemplos: "oi", "olá", "bom dia", "teste", "tudo bem?", "obrigado".
 
 Retorne APENAS um JSON com dois campos:
-- "mode": a categoria escolhida (uma das 7 acima)
+- "mode": a categoria escolhida (uma das 8 acima)
 - "confidence": número de 0 a 1 indicando sua confiança na classificação
 
 Exemplos — PHARMA_CHECK:
@@ -52,6 +86,13 @@ Exemplos — outros:
 - "Paciente 60 anos, diabético, com dor torácica e dispneia. ECG com supra de ST em V1-V4" → {{"mode": "CLINICAL_REASONING", "confidence": 0.98}}
 - "Me ajuda a montar um cronograma de atividades físicas" → {{"mode": "PRODUCTIVITY", "confidence": 0.90}}
 
+Exemplos — OFF_TOPIC:
+- "Oi" → {{"mode": "OFF_TOPIC", "confidence": 0.95}}
+- "Olá, tudo bem?" → {{"mode": "OFF_TOPIC", "confidence": 0.93}}
+- "Bom dia" → {{"mode": "OFF_TOPIC", "confidence": 0.95}}
+- "teste" → {{"mode": "OFF_TOPIC", "confidence": 0.9}}
+- "obrigado!" → {{"mode": "OFF_TOPIC", "confidence": 0.95}}
+
 Pergunta: {prompt}"""
 
 VALID_MODES = {
@@ -62,6 +103,7 @@ VALID_MODES = {
     "PHARMA_RECEITA",
     "PHARMA_GENERICO",
     "PRODUCTIVITY",
+    "OFF_TOPIC",
 }
 
 PHARMA_MODES = {"PHARMA_CHECK", "PHARMA_BULA", "PHARMA_RECEITA", "PHARMA_GENERICO"}

@@ -3,6 +3,7 @@ Médico 360 — Aplicação principal FastAPI.
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -13,6 +14,12 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.limiter import limiter
+
+# Windows console usa cp1252 por padrão, que não suporta emoji — força UTF-8
+# no stdout/stderr para evitar UnicodeEncodeError em prints do startup/reload.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 logger = logging.getLogger(__name__)
 

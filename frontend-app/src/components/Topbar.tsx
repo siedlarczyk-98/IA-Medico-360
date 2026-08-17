@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { APP_MODES } from '../lib/appModes';
 
 interface Props {
   title: string;
@@ -8,35 +9,25 @@ interface Props {
   onMenuToggle: () => void;
 }
 
-const MODES = [
-  {
-    key: 'orquestrador' as const,
-    label: 'Orquestrador',
-    shortLabel: 'Orq.',
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M8 2 V4 M8 12 V14 M2 8 H4 M12 8 H14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="M4.1 4.1 L5.5 5.5 M10.5 10.5 L11.9 11.9 M4.1 11.9 L5.5 10.5 M10.5 5.5 L11.9 4.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
-    ),
-    desc: 'Respostas com validação em bases científicas e artigos. Escolha o modo ideal — busca rápida, raciocínio clínico, checagem farmacológica ou produtividade.',
-  },
-  {
-    key: 'agregador' as const,
-    label: 'Agregador',
-    shortLabel: 'Agr.',
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-        <rect x="2" y="2" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-        <rect x="9" y="2" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-        <rect x="2" y="9" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-        <rect x="9" y="9" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      </svg>
-    ),
-    desc: 'Escolha a ferramenta que mais se adapta à sua necessidade. Acesse diretamente Claude, GPT, Gemini e outros — sem triagem automática.',
-  },
-] as const;
+const MODE_ICONS = {
+  orquestrador: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M8 2 V4 M8 12 V14 M2 8 H4 M12 8 H14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M4.1 4.1 L5.5 5.5 M10.5 10.5 L11.9 11.9 M4.1 11.9 L5.5 10.5 M10.5 5.5 L11.9 4.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  ),
+  agregador: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <rect x="2" y="2" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="2" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="2" y="9" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="9" width="5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  ),
+} as const;
+
+const MODES = APP_MODES.map(m => ({ ...m, icon: MODE_ICONS[m.key] }));
 
 function ModeTooltip({ desc, visible }: { desc: string; visible: boolean }) {
   if (!visible) return null;

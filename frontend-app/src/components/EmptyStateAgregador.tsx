@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { fetchModels, type AIModel } from '../api/agregador';
 import { MODEL_DESCRIPTIONS, type AIModelInfo } from '../lib/modelDescriptions';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -12,15 +12,12 @@ interface Props {
 
 export function EmptyStateAgregador({ selected, onChange, hasImageAttached = false }: Props) {
   const isMobile = useIsMobile();
-  const [models, setModels] = useState<AIModel[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchModels()
-      .then(m => setModels(m.filter(x => x.available)))
-      .catch(() => setModels([]))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: allModels = [], isLoading: loading } = useQuery<AIModel[]>({
+    queryKey: ['agregador-models'],
+    queryFn: fetchModels,
+    staleTime: 5 * 60_000,
+  });
+  const models = allModels.filter(m => m.available);
 
   function toggle(id: string) {
     if (selected.includes(id)) {

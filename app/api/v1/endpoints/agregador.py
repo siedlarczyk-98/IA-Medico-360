@@ -175,8 +175,10 @@ async def agregador_stream(
     base_system_prompt = build_agregador_prompt(user.specialty, user.med_status)
     if body.effort == "rápido":
         effort_system = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + base_system_prompt
+        effort_max_tokens = 700
     else:
         effort_system = base_system_prompt
+        effort_max_tokens = 4096
 
     stream_start = time.monotonic()
 
@@ -194,7 +196,7 @@ async def agregador_stream(
 
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
-            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system, web_search=body.web_search.get(model_id, False), image_content=image_content)
+            provider_stream = provider.stream(model_id, enriched_prompt, system_prompt=effort_system, web_search=body.web_search.get(model_id, False), image_content=image_content, max_tokens=effort_max_tokens)
             model_start = time.monotonic()
 
             async def _run(mid=model_id, ps=provider_stream, mstart=model_start):

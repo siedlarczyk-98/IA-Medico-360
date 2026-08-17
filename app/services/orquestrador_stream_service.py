@@ -45,7 +45,7 @@ from app.services.usage_service import add_interaction_audit, record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
+from app.services.triage_service import triage, is_off_topic_greeting, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,13 @@ MODE_TEMPERATURE_MAP = {
     "QUICK_SEARCH": 0.0,
     "CLINICAL_REASONING": 0.0,
     "PRODUCTIVITY": 0.7,
+}
+
+# Efeito real do toggle Rápido/Detalhado: limita o tamanho da resposta,
+# o que reduz tanto o tempo de geração quanto o custo em tokens de saída.
+EFFORT_MAX_TOKENS = {
+    "rápido": 700,
+    "detalhado": 4096,
 }
 
 
@@ -156,6 +163,54 @@ class OrquestradorStreamService:
                 # 2. DLP
                 dlp_result = sanitize_prompt(prompt)
                 sanitized_prompt = dlp_result.sanitized_text
+
+                # 2a. Saudação / mensagem sem conteúdo clínico — atalho local, sem
+                # gastar uma chamada de modelo. Independe do modo selecionado na UI,
+                # já que um modo explícito pula a triagem automática (ver item 3).
+                if is_off_topic_greeting(sanitized_prompt):
+                    conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
+                    greeting_reply = (
+                        "Olá! Sou o assistente do Médico 360. Pode me perguntar sobre posologia, "
+                        "protocolos, interações medicamentosas ou descrever um caso clínico que eu ajudo."
+                    )
+                    interaction = Interaction(
+                        conversation_id=conv_id,
+                        user_id=self.user_id,
+                        company_id=self.company_id,
+                        feature="ORQUESTRADOR",
+                        mode="OFF_TOPIC",
+                        prompt_text=sanitized_prompt,
+                        prompt_sanitized=dlp_result.was_sanitized,
+                        triage_confidence=1.0,
+                        triage_category="OFF_TOPIC",
+                        cache_hit=False,
+                        started_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    db.add(interaction)
+                    await db.flush()
+                    db.add(InteractionResponse(
+                        interaction_id=interaction.id,
+                        model_used="off_topic_shortcut",
+                        response_text=greeting_reply,
+                    ))
+                    await db.commit()
+
+                    yield _sse("start", {"mode": "OFF_TOPIC", "triage_confidence": 1.0})
+                    yield _sse("token", {"text": greeting_reply})
+                    yield _sse("done", {
+                        "interaction_id": str(interaction.id),
+                        "conversation_id": str(conv_id),
+                        "mode": "OFF_TOPIC",
+                        "model_used": "off_topic_shortcut",
+                        "is_fallback": False,
+                        "tokens_in": None,
+                        "tokens_out": None,
+                        "cost_usd": 0.0,
+                        "total_response_time_ms": int((time.monotonic() - start_time) * 1000),
+                        "disclaimer": DISCLAIMER_RESPOSTA,
+                    })
+                    return
 
                 # 2b. Enriquecer prompt com histórico (cache usa sanitized_prompt; modelo usa enriched_prompt)
                 if history:
@@ -265,6 +320,7 @@ class OrquestradorStreamService:
                 if effort == "rápido" and system_prompt:
                     system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
                 temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
+                max_tokens = EFFORT_MAX_TOKENS.get(effort, 4096)
 
                 model_info = await get_model_pricing(db, model_id)
 
@@ -287,6 +343,7 @@ class OrquestradorStreamService:
                         system_prompt=system_prompt,
                         temperature=temperature,
                         image_content=image_content,
+                        max_tokens=max_tokens,
                     ):
                         if token.delta:
                             full_text += token.delta

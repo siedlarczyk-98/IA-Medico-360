@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
+import { ModeIntro } from './components/ModeIntro';
 import { EmptyState } from './components/EmptyState';
 import { ChatView } from './components/ChatView';
 import { InputBar } from './components/InputBar';
@@ -15,6 +16,7 @@ import { streamAgregador } from './api/agregador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
+import { MODE_INTRO_SEEN_KEY, MODE_PREFERENCE_KEY, type AppMode } from './lib/appModes';
 
 // Páginas de auth são carregadas sob demanda (não fazem parte da rota principal).
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -22,8 +24,6 @@ const InvitePage = lazy(() => import('./pages/InvitePage').then(m => ({ default:
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then(m => ({ default: m.OnboardingPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
 const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
-
-type AppMode = 'orquestrador' | 'agregador';
 
 const BACKEND_TO_CHIP: Record<string, string> = {
   QUICK_SEARCH:      'busca',
@@ -34,6 +34,12 @@ const BACKEND_TO_CHIP: Record<string, string> = {
   PHARMA_GENERICO:   'farmaco',
   PRODUCTIVITY:      'produtividade',
 };
+
+// OFF_TOPIC (saudações/mensagens triviais) não ganha badge — é só uma resposta simples.
+function chipModeFor(mode: string): string | undefined {
+  if (mode === 'OFF_TOPIC') return undefined;
+  return BACKEND_TO_CHIP[mode] ?? mode;
+}
 
 interface PendingClarification {
   conversationId: string;
@@ -52,7 +58,12 @@ function MainApp() {
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [mode, setMode] = useState<AppMode>('orquestrador');
+  const [mode, setMode] = useState<AppMode>(
+    () => (localStorage.getItem(MODE_PREFERENCE_KEY) as AppMode | null) ?? 'orquestrador'
+  );
+  const [modeIntroSeen, setModeIntroSeen] = useState(
+    () => localStorage.getItem(MODE_INTRO_SEEN_KEY) === '1'
+  );
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | undefined>();
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
@@ -158,7 +169,7 @@ function MainApp() {
           pendingFolderIdRef.current = undefined;
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
-          const chipMode = BACKEND_TO_CHIP[event.mode] ?? event.mode;
+          const chipMode = chipModeFor(event.mode);
           setMessages(prev => [...prev, { role: 'assistant', content: event.response_text, mode: chipMode }]);
           return;
         }
@@ -179,7 +190,7 @@ function MainApp() {
           pendingFolderIdRef.current = undefined;
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
-          const chipMode = BACKEND_TO_CHIP[event.mode] ?? event.mode;
+          const chipMode = chipModeFor(event.mode);
           if (assistantIndex !== -1) {
             setMessages(prev => {
               if (assistantIndex >= prev.length) return prev;
@@ -197,7 +208,7 @@ function MainApp() {
           if (event.status === 'unsupported_mode') {
             // Modos PharmaDB não suportam streaming — fallback para /query
             const result = await queryOrquestrador({ ...params, folder_id });
-            const chipMode = BACKEND_TO_CHIP[result.mode] ?? result.mode;
+            const chipMode = chipModeFor(result.mode);
             setMessages(prev => [...prev, { role: 'assistant', content: result.response, mode: chipMode }]);
             if (result.conversation_id) {
               setActiveConvId(result.conversation_id);
@@ -373,8 +384,25 @@ function MainApp() {
     handleNew();
   }, [handleNew]);
 
+  const handleChooseInitialMode = useCallback((m: AppMode) => {
+    setMode(m);
+    localStorage.setItem(MODE_PREFERENCE_KEY, m);
+    localStorage.setItem(MODE_INTRO_SEEN_KEY, '1');
+    setModeIntroSeen(true);
+  }, []);
+
   const showClarification = clarification && !streaming;
   const agregadorBlocked = mode === 'agregador' && selectedModels.length === 0;
+
+  if (!modeIntroSeen) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <ModeIntro userName={currentUser?.firstName} onChoose={handleChooseInitialMode} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
