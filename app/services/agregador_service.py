@@ -18,13 +18,12 @@ from sqlalchemy.orm import selectinload
 from app.core.prompts import DISCLAIMER_RESPOSTA
 from app.services.pubmed_service import validate_with_pubmed
 from app.schemas.agregador import PubmedValidationResult, VerifiedCitationOut, PubMedArticleOut
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Conversation,
     Interaction,
     InteractionMedication,
     InteractionResponse,
-    ModelPricing,
 )
 from app.schemas.agregador import (
     AgregadorRequest,
@@ -33,7 +32,7 @@ from app.schemas.agregador import (
 )
 from app.services.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
-from app.services.pricing import calculate_cost, get_model_pricing
+from app.services.pricing import Pricing, calculate_cost, get_model_pricing
 from app.services.usage_service import add_interaction_audit, record_cost
 from app.services.specialty_detector import detect_specialty_and_topic
 
@@ -75,7 +74,7 @@ class AgregadorService:
         start_time = time.monotonic()
 
         # 1. DLP
-        dlp_result = sanitize_prompt(request.prompt)
+        dlp_result = await sanitize_prompt_async(request.prompt)
         sanitized_prompt = dlp_result.sanitized_text
 
         # 2. Conversation (usa prompt sanitizado no título)
@@ -429,7 +428,7 @@ class AgregadorService:
 
     # ── Buscar info dos modelos no banco ─────────────────────
 
-    async def _get_models_info(self, model_ids: list[str]) -> dict[str, ModelPricing]:
+    async def _get_models_info(self, model_ids: list[str]) -> dict[str, Pricing]:
         """Busca provider_type e info de cada modelo (com cache em memória TTL 1h)."""
         results = await asyncio.gather(
             *[get_model_pricing(self.db, mid) for mid in model_ids]
@@ -445,7 +444,7 @@ class AgregadorService:
     async def _call_providers(
         self,
         prompt: str,
-        models_info: dict[str, ModelPricing],
+        models_info: dict[str, Pricing],
         system_prompt: str | None = None,
     ) -> dict[str, ProviderResponse | Exception]:
         """

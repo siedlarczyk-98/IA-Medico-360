@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.calculators.engine.field_coercion import NUMERIC_TYPES, valid_options
 from app.core.config import get_settings
 from app.core.http_client import get_client
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.calculators import CalculatorField
 from app.models.models import AuditLog
 
@@ -108,7 +108,7 @@ async def extract_calculator_inputs(
     """
     fields_by_key = {f.key: f for f in fields}
     suggested_inputs: dict = {}
-    sanitized_text = sanitize_prompt(text).sanitized_text
+    sanitized_text = (await sanitize_prompt_async(text)).sanitized_text
 
     try:
         client = get_client()

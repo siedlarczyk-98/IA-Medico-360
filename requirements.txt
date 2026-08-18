@@ -21,7 +21,9 @@ sse-starlette==2.1.3
 PyJWT[crypto]==2.10.1
 slowapi==0.1.9
 cachetools==5.5.2
-passlib[bcrypt]==1.7.4
+
+# DLP — NER de nomes próprios (modelo instalado via `python -m spacy download pt_core_news_sm`)
+spacy==3.8.15
 
 # Redis
 redis==5.2.1
@@ -43,4 +45,4 @@ orjson==3.10.12
 tenacity==9.0.0
 
 # Observabilidade (Arize Phoenix / OpenTelemetry)
-arize-phoenix-otel>=0.6.1
+arize-phoenix-otel==0.17.1

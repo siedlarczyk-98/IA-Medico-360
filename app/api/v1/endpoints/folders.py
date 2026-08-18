@@ -47,7 +47,9 @@ async def list_folders(
 
 
 @router.post("", response_model=FolderOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 async def create_folder(
+    request: Request,
     body: FolderCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -61,7 +63,9 @@ async def create_folder(
 
 
 @router.put("/{folder_id}", response_model=FolderOut)
+@limiter.limit("30/minute")
 async def rename_folder(
+    request: Request,
     folder_id: UUID,
     body: FolderRename,
     current_user: User = Depends(get_current_user),
@@ -80,7 +84,9 @@ async def rename_folder(
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 async def delete_folder(
+    request: Request,
     folder_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -96,7 +102,9 @@ async def delete_folder(
 
 
 @router.patch("/conversations/{conversation_id}/folder", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 async def move_conversation(
+    request: Request,
     conversation_id: UUID,
     body: ConversationMoveBody,
     current_user: User = Depends(get_current_user),
@@ -124,7 +132,9 @@ async def move_conversation(
 
 
 @router.patch("/conversations/bulk", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 async def bulk_move_conversations(
+    request: Request,
     body: ConversationBulkMoveBody,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

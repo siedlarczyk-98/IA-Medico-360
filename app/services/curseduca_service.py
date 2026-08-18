@@ -23,6 +23,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
+from app.core.http_client import get_client
 
 _TIMEOUT_SECONDS = 8.0
 
@@ -39,8 +40,9 @@ async def _fetch_member_status(email: str, api_base: str, api_key: str, access_t
         headers["Authorization"] = f"Bearer {access_token}"
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url, params={"email": email}, headers=headers)
+        resp = await get_client().get(
+            url, params={"email": email}, headers=headers, timeout=_TIMEOUT_SECONDS
+        )
     except httpx.HTTPError as exc:
         raise CurseducaNotConfigured(f"Falha ao contatar a API da Curseduca: {exc}") from exc
 

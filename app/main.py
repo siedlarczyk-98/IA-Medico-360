@@ -27,6 +27,7 @@ from app.api.v1.router import api_v1_router
 from app.calculators.formulas import load_all_formulas
 from app.core.config import get_settings
 from app.core import http_client
+from app.middleware import ner
 from app.core.telemetry import setup_phoenix
 
 settings = get_settings()
@@ -43,6 +44,9 @@ async def lifespan(app: FastAPI):
         endpoint=settings.phoenix_endpoint,
     )
     await http_client.startup()
+    # Carrega o modelo de NER do DLP fora do caminho da 1ª requisição (~1s).
+    if not ner.warmup():
+        print("⚠️  NER do DLP indisponível — nomes sem palavra-gatilho não serão mascarados")
     # Popula o registry de formulas no boot: um formula_key ausente falha
     # aqui, e nao na primeira execucao clinica em producao.
     load_all_formulas()

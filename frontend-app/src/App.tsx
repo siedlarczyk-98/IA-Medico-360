@@ -384,6 +384,10 @@ function MainApp() {
     handleNew();
   }, [handleNew]);
 
+  // Referência estável: inline, esta prop invalidaria o memo do Sidebar a cada
+  // frame de streaming, re-renderizando toda a lista de conversas.
+  const toggleSidebar = useCallback(() => setSidebarOpen(o => !o), []);
+
   const handleChooseInitialMode = useCallback((m: AppMode) => {
     setMode(m);
     localStorage.setItem(MODE_PREFERENCE_KEY, m);
@@ -406,10 +410,10 @@ function MainApp() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={handleSelectConversation} open={sidebarOpen} onToggle={() => setSidebarOpen(o => !o)} usageTick={usageTick} />
+      <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={handleSelectConversation} open={sidebarOpen} onToggle={toggleSidebar} usageTick={usageTick} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} onMenuToggle={() => setSidebarOpen(o => !o)} />
+        <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} onMenuToggle={toggleSidebar} />
         {pendingFolderName && messages.length === 0 && (
           <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">

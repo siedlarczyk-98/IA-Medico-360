@@ -29,7 +29,7 @@ from app.core.prompts import (
     build_orquestrador_prompt,
 )
 from app.schemas.agregador import ConversationMessage
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Conversation,
     Interaction,
@@ -161,7 +161,7 @@ class OrquestradorStreamService:
                     )
 
                 # 2. DLP
-                dlp_result = sanitize_prompt(prompt)
+                dlp_result = await sanitize_prompt_async(prompt)
                 sanitized_prompt = dlp_result.sanitized_text
 
                 # 2a. Saudação / mensagem sem conteúdo clínico — atalho local, sem

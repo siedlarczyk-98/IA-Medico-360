@@ -34,7 +34,7 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     UserResponse,
 )
-from app.services import auth_service, curseduca_service
+from app.services import auth_service, cache_service, curseduca_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -130,9 +130,9 @@ async def embed_token(
     NÃO é prova de identidade — um cliente server-side (curl/script) pode forjá-lo. Por
     isso o Origin é apenas defesa em profundidade. A prova real de que o e-mail pertence
     a um membro matriculado vem da validação server-to-server na API da Curseduca
-    (ver `curseduca_service.verify_active_member`), ativada por config. Enquanto essa
-    validação não estiver habilitada, este endpoint confia apenas no Origin — mantê-lo
-    exposto a parceiros não confiáveis permite impersonar qualquer e-mail (ver plano 2.1).
+    (ver `curseduca_service.verify_active_member`). Essa validação é obrigatória em
+    produção — `Settings._validate_production_secrets` derruba o startup se estiver
+    desligada, porque sem ela este endpoint emite token para qualquer e-mail informado.
     """
     origin = request.headers.get("origin", "")
     settings = get_settings()
@@ -150,22 +150,40 @@ async def embed_token(
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
+async def _throttle_by_email(scope: str, email: str, limit: int, window_seconds: int) -> None:
+    """Rate limit por e-mail, complementar ao limite por IP do slowapi.
+
+    O e-mail só existe no corpo do request, fora do alcance do `key_func` do slowapi;
+    sem isso, quem rotaciona IP (ou forja X-Forwarded-For) escapa do throttle de OTP.
+    """
+    key = cache_service.make_key(f"ratelimit:{scope}", email.strip().lower())
+    if await cache_service.rate_limit_exceeded(key, limit, window_seconds):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Muitas tentativas para este e-mail. Tente novamente mais tarde.",
+        )
+
+
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("3/15minutes")
 async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Depends(get_db)):
+    await _throttle_by_email("otp_request", body.email, limit=3, window_seconds=900)
     await auth_service.request_otp(db, body.email)
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def verify_otp(request: Request, response: Response, body: OTPVerify, db: AsyncSession = Depends(get_db)):
+    await _throttle_by_email("otp_verify", body.email, limit=10, window_seconds=900)
     user, token = await auth_service.verify_otp(db, body.email, body.code)
     _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
 @router.post("/onboarding", response_model=TokenResponse)
+@limiter.limit("30/minute")
 async def complete_onboarding(
+    request: Request,
     body: OnboardingRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -194,7 +212,9 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 
 @router.patch("/me", response_model=TokenResponse)
+@limiter.limit("30/minute")
 async def update_me(
+    request: Request,
     body: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -214,7 +234,9 @@ async def update_me(
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("10/minute")
 async def delete_me(
+    request: Request,
     body: DeleteAccountRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

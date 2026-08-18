@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.http_client import get_client
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import FileExtraction
 
 settings = get_settings()
@@ -256,7 +256,7 @@ async def extract_image(content: bytes, media_type: str) -> dict:
     description = data["content"][0]["text"]
     # DLP: a descrição vira fallback_text injetado em providers sem visão (ex.: Perplexity),
     # fora do fluxo de sanitização do prompt — então sanitizamos aqui.
-    description = sanitize_prompt(description).sanitized_text
+    description = (await sanitize_prompt_async(description)).sanitized_text
     usage = data.get("usage", {})
     return {
         "base64": b64,

@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
 from app.core.telemetry import _set_llm_output, async_llm_span, start_llm_span
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 
 settings = get_settings()
 
@@ -671,11 +671,11 @@ class DlpEnforcingProvider(BaseProvider):
         self._inner = inner
 
     async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
-        safe_prompt = sanitize_prompt(prompt).sanitized_text
+        safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
         return await self._inner.complete(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens)
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
-        safe_prompt = sanitize_prompt(prompt).sanitized_text
+        safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
         async for token in self._inner.stream(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens):
             yield token
 

@@ -48,6 +48,13 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token inválido: campo 'sub' ausente",
             )
+        try:
+            user_uuid = UUID(user_id)
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido",
+            )
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -60,7 +67,7 @@ async def get_current_user(
         )
 
     result = await db.execute(
-        select(User).where(User.id == UUID(user_id), User.status == True)
+        select(User).where(User.id == user_uuid, User.status == True)
     )
     user = result.scalar_one_or_none()
 

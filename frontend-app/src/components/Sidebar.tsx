@@ -47,15 +47,15 @@ interface ConvItemProps {
   conv: ConversationSummary;
   activeId?: string;
   folders: Folder[];
-  onSelect: () => void;
-  onMove: (folderId: string | null) => void;
+  onSelect: (id: string) => void;
+  onMove: (convId: string, folderId: string | null) => void;
   selected?: boolean;
   selectionMode?: boolean;
-  onToggleSelect?: () => void;
-  onDragStart?: () => void;
+  onToggleSelect?: (convId: string) => void;
+  onDragStart?: (convId: string) => void;
 }
 
-function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
+function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -93,13 +93,13 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
   return (
     <div
       draggable
-      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(); }}
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(conv.id); }}
       style={{ position: 'relative', borderRadius: 6, background: rowBg, transition: 'background 0.1s', cursor: 'grab' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        onClick={() => selectionMode ? onToggleSelect?.() : onSelect()}
+        onClick={() => selectionMode ? onToggleSelect?.(conv.id) : onSelect(conv.id)}
         style={{
           padding: '7px 10px',
           paddingLeft: (selectionMode || hovered) ? 6 : 10,
@@ -119,7 +119,7 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
       >
         {(selectionMode || hovered) && (
           <span
-            onClick={e => { e.stopPropagation(); onToggleSelect?.(); }}
+            onClick={e => { e.stopPropagation(); onToggleSelect?.(conv.id); }}
             style={{
               width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected ? 'var(--green)' : 'var(--line2)'}`,
               background: selected ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -186,7 +186,7 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
               </button>
               {conv.folder_id && (
                 <button
-                  onClick={e => { e.stopPropagation(); onMove(null); setMenuOpen(false); }}
+                  onClick={e => { e.stopPropagation(); onMove(conv.id, null); setMenuOpen(false); }}
                   style={ctxItemStyle}
                 >
                   <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
@@ -207,7 +207,7 @@ function ConvItem({ conv, activeId, folders, onSelect, onMove, selected, selecti
               {folders.map(f => (
                 <button
                   key={f.id}
-                  onClick={e => { e.stopPropagation(); onMove(f.id); setMenuOpen(false); }}
+                  onClick={e => { e.stopPropagation(); onMove(conv.id, f.id); setMenuOpen(false); }}
                   style={{ ...ctxItemStyle, fontWeight: conv.folder_id === f.id ? 600 : 400 }}
                 >
                   {conv.folder_id === f.id ? '✓ ' : ''}{f.name}
@@ -227,6 +227,10 @@ const ctxItemStyle: React.CSSProperties = {
   fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer', textAlign: 'left',
 };
 
+// Memoizado: numa lista longa, sem isso qualquer estado local do Sidebar
+// (hover, menu, usageTick) re-renderiza todos os itens.
+const ConvItem = memo(ConvItemBase);
+
 // ── Linha de pasta ───────────────────────────────────────────────
 
 interface FolderRowProps {
@@ -238,7 +242,7 @@ interface FolderRowProps {
   onMove: (convId: string, folderId: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onNewInFolder: () => void;
+  onNewInFolder: (folderId: string, folderName: string) => void;
   selectedConvIds?: Set<string>;
   selectionMode?: boolean;
   onToggleSelect?: (convId: string) => void;
@@ -246,7 +250,7 @@ interface FolderRowProps {
   onDropConv?: (folderId: string | null) => void;
 }
 
-function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
+function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
@@ -312,7 +316,7 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
         </button>
 
         <button
-          onClick={e => { e.stopPropagation(); onNewInFolder(); }}
+          onClick={e => { e.stopPropagation(); onNewInFolder(folder.id, folder.name); }}
           title="Nova consulta nesta pasta"
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center', flexShrink: 0 }}
         >
@@ -389,12 +393,12 @@ function FolderRow({ folder, conversations, activeId, allFolders, onSelect, onMo
                 conv={conv}
                 activeId={activeId}
                 folders={allFolders}
-                onSelect={() => onSelect(conv.id)}
-                onMove={fId => onMove(conv.id, fId)}
+                onSelect={onSelect}
+                onMove={onMove}
                 selected={selectedConvIds?.has(conv.id)}
                 selectionMode={selectionMode}
-                onToggleSelect={() => onToggleSelect?.(conv.id)}
-                onDragStart={() => onDragStart?.(conv.id)}
+                onToggleSelect={onToggleSelect}
+                onDragStart={onDragStart}
               />
             ))
           )}
@@ -429,6 +433,8 @@ function DropZoneNoPasta({ onDrop }: { onDrop: () => void }) {
     </div>
   );
 }
+
+const FolderRow = memo(FolderRowBase);
 
 // ── Sidebar principal ────────────────────────────────────────────
 
@@ -559,15 +565,15 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
   });
 
-  function toggleSelect(convId: string) {
+  const toggleSelect = useCallback((convId: string) => {
     setSelectedConvIds(prev => {
       const next = new Set(prev);
       if (next.has(convId)) next.delete(convId); else next.add(convId);
       return next;
     });
-  }
+  }, []);
 
-  function handleDrop(folderId: string | null) {
+  const handleDrop = useCallback((folderId: string | null) => {
     if (!draggingConvId) return;
     if (selectedConvIds.has(draggingConvId) && selectedConvIds.size > 1) {
       bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId });
@@ -575,7 +581,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       moveConvMutation.mutate({ convId: draggingConvId, folderId });
     }
     setDraggingConvId(null);
-  }
+  }, [draggingConvId, selectedConvIds, bulkMoveMutation.mutate, moveConvMutation.mutate]);
 
   useEffect(() => {
     if (activeId && !conversations.some(c => c.id === activeId)) {
@@ -600,6 +606,30 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     (fn: () => void) => () => { fn(); if (isMobile) onToggle(); },
     [isMobile, onToggle],
   );
+
+  // Handlers com referência estável — os itens da lista são memoizados e
+  // qualquer arrow inline aqui anularia o memo a cada render do Sidebar.
+  const handleSelectConv = useCallback(
+    (id: string) => closeAfter(() => onSelect(id))(),
+    [closeAfter, onSelect],
+  );
+  const handleMoveConv = useCallback(
+    (convId: string, folderId: string | null) => moveConvMutation.mutate({ convId, folderId }),
+    [moveConvMutation.mutate],
+  );
+  const handleRenameFolder = useCallback(
+    (id: string, name: string) => renameFolderMutation.mutate({ id, name }),
+    [renameFolderMutation.mutate],
+  );
+  const handleDeleteFolder = useCallback(
+    (id: string) => deleteFolderMutation.mutate(id),
+    [deleteFolderMutation.mutate],
+  );
+  const handleNewInFolder = useCallback(
+    (folderId: string, folderName: string) => closeAfter(() => onNew(folderId, folderName))(),
+    [closeAfter, onNew],
+  );
+  const handleDragStart = useCallback((convId: string) => setDraggingConvId(convId), []);
 
   const groups = useMemo(() => groupByDate(conversations), [conversations]);
 
@@ -658,20 +688,6 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         </button>
       </div>
 
-      <div style={{ padding: '4px 14px 12px' }}>
-        <div style={{
-          height: 30, borderRadius: 8, border: '1px solid var(--line2)',
-          background: '#fff', display: 'flex', alignItems: 'center',
-          padding: '0 10px', gap: 8, fontSize: 11, color: 'var(--pen3)',
-        }}>
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-            <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M10.5 10.5 L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          Buscar conversas
-        </div>
-      </div>
-
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
 
         {/* Seção de pastas */}
@@ -722,16 +738,16 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 conversations={convsByFolder[folder.id] ?? []}
                 activeId={activeId}
                 allFolders={folders}
-                onSelect={id => closeAfter(() => onSelect(id))()}
-                onMove={(convId, fId) => moveConvMutation.mutate({ convId, folderId: fId })}
-                onRename={(id, name) => renameFolderMutation.mutate({ id, name })}
-                onDelete={id => deleteFolderMutation.mutate(id)}
-                onNewInFolder={closeAfter(() => onNew(folder.id, folder.name))}
+                onSelect={handleSelectConv}
+                onMove={handleMoveConv}
+                onRename={handleRenameFolder}
+                onDelete={handleDeleteFolder}
+                onNewInFolder={handleNewInFolder}
                 selectedConvIds={selectedConvIds}
                 selectionMode={selectionMode}
                 onToggleSelect={toggleSelect}
-                onDragStart={convId => setDraggingConvId(convId)}
-                onDropConv={folderId => handleDrop(folderId)}
+                onDragStart={handleDragStart}
+                onDropConv={handleDrop}
               />
             ))}
           </div>
@@ -781,12 +797,12 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                   conv={conv}
                   activeId={activeId}
                   folders={folders}
-                  onSelect={closeAfter(() => onSelect(conv.id))}
-                  onMove={fId => moveConvMutation.mutate({ convId: conv.id, folderId: fId })}
+                  onSelect={handleSelectConv}
+                  onMove={handleMoveConv}
                   selected={selectedConvIds.has(conv.id)}
                   selectionMode={selectionMode}
-                  onToggleSelect={() => toggleSelect(conv.id)}
-                  onDragStart={() => setDraggingConvId(conv.id)}
+                  onToggleSelect={toggleSelect}
+                  onDragStart={handleDragStart}
                 />
               ))}
             </div>

@@ -113,6 +113,28 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(f"Variáveis obrigatórias vazias em produção: {', '.join(missing)}")
+
+        # O embed SSO só prova identidade via validação server-to-server: sem ela, o
+        # endpoint confia apenas no header Origin (forjável) e emite JWT para qualquer
+        # e-mail. Em produção isso é fail-closed no startup, não opt-in.
+        if not self.curseduca_validation_enabled:
+            raise ValueError(
+                "CURSEDUCA_VALIDATION_ENABLED deve ser true em produção: sem ela o "
+                "/auth/embed/token emite token para qualquer e-mail informado."
+            )
+        embed_missing = [
+            name
+            for name, value in (
+                ("curseduca_api_base", self.curseduca_api_base),
+                ("curseduca_api_key", self.curseduca_api_key),
+            )
+            if not value
+        ]
+        if embed_missing:
+            raise ValueError(
+                "Validação Curseduca habilitada mas sem credenciais: "
+                f"{', '.join(embed_missing)}"
+            )
         return self
 
 

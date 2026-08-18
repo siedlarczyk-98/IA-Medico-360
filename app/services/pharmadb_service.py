@@ -4,6 +4,7 @@ Integração com API PharmaDB para checagem farmacológica, bulas, receitas e ge
 Cache via Redis. Token JWT com renovação automática antes de 60min.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -236,6 +237,16 @@ class PharmaDBService:
 
     # ── Interações ────────────────────────────────────────────────────────────
 
+    async def _interacoes_do_pa(self, pa_id) -> list:
+        """Interações de um princípio ativo, com cache. Levanta em erro (o caller loga)."""
+        cache_key = f"pharmadb:interacoes:pa:{pa_id}"
+        interacoes_pa = await self._cache_get(cache_key)
+        if interacoes_pa is None:
+            data = await self._get(f"/v1/interacoes/pa/{pa_id}", {"per_page": 200})
+            interacoes_pa = data.get("interacoes", [])
+            await self._cache_set(cache_key, interacoes_pa, TTL_INTERACOES)
+        return interacoes_pa
+
     async def checar_interacoes(self, nomes_genericos: list[str]) -> dict:
         """
         Recebe nomes genéricos (já normalizados pelo extrator).
@@ -249,12 +260,18 @@ class PharmaDBService:
                 "interacoes": [],
             }
 
-        # 1. Resolver pa_ids
+        # 1. Resolver pa_ids (em paralelo: uma requisição por medicamento)
         pas = []
         nao_encontrados = []
-        for nome in nomes_genericos:
-            pa = await self.buscar_pa(nome)
-            if pa:
+        pa_results = await asyncio.gather(
+            *(self.buscar_pa(nome) for nome in nomes_genericos),
+            return_exceptions=True,
+        )
+        for nome, pa in zip(nomes_genericos, pa_results):
+            if isinstance(pa, BaseException):
+                logger.error(f"Erro ao resolver PA de '{nome}': {pa}")
+                nao_encontrados.append(nome)
+            elif pa:
                 pas.append(pa)
             else:
                 nao_encontrados.append(nome)
@@ -274,26 +291,26 @@ class PharmaDBService:
         interacoes_encontradas = []
         pares_vistos: set[tuple] = set()
 
-        for pa in pas:
-            try:
-                cache_key = f"pharmadb:interacoes:pa:{pa['pa_id']}"
-                interacoes_pa = await self._cache_get(cache_key)
-                if interacoes_pa is None:
-                    data = await self._get(f"/v1/interacoes/pa/{pa['pa_id']}", {"per_page": 200})
-                    interacoes_pa = data.get("interacoes", [])
-                    await self._cache_set(cache_key, interacoes_pa, TTL_INTERACOES)
+        # Busca em paralelo; a deduplicação abaixo continua sequencial na ordem de `pas`
+        # para manter o resultado determinístico.
+        interacoes_por_pa = await asyncio.gather(
+            *(self._interacoes_do_pa(pa["pa_id"]) for pa in pas),
+            return_exceptions=True,
+        )
 
-                for interacao in interacoes_pa:
-                    pa_b_id = interacao.get("pa_b", {}).get("id")
-                    if pa_b_id not in pa_ids or pa_b_id == pa["pa_id"]:
-                        continue
-                    par = tuple(sorted([pa["pa_id"], pa_b_id]))
-                    if par in pares_vistos:
-                        continue
-                    pares_vistos.add(par)
-                    interacoes_encontradas.append(interacao)
-            except Exception as e:
-                logger.error(f"Erro ao buscar interações do PA {pa['pa_id']}: {e}")
+        for pa, interacoes_pa in zip(pas, interacoes_por_pa):
+            if isinstance(interacoes_pa, BaseException):
+                logger.error(f"Erro ao buscar interações do PA {pa['pa_id']}: {interacoes_pa}")
+                continue
+            for interacao in interacoes_pa:
+                pa_b_id = interacao.get("pa_b", {}).get("id")
+                if pa_b_id not in pa_ids or pa_b_id == pa["pa_id"]:
+                    continue
+                par = tuple(sorted([pa["pa_id"], pa_b_id]))
+                if par in pares_vistos:
+                    continue
+                pares_vistos.add(par)
+                interacoes_encontradas.append(interacao)
 
         # 3. Montar alertas com semáforo
         alertas = []
@@ -643,10 +660,6 @@ class PharmaDBService:
                 linhas.append(f"- **{s['nome']}** ({s.get('laboratorio', '—')}) — {preco}{economia}")
 
         return "\n".join(linhas)
-
-    # mantido por compatibilidade com código antigo
-    def formatar_resposta_texto(self, resultado: dict) -> str:
-        return self.formatar_interacoes(resultado)
 
 
 # ── Singleton ────────────────────────────────────────────────────────────────

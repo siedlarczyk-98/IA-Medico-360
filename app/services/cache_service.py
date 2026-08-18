@@ -61,3 +61,21 @@ async def set_json(key: str, value: dict | list, ttl: int) -> None:
         await _get_redis().setex(key, ttl, json.dumps(value, ensure_ascii=False))
     except Exception as e:
         logger.warning("Redis set falhou (%s): %s", key, e)
+
+
+async def rate_limit_exceeded(key: str, limit: int, window_seconds: int) -> bool:
+    """Contador de janela fixa: True quando `key` já passou de `limit` na janela.
+
+    Complementa o rate limit por IP do slowapi para chaves que só existem no corpo
+    do request (e-mail). Falha aberta se o Redis cair — o limite por IP continua
+    valendo e derrubar o login inteiro por indisponibilidade de cache seria pior.
+    """
+    try:
+        r = _get_redis()
+        count = await r.incr(key)
+        if count == 1:
+            await r.expire(key, window_seconds)
+        return count > limit
+    except Exception as e:
+        logger.warning("Redis rate limit falhou (%s): %s", key, e)
+        return False

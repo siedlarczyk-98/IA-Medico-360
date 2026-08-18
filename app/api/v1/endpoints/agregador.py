@@ -20,7 +20,7 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.prompts import DISCLAIMER_RESPOSTA, build_agregador_prompt
-from app.middleware.dlp import sanitize_prompt
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import ModelPricing, User
 from app.schemas.agregador import (
     AgregadorRequest,
@@ -145,7 +145,7 @@ async def agregador_stream(
     service = AgregadorService(db=db, user_id=user.id, company_id=user.company_id)
 
     # DLP antes de qualquer coisa
-    dlp_result = sanitize_prompt(body.prompt)
+    dlp_result = await sanitize_prompt_async(body.prompt)
     sanitized_prompt = dlp_result.sanitized_text
 
     # Criar/recuperar conversa (já usa prompt sanitizado no título)
