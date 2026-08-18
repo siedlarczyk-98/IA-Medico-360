@@ -49,12 +49,17 @@ async def get_definition_or_404(db: AsyncSession, slug: str) -> CalculatorDefini
 
 
 async def get_active_version(db: AsyncSession, calculator_id: UUID) -> CalculatorVersion | None:
-    stmt = select(CalculatorVersion).where(
-        CalculatorVersion.calculator_id == calculator_id,
-        CalculatorVersion.is_active.is_(True),
+    stmt = (
+        select(CalculatorVersion)
+        .where(
+            CalculatorVersion.calculator_id == calculator_id,
+            CalculatorVersion.is_active.is_(True),
+        )
+        .order_by(CalculatorVersion.version_number.desc())
+        .limit(1)
     )
     result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def list_favorite_calculator_ids(db: AsyncSession, *, user_id: UUID) -> set[UUID]:
@@ -70,7 +75,6 @@ async def add_favorite(db: AsyncSession, *, user_id: UUID, calculator_id: UUID) 
         .on_conflict_do_nothing(constraint="uq_calculator_favorites_user_calculator")
     )
     await db.execute(stmt)
-    await db.commit()
 
 
 async def remove_favorite(db: AsyncSession, *, user_id: UUID, calculator_id: UUID) -> None:
@@ -79,11 +83,10 @@ async def remove_favorite(db: AsyncSession, *, user_id: UUID, calculator_id: UUI
         CalculatorFavorite.calculator_id == calculator_id,
     )
     await db.execute(stmt)
-    await db.commit()
 
 
 async def list_executions(
-    db: AsyncSession, *, calculator_id: UUID, user_id: UUID, limit: int = 50
+    db: AsyncSession, *, calculator_id: UUID, user_id: UUID, limit: int = 50, offset: int = 0
 ) -> list[CalculatorExecution]:
     stmt = (
         select(CalculatorExecution)
@@ -93,6 +96,7 @@ async def list_executions(
         )
         .order_by(CalculatorExecution.created_at.desc())
         .limit(limit)
+        .offset(offset)
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())

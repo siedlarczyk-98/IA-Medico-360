@@ -1,7 +1,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Teto defensivo de chaves no payload de execucao. A validacao por campo
+# (engine/validation.py) ja rejeita chaves desconhecidas, mas isso acontece
+# depois de a request inteira ser materializada em memoria.
+MAX_INPUT_KEYS = 100
 
 
 class CalculatorListItem(BaseModel):
@@ -44,6 +49,13 @@ class CalculatorDetailOut(BaseModel):
 class CalculatorExecuteRequest(BaseModel):
     inputs: dict
     dry_run: bool = False
+
+    @field_validator("inputs")
+    @classmethod
+    def _limit_input_keys(cls, value: dict) -> dict:
+        if len(value) > MAX_INPUT_KEYS:
+            raise ValueError(f"inputs excede o máximo de {MAX_INPUT_KEYS} campos")
+        return value
 
 
 class CalculatorExecuteResponse(BaseModel):

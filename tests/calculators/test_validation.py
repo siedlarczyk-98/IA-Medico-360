@@ -15,6 +15,7 @@ def make_field(**kwargs) -> CalculatorField:
         required=True,
         min_value=None,
         max_value=None,
+        max_length=None,
         options=None,
         display_order=0,
     )
@@ -165,6 +166,43 @@ def test_text_convertido_para_str():
     fields = [make_field(key="obs", field_type="text", required=True)]
     validated = validate_inputs(fields, {"obs": 123})
     assert validated["obs"] == "123"
+
+
+def test_text_acima_do_teto_global_gera_erro():
+    fields = [make_field(key="obs", field_type="text", required=True)]
+    with pytest.raises(CalculatorValidationError) as exc_info:
+        validate_inputs(fields, {"obs": "x" * 2001})
+    assert "tamanho" in field_errors(exc_info.value)["obs"]
+
+
+def test_text_respeita_max_length_do_campo():
+    fields = [make_field(key="obs", field_type="text", required=True, max_length=10)]
+    assert validate_inputs(fields, {"obs": "x" * 10})["obs"] == "x" * 10
+
+    with pytest.raises(CalculatorValidationError):
+        validate_inputs(fields, {"obs": "x" * 11})
+
+
+# --- bool nao e numero ---
+
+def test_bool_nao_passa_como_numerico():
+    """bool e subclasse de int: sem guarda explicita, `true` viraria 1."""
+    for field_type in ("integer", "number"):
+        fields = [make_field(key="idade", field_type=field_type, required=True)]
+        with pytest.raises(CalculatorValidationError) as exc_info:
+            validate_inputs(fields, {"idade": True})
+        assert "numérico" in field_errors(exc_info.value)["idade"]
+
+
+# --- valores nao finitos ---
+
+def test_nan_e_infinito_sao_rejeitados():
+    """NaN/Infinity nao sao representaveis em JSONB e quebrariam a persistencia."""
+    fields = [make_field(key="peso", field_type="number", required=True)]
+    for valor in (float("nan"), float("inf"), "NaN", "Infinity"):
+        with pytest.raises(CalculatorValidationError) as exc_info:
+            validate_inputs(fields, {"peso": valor})
+        assert "finito" in field_errors(exc_info.value)["peso"]
 
 
 # --- campos desconhecidos ---

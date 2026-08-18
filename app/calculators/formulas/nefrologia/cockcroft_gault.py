@@ -39,6 +39,11 @@ def calculate(inputs: dict) -> dict:
 
     peso_usado = {"real": peso_real, "ideal": peso_ideal, "ajustado": peso_ajustado}[tipo_peso]
 
+    # min_value e dado configuravel em calculator_fields, nao garantia de codigo:
+    # sem esta guarda, creatinina 0 derruba a requisicao com ZeroDivisionError.
+    if creatinina <= 0:
+        raise ValueError("creatinina_mgdl deve ser maior que zero")
+
     crcl = ((140 - idade) * peso_usado) / (72 * creatinina)
     if sexo == "F":
         crcl *= 0.85

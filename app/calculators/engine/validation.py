@@ -1,7 +1,10 @@
 """Validação de inputs do usuário contra os `calculator_fields` da calculadora."""
 
 from app.calculators.engine.field_coercion import NUMERIC_TYPES, valid_options
+from app.core.config import get_settings
 from app.models.calculators import CalculatorField
+
+settings = get_settings()
 
 
 class CalculatorValidationError(Exception):
@@ -29,10 +32,18 @@ def validate_inputs(fields: list[CalculatorField], raw_inputs: dict) -> dict:
             continue
 
         if field.field_type in NUMERIC_TYPES:
+            if isinstance(value, bool):
+                # bool e subclasse de int: sem esta guarda, `true` num campo
+                # numerico seria convertido em 1 e auditado como tal.
+                add_error(field.key, "Campo deve ser numérico")
+                continue
             try:
                 value = int(value) if field.field_type == "integer" else float(value)
             except (TypeError, ValueError):
                 add_error(field.key, "Campo deve ser numérico")
+                continue
+            if value != value or value in (float("inf"), float("-inf")):
+                add_error(field.key, "Campo deve ser um número finito")
                 continue
             if field.min_value is not None and value < field.min_value:
                 add_error(field.key, f"Campo abaixo do mínimo ({field.min_value})")
@@ -59,6 +70,10 @@ def validate_inputs(fields: list[CalculatorField], raw_inputs: dict) -> dict:
 
         elif field.field_type == "text":
             value = str(value)
+            max_length = field.max_length or settings.calculator_text_field_max_chars
+            if len(value) > max_length:
+                add_error(field.key, f"Campo excede o tamanho máximo ({max_length} caracteres)")
+                continue
 
         validated[field.key] = value
 
