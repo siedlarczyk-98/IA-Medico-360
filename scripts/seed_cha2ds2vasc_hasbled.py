@@ -69,17 +69,18 @@ async def main() -> None:
             _field(cid, "icc", "Insuficiência cardíaca", "boolean", 3, required=False),
             _field(cid, "hipertensao", "Hipertensão", "boolean", 4, required=False),
             _field(cid, "diabetes", "Diabetes", "boolean", 5, required=False),
-            _field(cid, "avc_avc_tev_previo", "AVC / AIT / tromboembolismo venoso prévio", "boolean", 6, required=False),
-            _field(cid, "doenca_vascular", "Doença vascular", "boolean", 7, required=False),
+            _field(cid, "avc_ait_previo", "AVC / AIT prévio", "boolean", 6, required=False),
+            _field(cid, "tev_previo", "Tromboembolismo venoso prévio", "boolean", 7, required=False),
+            _field(cid, "doenca_vascular", "Doença vascular", "boolean", 8, required=False),
 
             # ── HAS-BLED ──────────────────────────────────────────────────
-            _field(cid, "hipertensao_nao_controlada", "Hipertensão não controlada", "boolean", 8, required=False),
-            _field(cid, "funcao_renal_alterada", "Função renal alterada", "boolean", 9, required=False),
-            _field(cid, "funcao_hepatica_alterada", "Função hepática alterada", "boolean", 10, required=False),
-            _field(cid, "sangramento_previo", "Sangramento prévio ou predisposição a sangramento", "boolean", 11, required=False),
-            _field(cid, "inr_labil", "INR lábil", "boolean", 12, required=False),
-            _field(cid, "uso_alcool_drogas", "Uso de álcool ou drogas", "boolean", 13, required=False),
-            _field(cid, "medicamentos_predisponentes_sangramento", "Uso de medicamentos que predispõem a sangramento", "boolean", 14, required=False),
+            _field(cid, "hipertensao_nao_controlada", "Hipertensão não controlada", "boolean", 9, required=False),
+            _field(cid, "funcao_renal_alterada", "Função renal alterada", "boolean", 10, required=False),
+            _field(cid, "funcao_hepatica_alterada", "Função hepática alterada", "boolean", 11, required=False),
+            _field(cid, "sangramento_previo", "Sangramento prévio ou predisposição a sangramento", "boolean", 12, required=False),
+            _field(cid, "inr_labil", "INR lábil", "boolean", 13, required=False),
+            _field(cid, "uso_alcool_drogas", "Uso de álcool ou drogas", "boolean", 14, required=False),
+            _field(cid, "medicamentos_predisponentes_sangramento", "Uso de medicamentos que predispõem a sangramento", "boolean", 15, required=False),
         ]
         db.add_all(fields)
 

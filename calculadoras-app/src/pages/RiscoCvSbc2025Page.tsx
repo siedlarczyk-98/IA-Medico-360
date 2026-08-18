@@ -2,19 +2,32 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCalculatorDetail } from '../hooks/useCalculatorDetail';
 import { useExecuteCalculator } from '../hooks/useExecuteCalculator';
-import { DynamicCalculatorForm } from '../components/DynamicCalculatorForm';
 import { AiPrefillSection } from '../components/AiPrefillSection';
 import { CalculatorTopbar } from '../components/CalculatorTopbar';
-import { ResultPanel } from '../components/ResultPanel';
 import { WizardStepper } from '../components/WizardStepper';
 import { formSpecRegistry } from '../calculators/formSpecs';
 import { buildVisibleInputs, checkVisibleCond, isVisibleSection, validateRequired } from '../calculators/formHelpers';
 import { ValidationError } from '../api/calculators';
+import { RiscoCvResultDashboard } from '../calculators/riscoCv/RiscoCvResultDashboard';
+import { TriagemStep } from '../calculators/riscoCv/steps/TriagemStep';
+import { DiabetesStep } from '../calculators/riscoCv/steps/DiabetesStep';
+import { AltoRiscoStep } from '../calculators/riscoCv/steps/AltoRiscoStep';
+import { PreventStep } from '../calculators/riscoCv/steps/PreventStep';
+import { AgravantesStep } from '../calculators/riscoCv/steps/AgravantesStep';
+import type { StepProps } from '../calculators/riscoCv/steps/types';
 
 // Side-effect: registers the formSpec for this slug.
 import '../calculators/riscoCvSbc2025.formSpec';
 
 const SLUG = 'risco_cv_sbc2025';
+
+const STEP_COMPONENTS: Record<string, (props: StepProps) => React.JSX.Element> = {
+  triagem: TriagemStep,
+  diabetes: DiabetesStep,
+  alto_risco: AltoRiscoStep,
+  prevent: PreventStep,
+  agravantes: AgravantesStep,
+};
 
 // Passo máximo do algoritmo de estratificação (backend) que o wizard TENTA cobrir ao
 // final de cada step — usado para decidir se um `passo_determinante` retornado pelo
@@ -343,16 +356,20 @@ export function RiscoCvSbc2025Page() {
               padding: '24px 20px',
               marginBottom: 24,
             }}>
-              <DynamicCalculatorForm
-                fields={calculator.fields}
-                formSpec={formSpec}
-                values={values}
-                onChange={handleChange}
-                aiFilledKeys={aiFilledKeys}
-                fieldErrors={fieldErrors}
-                showErrors={showErrors}
-                activeStep={activeStep?.key}
-              />
+              {activeStep && (() => {
+                const StepComponent = STEP_COMPONENTS[activeStep.key];
+                return StepComponent ? (
+                  <StepComponent
+                    fields={calculator.fields}
+                    formSpec={formSpec}
+                    values={values}
+                    onChange={handleChange}
+                    aiFilledKeys={aiFilledKeys}
+                    fieldErrors={fieldErrors}
+                    showErrors={showErrors}
+                  />
+                ) : null;
+              })()}
             </div>
           </>
         )}
@@ -452,7 +469,7 @@ export function RiscoCvSbc2025Page() {
         {/* Resultado */}
         {result && (
           <div id="result-panel">
-            <ResultPanel result={result} />
+            <RiscoCvResultDashboard result={result} />
           </div>
         )}
       </div>

@@ -33,7 +33,8 @@ def _interpretacao_hasbled(score: int) -> str:
 def calculate(inputs: dict) -> dict:
     idade = int(inputs["idade"])
     sexo = inputs["sexo"]  # "F" ou "M"
-    avc_avc_tev_previo = bool(inputs.get("avc_avc_tev_previo"))
+    avc_ait_previo = bool(inputs.get("avc_ait_previo"))
+    tev_previo = bool(inputs.get("tev_previo"))
 
     chads = 0
     chads += 1 if inputs.get("icc") else 0
@@ -43,7 +44,7 @@ def calculate(inputs: dict) -> dict:
     elif idade >= 65:
         chads += 1
     chads += 1 if inputs.get("diabetes") else 0
-    chads += 2 if avc_avc_tev_previo else 0
+    chads += 2 if (avc_ait_previo or tev_previo) else 0
     chads += 1 if inputs.get("doenca_vascular") else 0
     chads += 1 if sexo == "F" else 0
 
@@ -51,7 +52,8 @@ def calculate(inputs: dict) -> dict:
     hasbled += 1 if inputs.get("hipertensao_nao_controlada") else 0
     hasbled += 1 if inputs.get("funcao_renal_alterada") else 0
     hasbled += 1 if inputs.get("funcao_hepatica_alterada") else 0
-    hasbled += 1 if avc_avc_tev_previo else 0
+    # Critério "S" do HAS-BLED é especificamente AVC — TEV isolado não conta aqui.
+    hasbled += 1 if avc_ait_previo else 0
     hasbled += 1 if inputs.get("sangramento_previo") else 0
     hasbled += 1 if inputs.get("inr_labil") else 0
     hasbled += 1 if idade > 65 else 0
