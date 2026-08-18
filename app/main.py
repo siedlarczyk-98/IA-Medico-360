@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 logger = logging.getLogger(__name__)
 
 from app.api.v1.router import api_v1_router
+from app.calculators.formulas import load_all_formulas
 from app.core.config import get_settings
 from app.core import http_client
 from app.core.telemetry import setup_phoenix
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI):
         endpoint=settings.phoenix_endpoint,
     )
     await http_client.startup()
+    # Popula o registry de formulas no boot: um formula_key ausente falha
+    # aqui, e nao na primeira execucao clinica em producao.
+    load_all_formulas()
     yield
     # Shutdown
     await http_client.shutdown()

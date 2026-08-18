@@ -16,6 +16,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    desc,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -89,6 +91,9 @@ class CalculatorField(Base):
     required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     min_value: Mapped[float | None] = mapped_column()
     max_value: Mapped[float | None] = mapped_column()
+    # Teto de caracteres para campos `text`; None cai no default global
+    # (settings.calculator_text_field_max_chars).
+    max_length: Mapped[int | None] = mapped_column(Integer)
     options: Mapped[list | None] = mapped_column(JSONB)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -101,7 +106,14 @@ class CalculatorVersion(Base):
     __tablename__ = "calculator_versions"
     __table_args__ = (
         UniqueConstraint("calculator_id", "version_number", name="uq_calculator_versions_calculator_version"),
-        Index("ix_calculator_versions_calculator_active", "calculator_id", "is_active"),
+        # Garante no banco a invariante que `get_active_version` assume: no maximo
+        # uma versao ativa por calculadora (RN-CALC-SCHEMA-005).
+        Index(
+            "uq_calculator_versions_one_active",
+            "calculator_id",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
         {"schema": SCHEMA},
     )
 
@@ -139,8 +151,14 @@ class CalculatorFavorite(Base):
 class CalculatorExecution(Base):
     __tablename__ = "calculator_executions"
     __table_args__ = (
-        Index("ix_calculator_executions_user_created_at", "user_id", "created_at"),
-        Index("ix_calculator_executions_calculator_user", "calculator_id", "user_id"),
+        # Cobre filtro + ordenacao de `list_executions` (calculator_id, user_id
+        # ORDER BY created_at DESC) sem sort adicional.
+        Index(
+            "ix_calculator_executions_calculator_user_created_at",
+            "calculator_id",
+            "user_id",
+            desc("created_at"),
+        ),
         {"schema": SCHEMA},
     )
 

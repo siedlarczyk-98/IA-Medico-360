@@ -32,7 +32,9 @@ async def list_calculators(
 
 
 @router.get("/{slug}", response_model=CalculatorDetailOut)
+@limiter.limit("60/minute")
 async def get_calculator(
+    request: Request,
     slug: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -84,7 +86,9 @@ async def extract_calculator_fields(
 
 
 @router.put("/{slug}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 async def favorite_calculator(
+    request: Request,
     slug: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -93,7 +97,9 @@ async def favorite_calculator(
 
 
 @router.delete("/{slug}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 async def unfavorite_calculator(
+    request: Request,
     slug: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -102,9 +108,15 @@ async def unfavorite_calculator(
 
 
 @router.get("/{slug}/history", response_model=list[CalculatorExecutionHistoryItem])
+@limiter.limit("60/minute")
 async def get_calculator_history(
+    request: Request,
     slug: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await calculators_service.get_calculator_history(db, slug=slug, user_id=current_user.id)
+    return await calculators_service.get_calculator_history(
+        db, slug=slug, user_id=current_user.id, limit=limit, offset=offset
+    )

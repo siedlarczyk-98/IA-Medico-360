@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     max_prompt_chars: int = 4000
     default_timeout_seconds: int = 30
 
+    # --- Calculadoras ---
+    # Teto de caracteres para inputs do tipo `text` quando a calculadora nao
+    # declara `max_length` proprio (RN-CALC: inputs sao persistidos em JSONB).
+    calculator_text_field_max_chars: int = 2000
+    # Cache in-process do catalogo de calculadoras (dados quase estaticos,
+    # alterados apenas por seed/migration).
+    calculator_catalog_cache_ttl_seconds: int = 300
+    # Chamadas simultaneas ao LLM de extracao por processo, para o /extract nao
+    # esgotar o pool de conexoes compartilhado com as demais integracoes.
+    calculator_extraction_max_concurrency: int = 8
+    calculator_extraction_timeout_seconds: int = 15
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

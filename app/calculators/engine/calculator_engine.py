@@ -4,6 +4,7 @@ Engine genérico de execução de calculadoras (RN-CALC-BACK-001).
 (RN-CALC-BACK-004).
 """
 
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -15,6 +16,8 @@ from app.calculators.registry import get_formula
 from app.calculators.repositories import calculators_repository as repo
 from app.models.calculators import CalculatorExecution
 from app.models.models import AuditLog
+
+logger = logging.getLogger(__name__)
 
 
 async def execute_calculator(
@@ -42,16 +45,59 @@ async def execute_calculator(
             definition=definition, version=version, inputs=validated_inputs
         )
     else:
+        # Idempotente: o registry ja e populado no lifespan da app, este load
+        # cobre apenas contextos sem lifespan (testes, scripts).
         load_all_formulas()
-        formula_fn = get_formula(version.formula_key)
-        outcome = formula_fn(validated_inputs)
+        try:
+            formula_fn = get_formula(version.formula_key)
+        except KeyError:
+            logger.error(
+                "formula_key '%s' da versao ativa de '%s' nao esta registrada",
+                version.formula_key,
+                slug,
+            )
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Calculadora '{slug}' está mal configurada",
+            )
+        try:
+            outcome = formula_fn(validated_inputs)
+        except HTTPException:
+            raise
+        except (KeyError, TypeError, ValueError, ZeroDivisionError, ArithmeticError) as exc:
+            # Campos opcionais (ver migration 016) e faixas configuradas por seed
+            # podem deixar a formula sem um input que ela acessa direto. Responde
+            # 422 em vez de vazar um 500 com traceback.
+            logger.warning(
+                "Falha ao executar formula '%s' de '%s': %s", version.formula_key, slug, exc
+            )
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                [{"loc": ["inputs"], "msg": "Inputs insuficientes ou inválidos para esta calculadora"}],
+            )
         result = outcome["result"]
         interpretation = outcome.get("interpretation")
         interaction_id = None
 
     if dry_run:
         # Chamada intermediária (checagem de early-exit do wizard): não persiste
-        # execução nem consome cota de uso.
+        # execução nem consome cota de uso, mas continua auditada — sem isso o
+        # dry_run seria um caminho de cálculo clínico sem rastro (RN-CALC-SCHEMA-005).
+        db.add(
+            AuditLog(
+                user_id=user_id,
+                interaction_id=interaction_id,
+                action="calculator_execute_dry_run",
+                entity_type="calculator_definition",
+                entity_id=definition.id,
+                metadata_={
+                    "slug": slug,
+                    "version_id": str(version.id),
+                    "input_keys": sorted(validated_inputs.keys()),
+                },
+            )
+        )
+        await db.commit()
         return CalculatorExecution(
             calculator_id=definition.id,
             version_id=version.id,
