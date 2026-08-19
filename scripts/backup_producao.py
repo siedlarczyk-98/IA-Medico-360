@@ -108,33 +108,55 @@ def main() -> int:
     momento = datetime.now(UTC)
     arquivo = destino / f"medico360-{momento.strftime('%Y%m%dT%H%M%SZ')}.dump"
 
+    # Baixar a imagem ANTES, com a saida visivel. Se o pull acontecesse dentro do
+    # passo do dump (com stderr capturado), 400 MB de download apareceriam como
+    # um script travado - e a reacao correta de quem espera no escuro e Ctrl+C.
     print(f"Imagem: {imagem}")
+    if subprocess.run(["docker", "image", "inspect", imagem], capture_output=True).returncode != 0:
+        print("Baixando a imagem (so na primeira vez, pode levar alguns minutos)...")
+        if subprocess.run(["docker", "pull", imagem]).returncode != 0:
+            print(f"ERRO: nao foi possivel baixar {imagem}.")
+            return 1
+
     print(f"Destino: {arquivo}")
     print("Rodando pg_dump (so leitura na origem)...")
     inicio = datetime.now(UTC)
 
-    with arquivo.open("wb") as saida:
-        resultado = subprocess.run(
-            [
-                "docker", "run", "--rm", "-i",
-                "--add-host=host.docker.internal:host-gateway",
-                imagem,
-                "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
-                _para_container(dsn),
-            ],
-            stdout=saida,
-            stderr=subprocess.PIPE,
-            text=False,
-        )
+    # Qualquer saida que nao seja sucesso apaga o arquivo: dump parcial com nome
+    # de backup e pior que nenhum backup. Inclui Ctrl+C, que ja deixou para tras
+    # um arquivo de 0 byte antes desta guarda existir.
+    try:
+        with arquivo.open("wb") as saida:
+            resultado = subprocess.run(
+                [
+                    "docker", "run", "--rm", "-i",
+                    "--add-host=host.docker.internal:host-gateway",
+                    imagem,
+                    "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
+                    _para_container(dsn),
+                ],
+                stdout=saida,
+                stderr=subprocess.PIPE,
+                text=False,
+            )
+    except KeyboardInterrupt:
+        arquivo.unlink(missing_ok=True)
+        print()
+        print("Interrompido. O arquivo parcial foi apagado.")
+        return 130
 
     duracao = datetime.now(UTC) - inicio
     if resultado.returncode != 0:
         erro = resultado.stderr.decode("utf-8", "replace").strip()
         print(f"FALHOU: {_oculta(erro, dsn)}")
-        arquivo.unlink(missing_ok=True)  # nao deixar dump parcial parecendo backup valido
+        arquivo.unlink(missing_ok=True)
         return 1
 
     tamanho = arquivo.stat().st_size
+    if tamanho == 0:
+        print("FALHOU: pg_dump terminou sem erro mas nao escreveu nada.")
+        arquivo.unlink(missing_ok=True)
+        return 1
     print(f"Dump escrito em {duracao} ({tamanho / 1_048_576:.1f} MiB)")
 
     # Arquivo existir e ter tamanho nao prova nada: dump truncado tambem tem.
