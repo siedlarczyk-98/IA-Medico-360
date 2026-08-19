@@ -35,7 +35,10 @@ USO_DADOS_ANONIMIZADOS = "uso_dados_anonimizados"
 # versão vigente no momento do aceite. Ao publicar uma revisão dos documentos,
 # suba esta constante — quem aceitou a anterior aparece como desatualizado, em
 # vez de parecer que consentiu com um texto que nunca viu.
-VERSAO_DOCUMENTOS = "2026-08"
+#
+# É a data da última revisão publicada dos documentos, não a data de hoje.
+# Precisa bater com `VERSAO_DOCUMENTOS` em frontend-app/src/lib/documentos.ts.
+VERSAO_DOCUMENTOS = "2024-08-05"
 
 
 def _origem(request: Request | None) -> tuple[str | None, str | None]:

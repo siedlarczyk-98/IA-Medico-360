@@ -548,6 +548,8 @@ A plataforma DEVE ser projetada com abordagem **Mobile First** (viewport base: 3
 | Áudio / Whisper | ⏳ Backlog | — |
 | Métricas de cache hit rate | ⏳ Backlog | — |
 | Aceite de termos registrado (LGPD art. 8) | ✅ Implementado | `consent_logs` com IP, user-agent e versão do documento |
+| Termos de Uso próprios do Médico 360 | ❌ Ausente | O documento linkado é o do **Paciente 360**, produto diferente |
+| Política de Privacidade cobrindo dado de saúde | ⚠️ Lacuna | O texto vigente (05/08/2024) não trata dado de saúde como sensível |
 | Consent específico de monetização (art. 11) | 🚫 Bloqueia RN-DATA-001 | Infra pronta; falta tela e decisão de produto |
 
 ### Frontend

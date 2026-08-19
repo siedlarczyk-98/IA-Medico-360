@@ -9,6 +9,9 @@ Estes testes cobrem o que sustenta a prova: que o aceite vira registro, que o
 onboarding é recusado sem ele, e que a revogação não apaga o histórico.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 
@@ -139,3 +142,16 @@ async def test_revogar_tipo_desconhecido_da_404(client, user):
 @pytest.mark.parametrize("rota", ["/api/v1/auth/me/consentimentos"])
 async def test_consentimento_exige_autenticacao(client, rota):
     assert (await client.get(rota)).status_code == 401
+
+
+def test_versao_dos_documentos_bate_com_o_frontend():
+    """
+    As duas constantes precisam andar juntas. Se o front linkar uma revisao nova
+    e o backend continuar gravando a antiga, o registro passa a afirmar que o
+    usuario aceitou um texto que ele nunca viu - e o registro so vale pelo que
+    consegue provar.
+    """
+    arquivo = Path(__file__).resolve().parents[1] / "frontend-app" / "src" / "lib" / "documentos.ts"
+    achado = re.search(r"VERSAO_DOCUMENTOS\s*=\s*'([^']+)'", arquivo.read_text(encoding="utf-8"))
+    assert achado, "VERSAO_DOCUMENTOS nao encontrada em documentos.ts"
+    assert achado.group(1) == consent_service.VERSAO_DOCUMENTOS

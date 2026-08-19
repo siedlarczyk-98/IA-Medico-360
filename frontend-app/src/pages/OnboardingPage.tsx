@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { completeOnboarding } from '../api/auth';
 import { isAuthenticated, setToken } from '../lib/auth';
+import { DOCUMENTOS } from '../lib/documentos';
 
 const BRAZIL_STATES = [
   'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA',
@@ -149,6 +150,8 @@ export function OnboardingPage() {
       : isMedico
         ? !!form.crm && !!form.crm_state && (!needsSpecialty || !!form.specialty)
         : false);
+
+  const linkDocumento = { color: 'var(--petrol)', textDecoration: 'underline' } as const;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -373,21 +376,30 @@ export function OnboardingPage() {
             <span style={{ fontSize: 12.5, color: 'var(--pen2)', lineHeight: 1.5 }}>
               Li e aceito os{' '}
               <a
-                href="#"
+                href={DOCUMENTOS.termos.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: 'var(--petrol)', textDecoration: 'underline' }}
+                style={linkDocumento}
               >
-                Termos de Uso
+                {DOCUMENTOS.termos.label}
+              </a>
+              , a{' '}
+              <a
+                href={DOCUMENTOS.privacidade.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={linkDocumento}
+              >
+                {DOCUMENTOS.privacidade.label}
               </a>
               {' '}e a{' '}
               <a
-                href="#"
+                href={DOCUMENTOS.cookies.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: 'var(--petrol)', textDecoration: 'underline' }}
+                style={linkDocumento}
               >
-                Política de Privacidade
+                {DOCUMENTOS.cookies.label}
               </a>
             </span>
           </label>
