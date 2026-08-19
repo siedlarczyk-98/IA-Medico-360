@@ -151,8 +151,11 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: alembic upgrade head
-      - run: python scripts/seed_calculators.py
-      - run: python scripts/seed_risco_cv_sbc2025.py
+      # `python -m` em vez de `python scripts/x.py`: a forma com caminho coloca
+      # `scripts/` no sys.path em vez da raiz, e os seeds importam `app.*`.
+      # Mesma causa do `prepend_sys_path` que o alembic precisou.
+      - run: python -m scripts.seed_calculators
+      - run: python -m scripts.seed_risco_cv_sbc2025
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
