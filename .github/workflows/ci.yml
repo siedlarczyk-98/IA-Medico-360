@@ -16,7 +16,10 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
+          # Derivada do run, como no job de e2e: servico efemero alcancavel
+          # so de dentro do job. Literal com nome de senha dispara scanner de
+          # segredo, e scanner que da alarme falso e scanner ignorado.
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}
           POSTGRES_DB: medico360_test
         ports:
           - 55433:5432
@@ -27,7 +30,7 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL_TEST: postgresql+asyncpg://test:test@localhost:55433/medico360_test
+      DATABASE_URL_TEST: postgresql+asyncpg://test:ci-${{ github.run_id }}@localhost:55433/medico360_test
 
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +59,8 @@ jobs:
       # models, então sem este passo uma migration quebrada passaria despercebida.
       - name: migrations aplicam do zero
         env:
-          DATABASE_URL: postgresql+asyncpg://test:test@localhost:55433/medico360_migrations_test
-          PGPASSWORD: test
+          DATABASE_URL: postgresql+asyncpg://test:ci-${{ github.run_id }}@localhost:55433/medico360_migrations_test
+          PGPASSWORD: ci-${{ github.run_id }}
           # APP_ENV nao tem mais padrao: o Settings exige que seja declarada.
           APP_ENV: development
         run: |
