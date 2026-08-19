@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { completeOnboarding } from '../api/auth';
 import { isAuthenticated, setToken } from '../lib/auth';
 
@@ -99,11 +99,11 @@ const labelStyle: React.CSSProperties = {
 export function OnboardingPage() {
   const navigate = useNavigate();
 
-  if (!isAuthenticated()) {
-    navigate('/login', { replace: true });
-    return null;
-  }
-
+  // Todos os hooks ANTES de qualquer return condicional. Do jeito anterior, a
+  // checagem de autenticacao saia com `return null` no meio do componente e os
+  // useState abaixo so rodavam em parte dos renders — o React conta hooks por
+  // ordem de chamada, entao um render nao-autenticado seguido de um autenticado
+  // quebrava com "Rendered more hooks than during the previous render".
   const [form, setForm] = useState({
     name: '',
     med_status: '',
@@ -116,6 +116,13 @@ export function OnboardingPage() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // `<Navigate>` em vez de chamar `navigate()` durante o render: navegar e efeito
+  // colateral, e efeito colateral no corpo do componente e justamente o que o
+  // React proibe.
+  if (!isAuthenticated()) {
+    return <Navigate to="/login" replace />;
+  }
 
   const isGraduando = form.med_status === 'graduando';
   const isMedico = ['generalista', 'residente', 'especialista'].includes(form.med_status);
