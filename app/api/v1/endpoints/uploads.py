@@ -1,7 +1,8 @@
+import logging
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,8 @@ from app.services.file_extractor_service import (
 )
 from app.services.pricing import calculate_cost
 from app.services.usage_service import check_limit, record_cost
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
 
@@ -102,6 +105,27 @@ async def extract_file(
             await record_cost(db, user.id, haiku_cost)
     except FileValidationError as e:
         raise HTTPException(status_code=413, detail=str(e))
+    except Exception as e:
+        # Arquivo danificado é comportamento normal de usuário: download
+        # interrompido, PDF truncado, planilha meio salva. Antes disso subia como
+        # 500 — o médico via "Erro interno do servidor" e não sabia que o problema
+        # era o arquivo dele, e o Sentry enchia de ruído.
+        #
+        # O `except` é amplo de propósito: cada parser levanta exceção da sua
+        # própria biblioteca (PdfminerException, InvalidFileException, PackageNotFound...)
+        # e enumerá-las seria uma lista que envelhece a cada upgrade. Fica em
+        # `warning`, não `error`: é problema do arquivo, não da aplicação.
+        logger.warning(
+            "Falha ao extrair %s: %s: %s", file_kind, type(e).__name__, e,
+            extra={"file_kind": file_kind, "erro": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Não consegui ler este arquivo — ele parece danificado ou incompleto. "
+                "Tente abrir no seu computador para conferir, ou reenvie."
+            ),
+        ) from e
 
     if len(text) > MAX_EXTRACTED_CHARS:
         text = text[:MAX_EXTRACTED_CHARS] + "\n\n[... conteúdo truncado — arquivo muito extenso]"

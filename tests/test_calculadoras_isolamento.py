@@ -177,3 +177,55 @@ async def test_upload_rejeita_conteudo_que_mente_o_tipo(client, dono):
         headers=auth_headers(dono),
     )
     assert resp.status_code == 415
+
+
+# ── Arquivo danificado: comportamento normal de usuario ──────────────────
+# Download interrompido, PDF truncado, planilha meio salva. Antes isso subia
+# como 500: o medico via "Erro interno do servidor" sem saber que o problema
+# era o arquivo dele, e o Sentry enchia de ruido de erro que nao e da aplicacao.
+
+QUEBRA = bytes([10])  # quebra de linha sem escape, para o literal nao se corromper
+
+# Assinatura %PDF- valida (passa na checagem de magic bytes) mas sem estrutura.
+PDF_VAZIO = b"%PDF-1.4" + QUEBRA + b"%%EOF" + QUEBRA
+PDF_CORROMPIDO = b"%PDF-1.4" + QUEBRA + bytes([0, 255]) * 300 + QUEBRA + b"%%EOF" + QUEBRA
+
+
+@pytest.mark.parametrize(("nome", "conteudo"), [("vazio", PDF_VAZIO), ("corrompido", PDF_CORROMPIDO)])
+async def test_pdf_danificado_devolve_erro_util(client, dono, nome, conteudo):
+    resp = await client.post(
+        "/api/v1/uploads/extract",
+        files={"file": (f"{nome}.pdf", conteudo, "application/pdf")},
+        headers=auth_headers(dono),
+    )
+
+    assert resp.status_code == 422, f"{nome}: veio {resp.status_code}"
+    detalhe = resp.json()["detail"]
+    assert "danificado" in detalhe or "incompleto" in detalhe, (
+        "A mensagem precisa dizer ao medico que o problema e o arquivo dele"
+    )
+
+
+async def test_arquivo_danificado_nao_vira_500(client, dono):
+    """
+    Regressao explicita: passar de 500 para 4xx nao e cosmetico. 500 significa
+    "a aplicacao quebrou" e dispara alerta no Sentry; 4xx significa "a entrada
+    e invalida" e nao acorda ninguem.
+    """
+    resp = await client.post(
+        "/api/v1/uploads/extract",
+        files={"file": ("x.pdf", PDF_CORROMPIDO, "application/pdf")},
+        headers=auth_headers(dono),
+    )
+    assert resp.status_code < 500
+
+
+async def test_arquivo_danificado_nao_e_persistido(client, db, dono):
+    resp = await client.post(
+        "/api/v1/uploads/extract",
+        files={"file": ("x.pdf", PDF_CORROMPIDO, "application/pdf")},
+        headers=auth_headers(dono),
+    )
+
+    assert resp.status_code == 422
+    assert (await db.execute(select(FileExtraction))).scalars().all() == []
