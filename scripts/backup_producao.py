@@ -34,6 +34,11 @@ IMAGEM = "pgvector/pgvector:pg{maior}"
 
 
 def _normaliza(dsn: str) -> str:
+    # Copiar a URL do painel do Railway costuma trazer quebra de linha junto, e
+    # ela vai parar no NOME DO BANCO: o erro sai como `database "railway` com a
+    # aspas so na linha seguinte, que nao parece um problema de espaco em branco.
+    # Aspas coladas por engano tambem caem aqui.
+    dsn = dsn.strip().strip('"').strip("'").strip()
     for prefixo, troca in (("postgresql+asyncpg://", "postgresql://"), ("postgres://", "postgresql://")):
         if dsn.startswith(prefixo):
             return troca + dsn[len(prefixo):]

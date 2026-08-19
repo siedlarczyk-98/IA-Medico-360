@@ -40,9 +40,13 @@ except ModuleNotFoundError:  # pragma: no cover - depende do ambiente, nao da lo
 
 def _normaliza(dsn: str) -> str:
     """
+    Espaco/quebra de linha vindos do copiar-e-colar do painel entram no nome do
+    banco e produzem um erro confuso (`database "railway` sem fechar).
+
     asyncpg nao entende o prefixo do SQLAlchemy nem o `postgres://` legado que
     alguns paineis do Railway ainda entregam.
     """
+    dsn = dsn.strip().strip('"').strip("'").strip()
     for prefixo, troca in (
         ("postgresql+asyncpg://", "postgresql://"),
         ("postgres://", "postgresql://"),
