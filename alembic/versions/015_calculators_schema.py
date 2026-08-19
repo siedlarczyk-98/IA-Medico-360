@@ -4,9 +4,10 @@ Revision ID: 015_calculators_schema
 Revises: 014_img_columns
 Create Date: 2026-06-30
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from alembic import op
 
 revision = "015_calculators_schema"
 down_revision = "014_img_columns"

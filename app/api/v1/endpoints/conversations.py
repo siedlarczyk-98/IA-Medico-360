@@ -25,7 +25,7 @@ async def list_conversations(
 ):
     result = await db.execute(
         select(Conversation)
-        .where(Conversation.user_id == current_user.id, Conversation.status == True)
+        .where(Conversation.user_id == current_user.id, Conversation.status.is_(True))
         .order_by(Conversation.updated_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -48,7 +48,7 @@ async def get_conversation(
         .where(
             Conversation.id == conversation_id,
             Conversation.user_id == current_user.id,
-            Conversation.status == True,
+            Conversation.status.is_(True),
         )
     )
     conv = conv_result.scalar_one_or_none()

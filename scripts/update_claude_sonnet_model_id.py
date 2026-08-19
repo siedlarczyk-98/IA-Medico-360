@@ -4,13 +4,13 @@ Execute via: python -m scripts.update_claude_sonnet_model_id
 """
 
 import asyncio
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
 from app.models.models import ModelPricing
-
 
 OLD_ID = "claude-sonnet-4-20250514"
 NEW_ID = "claude-sonnet-4-6"

@@ -6,8 +6,9 @@ Create Date: 2026-06-19
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "013_file_extractions"
 down_revision = "012_user_specialty"

@@ -33,7 +33,7 @@ async def get_model_pricing(db: AsyncSession, model_id: str) -> Pricing | None:
             ModelPricing.output_per_million,
         ).where(
             ModelPricing.model_id == model_id,
-            ModelPricing.status == True,
+            ModelPricing.status.is_(True),
         )
     )
     row = result.one_or_none()

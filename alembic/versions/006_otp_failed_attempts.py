@@ -5,8 +5,9 @@ Revises: 005_enrollment_date
 Create Date: 2026-06-08
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "006_otp_failed_attempts"
 down_revision = "005_enrollment_date"

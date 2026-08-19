@@ -4,8 +4,9 @@ Revision ID: 014_file_extraction_image_columns
 Revises: 013_file_extractions
 Create Date: 2026-06-19
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "014_img_columns"
 down_revision = "013_file_extractions"

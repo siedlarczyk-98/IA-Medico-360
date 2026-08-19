@@ -5,8 +5,9 @@ Revision ID: 021_calculators_hardening
 Revises: 020_fix_display_order
 Create Date: 2026-08-18
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "021_calculators_hardening"
 down_revision = "020_fix_display_order"

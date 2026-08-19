@@ -5,9 +5,10 @@ Revises: 001_add_semantic_cache
 Create Date: 2026-06-08
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
+
+from alembic import op
 
 revision = "002_auth_schema"
 down_revision = "001_add_semantic_cache"

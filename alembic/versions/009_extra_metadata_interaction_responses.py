@@ -6,8 +6,9 @@ Create Date: 2026-06-10
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import op
 
 revision = "009_extra_metadata"
 down_revision = "008_performance_indexes_2"

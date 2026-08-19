@@ -2,9 +2,10 @@
 
 import asyncio
 
+from sqlalchemy import select
+
 from app.core.database import async_session_factory
 from app.models.calculators import Specialty
-from sqlalchemy import select
 
 
 async def main() -> None:

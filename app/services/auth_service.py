@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt as pyjwt
 from fastapi import HTTPException, status
@@ -15,7 +15,7 @@ from app.services import email_service
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def intercom_user_hash(user: "User") -> str | None:
@@ -36,7 +36,6 @@ def intercom_user_hash(user: "User") -> str | None:
 
 
 def create_access_token(user: "User") -> str:
-    from app.models.models import User as UserModel  # avoid circular at module level
     settings = get_settings()
     expire = _utcnow() + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     payload = {

@@ -4,7 +4,6 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-
 MED_STATUS_VALUES = {"graduando", "generalista", "residente", "especialista"}
 BRAZIL_STATES = {
     "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",

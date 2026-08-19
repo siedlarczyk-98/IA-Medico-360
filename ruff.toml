@@ -4,3 +4,13 @@ target-version = "py312"
 [lint]
 select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Os imports da aplicação precisam vir DEPOIS do `sys.stdout.reconfigure(utf-8)`:
+# o console do Windows usa cp1252 e qualquer módulo que imprima emoji durante o
+# import estoura UnicodeEncodeError antes de o app subir.
+"app/main.py" = ["E402"]
+
+# O conftest sobrescreve DATABASE_URL antes de importar `app`, para que nenhum
+# teste alcance o banco de produção. A ordem aqui é a própria trava de segurança.
+"tests/conftest.py" = ["E402"]

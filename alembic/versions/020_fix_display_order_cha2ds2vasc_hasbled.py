@@ -8,8 +8,9 @@ Revision ID: 020_fix_display_order
 Revises: 019_split_avc_tev
 Create Date: 2026-08-18
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "020_fix_display_order"
 down_revision = "019_split_avc_tev"

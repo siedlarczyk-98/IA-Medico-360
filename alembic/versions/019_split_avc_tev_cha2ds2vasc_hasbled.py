@@ -12,8 +12,9 @@ Create Date: 2026-08-18
 """
 import uuid
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "019_split_avc_tev"
 down_revision = "018_standardize_timestamps"

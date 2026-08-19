@@ -3,8 +3,9 @@ Médico 360 — Modelos SQLAlchemy baseados no ERD (medico360_erd_final.mermaid)
 Cobre todas as entidades necessárias para o Agregador + auditoria.
 """
 
+import enum
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
@@ -12,7 +13,6 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
-    Enum as SAEnum,
     Float,
     ForeignKey,
     Index,
@@ -26,11 +26,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
-
 # ── Helpers ──────────────────────────────────────────────────
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_uuid() -> uuid.UUID:
@@ -39,7 +38,6 @@ def new_uuid() -> uuid.UUID:
 
 # ── Enums ────────────────────────────────────────────────────
 
-import enum
 
 class FeatureEnum(str, enum.Enum):
     AGREGADOR = "AGREGADOR"

@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AuditLog, User, UserWeeklyUsage
@@ -46,7 +46,7 @@ async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:
     if usage is None:
         usage = UserWeeklyUsage(
             user_id=user_id,
-            week_start=datetime.now(timezone.utc),
+            week_start=datetime.now(UTC),
             total_cost_usd=Decimal("0"),
         )
         db.add(usage)
@@ -56,7 +56,7 @@ async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:
 
 
 async def _reset_if_expired(db: AsyncSession, usage: UserWeeklyUsage) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     week_end = usage.week_start + timedelta(days=7)
     if now >= week_end:
         usage.week_start = now

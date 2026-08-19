@@ -15,7 +15,7 @@ Modos:
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import text
@@ -130,7 +130,7 @@ async def _lookup(
 ) -> dict | None:
     """Busca hit por cosine similarity. Retorna response_json ou None."""
     vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         result = await db.execute(
@@ -229,7 +229,7 @@ async def store_response(
         await cache_service.set_json(_exact_key(mode, raw_prompt), response_dict, TTL_EXACT_SECONDS)
     try:
         vector_str = "[" + ",".join(str(x) for x in embedding) + "]"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + timedelta(days=TTL_DAYS)
 
         async with db.begin_nested():

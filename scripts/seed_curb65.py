@@ -5,6 +5,8 @@ Referência: Lim WS et al., Thorax. 2003;58(5):377-82.
 
 import asyncio
 
+from sqlalchemy import select
+
 from app.core.database import async_session_factory
 from app.models.calculators import (
     CalculatorDefinition,
@@ -12,7 +14,6 @@ from app.models.calculators import (
     CalculatorVersion,
     Specialty,
 )
-from sqlalchemy import select
 
 
 def _field(calculator_id, key, label, field_type, order, **kwargs):

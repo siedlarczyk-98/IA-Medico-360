@@ -6,6 +6,7 @@ Create Date: 2026-06-08
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "004_weekly_usage"

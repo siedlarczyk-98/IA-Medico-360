@@ -427,7 +427,7 @@ async def validate_with_pubmed(
             _run_validation(agent_response, topic),
             timeout=timeout_s,
         )
-    except (asyncio.TimeoutError, Exception) as exc:
+    except (TimeoutError, Exception) as exc:
         logger.warning("[PubMed] Fallback ativado: %s", exc)
         # não cacheia falbacks de erro/timeout — deve retentar na próxima requisição
         return ValidationResult(confidence_score=0.0, low_evidence_alert=True, fallback=True)

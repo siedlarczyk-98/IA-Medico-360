@@ -4,9 +4,10 @@ Extrai usuário autenticado do token JWT.
 """
 
 from uuid import UUID
+
+import jwt as pyjwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-import jwt as pyjwt
 from jwt import PyJWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,7 +68,7 @@ async def get_current_user(
         )
 
     result = await db.execute(
-        select(User).where(User.id == user_uuid, User.status == True)
+        select(User).where(User.id == user_uuid, User.status.is_(True))
     )
     user = result.scalar_one_or_none()
 

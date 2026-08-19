@@ -14,7 +14,7 @@ from app.models.models import InviteToken, OtpCode, User
 async def get_user_by_email(db: AsyncSession, email: str, *, active_only: bool = False) -> User | None:
     stmt = select(User).where(User.email == email)
     if active_only:
-        stmt = stmt.where(User.status == True)  # noqa: E712 (comparação SQLAlchemy, não booleana Python)
+        stmt = stmt.where(User.status.is_(True))  # noqa: E712 (comparação SQLAlchemy, não booleana Python)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 

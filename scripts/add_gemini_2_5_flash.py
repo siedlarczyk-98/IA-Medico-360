@@ -5,8 +5,9 @@ Execute via: python -m scripts.add_gemini_2_5_flash
 
 import asyncio
 from decimal import Decimal
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
@@ -48,9 +49,9 @@ async def add_gemini_2_5_flash():
         await session.commit()
 
         print("[OK] Gemini 2.5 Flash adicionado com sucesso!")
-        print(f"  - Model ID: gemini-2.5-flash")
-        print(f"  - Input: $0.075 / 1M tokens")
-        print(f"  - Output: $0.30 / 1M tokens")
+        print("  - Model ID: gemini-2.5-flash")
+        print("  - Input: $0.075 / 1M tokens")
+        print("  - Output: $0.30 / 1M tokens")
 
 
 if __name__ == "__main__":

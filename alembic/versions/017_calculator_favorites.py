@@ -4,9 +4,10 @@ Revision ID: 017_calculator_favorites
 Revises: 016_risco_cv_relax_required
 Create Date: 2026-07-01
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
+
+from alembic import op
 
 revision = "017_calculator_favorites"
 down_revision = "016_risco_cv_relax_required"

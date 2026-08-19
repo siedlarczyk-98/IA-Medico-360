@@ -6,8 +6,9 @@ Create Date: 2026-06-10
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
+
+from alembic import op
 
 revision = "010_folders"
 down_revision = "009_extra_metadata"

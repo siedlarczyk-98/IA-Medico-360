@@ -10,8 +10,9 @@ Execute via: python -m scripts.deactivate_gemini_3_flash
 """
 
 import asyncio
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings

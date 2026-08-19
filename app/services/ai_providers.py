@@ -11,8 +11,8 @@ continua sendo aplicado por-requisição.
 import asyncio
 import json as json_lib
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import AsyncIterator
 
 from app.core.config import get_settings
 from app.core.http_client import get_client
