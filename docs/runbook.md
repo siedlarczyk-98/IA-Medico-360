@@ -166,10 +166,20 @@ Para ligar:
 3. Configurar alerta por taxa de 5xx e por erro novo, com destino definido —
    sem isso o painel existe mas ninguém é avisado.
 
-**Antes de confiar:** provoque um erro de propósito num ambiente de teste e
-confira no painel que o evento chegou **sem** o texto do prompt em nenhum campo.
-O scrubbing tem 17 testes (`tests/test_error_tracking.py`), incluindo um ponta a
-ponta, mas a verificação no painel real custa dois minutos e fecha a dúvida.
+**Antes de confiar**, rode a verificação no ambiente real:
+
+```bash
+python -m scripts.verificar_sentry
+```
+
+Ela envia UM evento de teste com um prompt clínico sintético vivo no escopo e
+imprime a lista do que não pode aparecer no painel. Não escreve no banco nem
+chama provedor de IA. O evento vai com a tag `verificacao=manual` e título
+"VERIFICACAO DE SCRUBBING", para ser fácil de achar e resolver depois.
+
+O scrubbing tem 17 testes automatizados (`tests/test_error_tracking.py`),
+incluindo um ponta a ponta que inspeciona o envelope que sairia pela rede. Mas
+conferir no painel real custa dois minutos e fecha a dúvida.
 
 Nunca ligar `send_default_pii=True` nem remover o `before_send`: é o que separa
 "alerta útil" de "prontuário saindo do país num evento de erro".
