@@ -153,6 +153,29 @@ o problema é do fornecedor. Só a Curseduca é urgente, porque bloqueia login.
 
 ---
 
+## Ativar o rastreamento de erro
+
+O Sentry está implementado mas **desligado**: sem `SENTRY_DSN` o código é no-op.
+
+Para ligar:
+
+1. Criar projeto em `sentry.io` (plano gratuito cobre volume baixo) ou subir uma
+   instância de GlitchTip, que é compatível e roda na sua infraestrutura.
+2. Definir `SENTRY_DSN` no Railway. Opcionalmente `SENTRY_RELEASE` com o hash do
+   commit, para o erro apontar a versão.
+3. Configurar alerta por taxa de 5xx e por erro novo, com destino definido —
+   sem isso o painel existe mas ninguém é avisado.
+
+**Antes de confiar:** provoque um erro de propósito num ambiente de teste e
+confira no painel que o evento chegou **sem** o texto do prompt em nenhum campo.
+O scrubbing tem 17 testes (`tests/test_error_tracking.py`), incluindo um ponta a
+ponta, mas a verificação no painel real custa dois minutos e fecha a dúvida.
+
+Nunca ligar `send_default_pii=True` nem remover o `before_send`: é o que separa
+"alerta útil" de "prontuário saindo do país num evento de erro".
+
+---
+
 ## Retenção de dados
 
 O expurgo roda por cron: `python -m scripts.expurgar_dados_vencidos`.
