@@ -36,9 +36,30 @@ MASCARA = "[REMOVIDO PELO SCRUBBING]"
 _MAX_PROFUNDIDADE = 8
 
 
-def _bloqueado(chave: str) -> bool:
+def _bloqueado(chave) -> bool:
+    """Aceita str e bytes: no ASGI os nomes de header chegam como bytes."""
+    if isinstance(chave, bytes):
+        chave = chave.decode("latin-1", "replace")
     k = str(chave).lower()
     return any(proibido in k for proibido in CAMPOS_BLOQUEADOS)
+
+
+def _e_par_bloqueado(valor) -> bool:
+    """
+    Reconhece o formato de header do ASGI: `[b"authorization", b"Bearer ..."]`.
+
+    Sem isso o scrubbing por nome de campo nao alcanca nada: `scope["headers"]` e
+    `request.headers` sao LISTAS DE PARES, nao dicionarios, e aparecem como
+    variaveis locais dos frames do stack trace. Foi assim que o token de sessao
+    vazou numa simulacao de requisicao real, mesmo com todos os testes de unidade
+    (que usavam dados em formato de dicionario) passando.
+    """
+    return (
+        isinstance(valor, list | tuple)
+        and len(valor) == 2
+        and isinstance(valor[0], str | bytes)
+        and _bloqueado(valor[0])
+    )
 
 
 def _limpa(valor: Any, profundidade: int = 0) -> Any:
@@ -51,6 +72,8 @@ def _limpa(valor: Any, profundidade: int = 0) -> Any:
             for chave, v in valor.items()
         }
     if isinstance(valor, list | tuple):
+        if _e_par_bloqueado(valor):
+            return [valor[0], MASCARA]
         return [_limpa(v, profundidade + 1) for v in valor]
     return valor
 

@@ -260,3 +260,65 @@ def test_excecao_real_nao_leva_o_prompt(sentry_espiao):
     texto = json.dumps(evento, default=str)
     assert "provider timeout" in texto
     assert "chamada_ao_provider" in texto
+
+
+# ── Regressao: headers do ASGI sao LISTA DE PARES, nao dicionario ────────
+# Todos os testes acima usavam dados em formato de dicionario, e passavam. Uma
+# simulacao de requisicao real (scripts/simular_erro_de_usuario.py) mostrou o
+# token de sessao vazando mesmo assim: nos frames do stack trace aparecem os
+# objetos `scope` e `request` do ASGI, cujos headers sao pares [chave, valor]
+# em bytes. O scrubbing por chave de dicionario nao alcancava nada ali.
+
+HEADERS_ASGI = [
+    [b"host", b"medico360.com.br"],
+    [b"authorization", b"Bearer eyJhbGciOiJIUzI1NiJ9.token-secreto.assinatura"],
+    [b"cookie", b"medico360_session=sessao-secreta"],
+    [b"user-agent", b"Mozilla/5.0"],
+]
+
+
+def test_headers_em_pares_de_bytes_sao_mascarados():
+    evento = {
+        "exception": {"values": [{"stacktrace": {"frames": [{
+            "vars": {"scope": {"headers": HEADERS_ASGI}},
+        }]}}]}
+    }
+
+    limpo = scrub_event(evento)
+
+    import json
+    texto = json.dumps(limpo, default=str)
+    assert "token-secreto" not in texto
+    assert "sessao-secreta" not in texto
+    # Header inocuo sobrevive: o objetivo e mascarar credencial, nao apagar contexto.
+    assert "Mozilla/5.0" in texto
+    assert "medico360.com.br" in texto
+
+
+def test_par_de_header_preserva_o_nome_do_campo():
+    """Saber QUE havia um Authorization ajuda a diagnosticar; o valor, nao."""
+    evento = {"extra": {"headers": [[b"authorization", b"Bearer segredo"]]}}
+
+    par = scrub_event(evento)["extra"]["headers"][0]
+
+    assert par[0] == b"authorization"
+    assert par[1] == MASCARA
+
+
+def test_pares_em_str_tambem_funcionam():
+    """Nem todo framework entrega bytes."""
+    evento = {"extra": {"h": [("Authorization", "Bearer segredo"), ("Accept", "*/*")]}}
+
+    limpo = scrub_event(evento)["extra"]["h"]
+
+    assert limpo[0][1] == MASCARA
+    assert limpo[1][1] == "*/*"
+
+
+def test_lista_comum_nao_e_confundida_com_par_de_header():
+    """Contraprova: lista de dois elementos cujo primeiro nao e campo bloqueado."""
+    evento = {"extra": {"coordenadas": [["latitude", "-23.55"], ["longitude", "-46.63"]]}}
+
+    limpo = scrub_event(evento)["extra"]["coordenadas"]
+
+    assert limpo == [["latitude", "-23.55"], ["longitude", "-46.63"]]
