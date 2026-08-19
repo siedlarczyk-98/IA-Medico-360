@@ -25,3 +25,8 @@ calculadoras-app/.env
 calculadoras-app/.env.production
 calculadoras-app/test-results/
 calculadoras-app/playwright-report/
+
+# Cobertura de testes
+.coverage
+coverage.xml
+htmlcov/

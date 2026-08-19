@@ -16,7 +16,6 @@ from datetime import UTC, datetime, timedelta
 
 import jwt as pyjwt
 import pytest
-from fastapi.routing import APIRoute
 
 from app.core.config import get_settings
 from app.main import app
@@ -31,6 +30,8 @@ ADMIN = "admin"
 ROUTE_POLICY: dict[tuple[str, str], str] = {
     # Público por natureza
     ("GET", "/api/v1/health"): PUBLICA,
+    # Readiness é consultado pela plataforma, antes de existir usuário.
+    ("GET", "/api/v1/health/ready"): PUBLICA,
     # Público porque são os fluxos de entrada — protegidos por rate limit,
     # OTP e validação server-to-server, não por token.
     ("POST", "/api/v1/auth/register"): PUBLICA,
@@ -42,6 +43,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/auth/me"): AUTENTICADA,
     ("PATCH", "/api/v1/auth/me"): AUTENTICADA,
     ("DELETE", "/api/v1/auth/me"): AUTENTICADA,
+    # Portabilidade LGPD: cada titular exporta os PRÓPRIOS dados.
+    ("GET", "/api/v1/auth/me/export"): AUTENTICADA,
     ("POST", "/api/v1/auth/onboarding"): AUTENTICADA,
     ("POST", "/api/v1/auth/invite/generate"): ADMIN,
     # Núcleo clínico
@@ -75,12 +78,28 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
 
 
 def rotas_da_app() -> list[tuple[str, str]]:
-    return sorted(
-        (metodo, rota.path)
-        for rota in app.routes
-        if isinstance(rota, APIRoute)
-        for metodo in rota.methods - {"HEAD", "OPTIONS"}
+    """
+    Rotas expostas pela aplicação, lidas do schema OpenAPI.
+
+    Usar o schema em vez de varrer `app.routes` é deliberado: a estrutura interna
+    de rotas do FastAPI já mudou de forma (0.141 aninhou as rotas incluídas dentro
+    de objetos de router, e uma varredura por `isinstance(..., APIRoute)` passou a
+    devolver ZERO — silenciosamente transformando todo teste parametrizado por
+    rota em no-op). O schema é contrato público e devolve o caminho completo.
+
+    Limitação conhecida: rota declarada com `include_in_schema=False` não aparece
+    aqui. Se algum dia for preciso uma, ela precisa de política declarada à mão.
+    """
+    schema = app.openapi()
+    rotas = sorted(
+        (metodo.upper(), caminho)
+        for caminho, operacoes in schema["paths"].items()
+        for metodo in operacoes
+        if metodo.upper() not in {"HEAD", "OPTIONS"}
     )
+    # Salvaguarda: varredura vazia faria os testes abaixo passarem vacuamente.
+    assert rotas, "Nenhuma rota encontrada — a varredura quebrou, não a aplicação."
+    return rotas
 
 
 def rotas_com_politica(*politicas: str) -> list[tuple[str, str]]:
@@ -123,7 +142,7 @@ async def test_sem_token_recebe_401(client, metodo, caminho):
 async def test_token_com_assinatura_invalida_recebe_401(client, metodo, caminho):
     """Token assinado com outra chave não pode ser aceito."""
     token = pyjwt.encode(
-        {"sub": "00000000-0000-0000-0000-000000000001"}, "chave-errada", algorithm="HS256"
+        {"sub": "00000000-0000-0000-0000-000000000001"}, "chave-errada-mas-longa-o-suficiente-para-hs256", algorithm="HS256"
     )
     resp = await client.request(
         metodo, _preenche_params(caminho), headers={"Authorization": f"Bearer {token}"}
