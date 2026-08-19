@@ -58,12 +58,14 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:55433/medico360_migrations_test
           PGPASSWORD: test
+          # APP_ENV nao tem mais padrao: o Settings exige que seja declarada.
+          APP_ENV: development
         run: |
           # Segredo efemero: o Settings exige a variavel, mas nada aqui depende
           # do valor. Gerar em runtime em vez de fixar evita um literal com cara
           # de credencial no repositorio - o scanner de segredos aponta, e com razao.
           export JWT_SECRET_KEY="$(openssl rand -hex 32)"
-          psql -h localhost -p 55433 -U test -d medico360_test             -c 'CREATE DATABASE medico360_migrations_test'
+          psql -h localhost -p 55433 -U test -d medico360_test -c 'CREATE DATABASE medico360_migrations_test'
           alembic upgrade head
 
       # Falha em vulnerabilidade conhecida nas dependências fixadas.

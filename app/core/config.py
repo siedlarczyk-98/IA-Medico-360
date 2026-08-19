@@ -4,6 +4,7 @@ Carrega variáveis de .env ou variáveis de ambiente do Railway.
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +19,12 @@ class Settings(BaseSettings):
 
     # --- App ---
     app_name: str = "Médico 360"
-    app_env: str = "development"
+    # SEM padrão de propósito. Todo o endurecimento de produção está atrás de
+    # `is_production` — docs fechada, cookie Secure, validação fail-closed do
+    # embed SSO. Com um padrão, esquecer de definir a variável fazia a aplicação
+    # rodar em modo de desenvolvimento em produção, silenciosamente. Aconteceu.
+    # Agora falta de APP_ENV derruba o startup com mensagem clara.
+    app_env: Literal["development", "staging", "production"]
     app_debug: bool = False
     log_level: str = "INFO"
 
