@@ -114,12 +114,10 @@ jobs:
       - run: npm run build
 
   # E2E depende de Postgres + backend rodando + usuário/calculadoras seedados
-  # (ver calculadoras-app/e2e/helpers/auth.ts). A seed do usuário de teste fixo
-  # ainda não está automatizada neste pipeline — roda best-effort e não bloqueia
-  # o merge até essa infra ser adicionada (ver plano de melhorias, item 1.1).
+  # (ver calculadoras-app/e2e/helpers/auth.ts). Toda essa infra está automatizada
+  # nos steps abaixo, então o job é bloqueante como os outros três.
   e2e-calculadoras:
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -173,12 +171,41 @@ jobs:
         working-directory: calculadoras-app
       - run: npx playwright install --with-deps chromium
         working-directory: calculadoras-app
+      # Log em arquivo, nao no stdout do step: o processo fica em background e o
+      # step termina imediatamente, entao qualquer traceback de boot se perderia.
       - name: start backend
-        run: nohup uvicorn app.main:app --port 8000 &
+        run: nohup uvicorn app.main:app --port 8000 > /tmp/backend.log 2>&1 &
       - name: start calculadoras-app
         working-directory: calculadoras-app
-        run: nohup npm run dev -- --port 5174 &
+        run: nohup npm run dev -- --port 5174 > /tmp/frontend.log 2>&1 &
+
+      # Sem esta espera o Playwright comecava antes dos servidores aceitarem
+      # conexao - era essa race condition que deixava o job intermitente.
+      # `/api/v1/health` (nao `/health`): o router tem prefixo, e e liveness
+      # puro, nao consulta banco. Ver app/api/v1/router.py.
+      - name: aguardar backend e frontend
+        run: |
+          for alvo in http://localhost:8000/api/v1/health http://localhost:5174; do
+            echo "aguardando $alvo"
+            for _ in $(seq 60); do
+              if curl --fail --silent --output /dev/null "$alvo"; then
+                echo "$alvo respondeu"
+                continue 2
+              fi
+              sleep 1
+            done
+            echo "::error::$alvo nao respondeu em 60s"
+            exit 1
+          done
+
       - run: npm run test:e2e
         working-directory: calculadoras-app
         env:
           E2E_BASE_URL: http://localhost:5174
+
+      # Sem isto, uma falha de startup aparece so como timeout do Playwright.
+      - name: logs dos servidores (em caso de falha)
+        if: failure()
+        run: |
+          echo "===== backend ====="; cat /tmp/backend.log || true
+          echo "===== frontend ====="; cat /tmp/frontend.log || true

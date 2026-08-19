@@ -110,17 +110,15 @@ para qualquer e-mail informado.
 
 ## Restaurar o banco
 
-> ### Limitação importante, leia antes
+> ### Sobre reconstruir o schema
 >
-> **O banco não pode ser reconstruído do zero pelas migrations.** A migration `001`
-> é a raiz e só cria `semantic_cache`; nenhuma migration cria `users`,
-> `conversations` ou `interactions` — essas tabelas nasceram de um `create_all`
-> fora do Alembic, e as demais migrations são `ALTER`s em cima.
+> Isto já foi uma limitação: o schema nascia de um `create_all` fora do Alembic e
+> `alembic upgrade head` num banco vazio falhava. Hoje existe a migration de
+> baseline (`000_baseline`), e o CI prova a cada push que a cadeia aplica do zero
+> (job `backend`, step "migrations aplicam do zero").
 >
-> Consequência prática: **a recuperação depende do backup do Railway**, não de
-> replay de migrations. `alembic upgrade head` num banco vazio falha.
->
-> Enquanto não houver uma migration de baseline, este é o único caminho.
+> Isso reconstrói o **schema**, não os **dados**. Para recuperar dados, o caminho
+> continua sendo o backup do Railway, abaixo.
 
 1. Railway → Postgres → aba de backups → escolher o ponto de restauração.
 2. Restaurar para um banco **novo**, nunca por cima do atual.
@@ -128,8 +126,14 @@ para qualquer e-mail informado.
    esperado.
 4. Só então apontar `DATABASE_URL` para o banco restaurado e reiniciar.
 
-**Pendente:** ninguém executou um restore de verdade ainda. Até que isso aconteça e
-o tempo seja cronometrado, não há RPO nem RTO conhecidos — só prometidos.
+**Pendente — lacuna conhecida, não fechada:** ninguém executou um restore de
+verdade ainda. Os números de RPO e RTO seguem **prometidos, não medidos**, e só
+deixam de ser quando alguém com acesso ao painel do Railway fizer o ensaio:
+restaurar um ponto recente para um banco novo cronometrando início e fim, conferir
+as contagens de `users`, `conversations` e `interactions` contra o original, subir
+um ambiente de teste (nunca produção) contra o banco restaurado e registrar aqui os
+tempos reais. Enquanto isso não acontecer, trate o plano de recuperação como não
+testado.
 
 ---
 
