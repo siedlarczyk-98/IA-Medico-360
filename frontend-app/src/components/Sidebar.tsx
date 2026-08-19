@@ -262,7 +262,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           </svg>
         </button>
         <button
-          onClick={onNew}
+          onClick={() => onNew()}
           title="Nova consulta"
           style={{
             width: 32, height: 32, borderRadius: 8, background: 'var(--ink)', color: '#fff',
