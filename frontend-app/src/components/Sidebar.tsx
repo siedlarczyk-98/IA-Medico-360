@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
@@ -7,6 +7,11 @@ import { listFolders, createFolder, renameFolder, deleteFolder, moveConversation
 import { logout } from '../lib/auth';
 import { ProfileModal } from './ProfileModal';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { ConvItem } from './sidebar/ConvItem';
+import { FolderRow } from './sidebar/FolderRow';
+import { DropZoneNoPasta } from './sidebar/DropZoneNoPasta';
+import { groupByDate } from './sidebar/groupByDate';
+import { ctxItemStyle, menuItemStyle } from './sidebar/styles';
 
 interface Props {
   activeId?: string;
@@ -16,425 +21,6 @@ interface Props {
   onToggle: () => void;
   usageTick?: number;
 }
-
-function groupByDate(conversations: ConversationSummary[]) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const weekAgo = new Date(today);
-  weekAgo.setDate(weekAgo.getDate() - 7);
-
-  const groups: { label: string; items: ConversationSummary[] }[] = [
-    { label: 'Hoje', items: [] },
-    { label: 'Esta semana', items: [] },
-    { label: 'Anteriores', items: [] },
-  ];
-
-  for (const conv of conversations) {
-    if (conv.folder_id) continue; // pastas tratadas separadamente
-    const d = new Date(conv.updated_at);
-    d.setHours(0, 0, 0, 0);
-    if (d >= today) groups[0].items.push(conv);
-    else if (d >= weekAgo) groups[1].items.push(conv);
-    else groups[2].items.push(conv);
-  }
-
-  return groups.filter(g => g.items.length > 0);
-}
-
-// ── Item de conversa com menu contextual ────────────────────────
-
-interface ConvItemProps {
-  conv: ConversationSummary;
-  activeId?: string;
-  folders: Folder[];
-  onSelect: (id: string) => void;
-  onMove: (convId: string, folderId: string | null) => void;
-  selected?: boolean;
-  selectionMode?: boolean;
-  onToggleSelect?: (convId: string) => void;
-  onDragStart?: (convId: string) => void;
-}
-
-function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const dropRef = useRef<HTMLDivElement>(null);
-  const isActive = conv.id === activeId;
-  const showBtn = hovered || menuOpen;
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        dropRef.current && !dropRef.current.contains(e.target as Node)
-      ) {
-        setMenuOpen(false);
-        setShowFolderPicker(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (!menuOpen || !btnRef.current || !dropRef.current) return;
-    const rect = btnRef.current.getBoundingClientRect();
-    const drop = dropRef.current;
-    drop.style.top = (rect.bottom + 4) + 'px';
-    drop.style.left = (rect.right - drop.offsetWidth) + 'px';
-  }, [menuOpen]);
-
-  const rowBg = selected ? 'var(--fill2)' : isActive ? 'var(--mint)' : hovered ? 'var(--fill)' : 'transparent';
-
-  return (
-    <div
-      draggable
-      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(conv.id); }}
-      style={{ position: 'relative', borderRadius: 6, background: rowBg, transition: 'background 0.1s', cursor: 'grab' }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div
-        onClick={() => selectionMode ? onToggleSelect?.(conv.id) : onSelect(conv.id)}
-        style={{
-          padding: '7px 10px',
-          paddingLeft: (selectionMode || hovered) ? 6 : 10,
-          paddingRight: showBtn ? 26 : 10,
-          fontSize: 12.5,
-          color: 'var(--pen)',
-          cursor: 'pointer',
-          fontWeight: isActive ? 600 : 400,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}
-        title={conv.title ?? ''}
-      >
-        {(selectionMode || hovered) && (
-          <span
-            onClick={e => { e.stopPropagation(); onToggleSelect?.(conv.id); }}
-            style={{
-              width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${selected ? 'var(--green)' : 'var(--line2)'}`,
-              background: selected ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              opacity: selectionMode || hovered ? 1 : 0,
-            }}
-          >
-            {selected && <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 5 L4 7 L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>}
-          </span>
-        )}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.title ?? 'Sem título'}</span>
-      </div>
-
-      {showBtn && (
-        <div ref={menuRef} style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}>
-          <button
-            ref={btnRef}
-            onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); setShowFolderPicker(false); }}
-            style={{
-              background: menuOpen ? 'var(--fill2)' : 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--pen2)',
-              padding: '2px 4px',
-              borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="3" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="13" r="1.3" fill="currentColor" />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {menuOpen && (
-        <div
-          ref={dropRef}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            background: 'var(--paper)',
-            border: '1px solid var(--line2)',
-            borderRadius: 8,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.14)',
-            zIndex: 500,
-            minWidth: 170,
-            overflow: 'hidden',
-          }}
-        >
-          {!showFolderPicker ? (
-            <div>
-              <button
-                onClick={e => { e.stopPropagation(); setShowFolderPicker(true); }}
-                style={ctxItemStyle}
-              >
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                </svg>
-                Mover para pasta
-              </button>
-              {conv.folder_id && (
-                <button
-                  onClick={e => { e.stopPropagation(); onMove(conv.id, null); setMenuOpen(false); }}
-                  style={ctxItemStyle}
-                >
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 3L13 13M13 3L3 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                  </svg>
-                  Remover da pasta
-                </button>
-              )}
-            </div>
-          ) : (
-            <div>
-              <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.8, textTransform: 'uppercase' }}>
-                Escolher pasta
-              </div>
-              {folders.length === 0 && (
-                <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--pen3)' }}>Nenhuma pasta criada</div>
-              )}
-              {folders.map(f => (
-                <button
-                  key={f.id}
-                  onClick={e => { e.stopPropagation(); onMove(conv.id, f.id); setMenuOpen(false); }}
-                  style={{ ...ctxItemStyle, fontWeight: conv.folder_id === f.id ? 600 : 400 }}
-                >
-                  {conv.folder_id === f.id ? '✓ ' : ''}{f.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const ctxItemStyle: React.CSSProperties = {
-  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-  padding: '8px 12px', background: 'none', border: 'none',
-  fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer', textAlign: 'left',
-};
-
-// Memoizado: numa lista longa, sem isso qualquer estado local do Sidebar
-// (hover, menu, usageTick) re-renderiza todos os itens.
-const ConvItem = memo(ConvItemBase);
-
-// ── Linha de pasta ───────────────────────────────────────────────
-
-interface FolderRowProps {
-  folder: Folder;
-  conversations: ConversationSummary[];
-  activeId?: string;
-  allFolders: Folder[];
-  onSelect: (id: string) => void;
-  onMove: (convId: string, folderId: string | null) => void;
-  onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
-  onNewInFolder: (folderId: string, folderName: string) => void;
-  selectedConvIds?: Set<string>;
-  selectionMode?: boolean;
-  onToggleSelect?: (convId: string) => void;
-  onDragStart?: (convId: string) => void;
-  onDropConv?: (folderId: string | null) => void;
-}
-
-function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(folder.name);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
-
-  function submitRename() {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== folder.name) onRename(folder.id, trimmed);
-    setEditing(false);
-  }
-
-  return (
-    <div style={{ marginBottom: 2 }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 4px', borderRadius: 6, background: dragOver ? 'var(--fill2)' : 'transparent', transition: 'background 0.1s' }}
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={e => { e.preventDefault(); setDragOver(false); onDropConv?.(folder.id); }}
-      >
-        <button
-          onClick={() => setOpen(o => !o)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
-            style={{ flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-            <path d="M3 2 L7 5 L3 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-            <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="var(--fill2)" />
-          </svg>
-          {editing ? (
-            <input
-              ref={inputRef}
-              value={editName}
-              onChange={e => setEditName(e.target.value)}
-              onBlur={submitRename}
-              onKeyDown={e => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') { setEditName(folder.name); setEditing(false); } }}
-              onClick={e => e.stopPropagation()}
-              style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', background: 'transparent', border: 'none', outline: '1px solid var(--green)', borderRadius: 3, padding: '0 3px', minWidth: 0, width: '100%' }}
-            />
-          ) : (
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {folder.name}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={e => { e.stopPropagation(); onNewInFolder(folder.id, folder.name); }}
-          title="Nova consulta nesta pasta"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center', flexShrink: 0 }}
-        >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-            <path d="M8 3 V13 M3 8 H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        </button>
-
-        <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
-          <button
-            onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center' }}
-          >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="3" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-              <circle cx="8" cy="13" r="1.3" fill="currentColor" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div style={{
-              position: 'absolute', right: 0, top: 'calc(100% + 2px)',
-              background: 'var(--paper)', border: '1px solid var(--line2)',
-              borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-              zIndex: 400, minWidth: 150, overflow: 'hidden',
-            }}>
-              <button onClick={() => { setEditing(true); setMenuOpen(false); }} style={ctxItemStyle}>
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M11 2 L14 5 L5 14 H2 V11 L11 2Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                </svg>
-                Renomear
-              </button>
-              <div style={{ height: 1, background: 'var(--line2)', margin: '0 8px' }} />
-              {!confirmDelete ? (
-                <button onClick={() => setConfirmDelete(true)} style={{ ...ctxItemStyle, color: '#ef4444' }}>
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 5h10M6 5V3h4v2M6 8v5M10 8v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                  </svg>
-                  Excluir pasta
-                </button>
-              ) : (
-                <div style={{ padding: '8px 12px' }}>
-                  <p style={{ fontSize: 11.5, color: 'var(--ink)', margin: '0 0 6px', lineHeight: 1.4 }}>
-                    {conversations.length > 0
-                      ? `${conversations.length} conversa${conversations.length > 1 ? 's' : ''} voltará${conversations.length > 1 ? 'ão' : ''} para "Sem pasta".`
-                      : 'Confirmar exclusão?'
-                    }
-                  </p>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button
-                      onClick={() => { onDelete(folder.id); setMenuOpen(false); setConfirmDelete(false); }}
-                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
-                    >Excluir</button>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: '1px solid var(--line2)', background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}
-                    >Cancelar</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {open && (
-        <div style={{ paddingLeft: 12 }}>
-          {conversations.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--pen3)', padding: '4px 10px' }}>Vazia</div>
-          ) : (
-            conversations.map(conv => (
-              <ConvItem
-                key={conv.id}
-                conv={conv}
-                activeId={activeId}
-                folders={allFolders}
-                onSelect={onSelect}
-                onMove={onMove}
-                selected={selectedConvIds?.has(conv.id)}
-                selectionMode={selectionMode}
-                onToggleSelect={onToggleSelect}
-                onDragStart={onDragStart}
-              />
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Drop zone "Sem pasta" ────────────────────────────────────────
-
-function DropZoneNoPasta({ onDrop }: { onDrop: () => void }) {
-  const [over, setOver] = useState(false);
-  return (
-    <div
-      onDragOver={e => { e.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={e => { e.preventDefault(); setOver(false); onDrop(); }}
-      style={{
-        margin: '0 4px 6px',
-        padding: '5px 10px',
-        borderRadius: 6,
-        border: `1.5px dashed ${over ? 'var(--green)' : 'var(--line2)'}`,
-        background: over ? 'var(--fill2)' : 'transparent',
-        fontSize: 11,
-        color: over ? 'var(--green)' : 'var(--pen3)',
-        textAlign: 'center',
-        transition: 'all 0.1s',
-      }}
-    >
-      Soltar aqui para remover da pasta
-    </div>
-  );
-}
-
-const FolderRow = memo(FolderRowBase);
 
 // ── Sidebar principal ────────────────────────────────────────────
 
@@ -531,6 +117,13 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
   });
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
+  }, [collapsed]);
 
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -651,6 +244,81 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
 
   if (isMobile && !open) return null;
 
+  if (!isMobile && collapsed) {
+    return (
+      <aside style={{
+        width: 56, flexShrink: 0, height: '100%',
+        borderRight: '1px solid var(--line2)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        background: '#fbfdf7', padding: '14px 0',
+      }}>
+        <button
+          onClick={() => setCollapsed(false)}
+          title="Expandir barra lateral"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', marginBottom: 14 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M6 3 L11 8 L6 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          onClick={onNew}
+          title="Nova consulta"
+          style={{
+            width: 32, height: 32, borderRadius: 8, background: 'var(--ink)', color: '#fff',
+            border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 16, marginBottom: 'auto',
+          }}
+        >
+          +
+        </button>
+        <div
+          onClick={() => setUserMenuOpen(o => !o)}
+          title={user?.name ?? ''}
+          style={{
+            width: 32, height: 32, borderRadius: '50%', background: 'var(--mint)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 600, color: 'var(--pen2)', cursor: 'pointer', position: 'relative',
+          }}
+          ref={userMenuRef}
+        >
+          {user?.initial ?? '?'}
+          {userMenuOpen && (
+            <div style={{
+              position: 'absolute', bottom: 0, left: 'calc(100% + 8px)',
+              background: 'var(--paper)', border: '1px solid var(--line2)',
+              borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+              overflow: 'hidden', zIndex: 300, width: 170,
+            }}>
+              <button onClick={() => { setUserMenuOpen(false); setShowProfile(true); }} style={menuItemStyle}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="6" r="3" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M2 14c0-2.5 2.7-4 6-4s6 1.5 6 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                Editar perfil
+              </button>
+              <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
+              <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                  <path d="M10 11 L14 8 L10 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M14 8 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  <path d="M6 3 H3 V13 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Sair
+              </button>
+            </div>
+          )}
+        </div>
+        {showProfile && (
+          <ProfileModal
+            onClose={() => setShowProfile(false)}
+            onSuccess={() => queryClient.invalidateQueries({ queryKey: ['currentUser'] })}
+          />
+        )}
+      </aside>
+    );
+  }
+
   const aside = (
     <aside style={{
       width: 260, flexShrink: 0, height: '100%',
@@ -663,6 +331,19 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         boxShadow: '2px 0 20px rgba(0,0,0,0.15)',
       } : {}),
     }}>
+      {!isMobile && (
+        <div style={{ padding: '10px 10px 0', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Recolher barra lateral"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3 L5 8 L10 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      )}
       {isMobile && (
         <div style={{ padding: '14px 14px 0', display: 'flex', justifyContent: 'flex-end' }}>
           <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--pen3)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
@@ -972,9 +653,3 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
 }
 
 export const Sidebar = memo(SidebarComponent);
-
-const menuItemStyle: React.CSSProperties = {
-  width: '100%', display: 'flex', alignItems: 'center', gap: 9,
-  padding: '10px 14px', background: 'none', border: 'none',
-  fontSize: 13, color: 'var(--ink)', cursor: 'pointer', textAlign: 'left',
-};
