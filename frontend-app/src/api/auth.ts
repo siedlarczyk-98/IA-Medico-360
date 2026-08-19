@@ -29,6 +29,8 @@ export interface OnboardingData {
   crm_state?: string;
   specialty?: string;
   enrollment_year?: number;
+  /** Obrigatorio: o backend recusa o onboarding sem aceite e grava em consent_logs. */
+  terms_accepted: boolean;
 }
 
 async function post<T>(path: string, body: unknown, auth = false): Promise<T> {

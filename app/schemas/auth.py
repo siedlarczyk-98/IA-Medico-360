@@ -56,6 +56,22 @@ class OnboardingRequest(BaseModel):
     crm_state: str | None = None
     enrollment_year: int | None = None
     specialty: str | None = None
+    # Sem default: o aceite tem que vir explicito do cliente. Default True
+    # gravaria consentimento que ninguem manifestou; default False deixaria o
+    # front esquecer de enviar e o onboarding passar sem registro - que era
+    # exatamente o estado anterior.
+    terms_accepted: bool
+
+    @field_validator("terms_accepted")
+    @classmethod
+    def exigir_aceite(cls, v: bool) -> bool:
+        """
+        Recusa no servidor, nao so no botao desabilitado do front: o endpoint e
+        publico e nao se pode assumir que o cliente e a nossa tela.
+        """
+        if not v:
+            raise ValueError("E necessario aceitar os Termos de Uso e a Politica de Privacidade")
+        return v
 
     @field_validator("med_status")
     @classmethod

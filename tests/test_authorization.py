@@ -45,6 +45,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/auth/me"): AUTENTICADA,
     # Portabilidade LGPD: cada titular exporta os PRÓPRIOS dados.
     ("GET", "/api/v1/auth/me/export"): AUTENTICADA,
+    ("GET", "/api/v1/auth/me/consentimentos"): AUTENTICADA,
+    ("POST", "/api/v1/auth/me/consentimentos/{tipo}/revogar"): AUTENTICADA,
     ("POST", "/api/v1/auth/onboarding"): AUTENTICADA,
     ("POST", "/api/v1/auth/invite/generate"): ADMIN,
     # Núcleo clínico

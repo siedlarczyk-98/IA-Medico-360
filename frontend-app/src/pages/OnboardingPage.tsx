@@ -164,6 +164,10 @@ export function OnboardingPage() {
         crm_state: isMedico ? form.crm_state : undefined,
         specialty: needsSpecialty ? form.specialty : undefined,
         enrollment_year: isGraduando ? parseInt(form.enrollment_year) : undefined,
+        // Antes o aceite so habilitava o botao e nunca saia daqui: o usuario
+        // marcava a caixa e nao ficava prova nenhuma. O backend agora grava em
+        // consent_logs, e recusa o onboarding sem este campo.
+        terms_accepted: termsAccepted,
       });
       setToken(res.access_token);
       navigate('/', { replace: true });

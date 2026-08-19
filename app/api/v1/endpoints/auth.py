@@ -37,6 +37,7 @@ from app.schemas.auth import (
 from app.services import (
     auth_service,
     cache_service,
+    consent_service,
     curseduca_service,
     data_subject_service,
 )
@@ -202,6 +203,16 @@ async def complete_onboarding(
     current_user.specialty = body.specialty
     current_user.enrollment_date = date_type(body.enrollment_year, 1, 1) if body.enrollment_year else None
     current_user.onboarding_complete = True
+    # Mesma transacao do onboarding, de proposito: se o consentimento nao for
+    # gravado, o cadastro tambem nao se completa. Usuario ativo sem prova de
+    # aceite e justamente o estado que isto veio corrigir.
+    await consent_service.registrar(
+        db,
+        current_user,
+        consent_service.TERMOS_E_PRIVACIDADE,
+        aceito=body.terms_accepted,
+        request=request,
+    )
     await db.commit()
     await db.refresh(current_user)
     from app.services.auth_service import create_access_token
@@ -236,6 +247,56 @@ async def update_me(
     from app.services.auth_service import create_access_token
     token = create_access_token(current_user)
     return TokenResponse(access_token=token, onboarding_complete=current_user.onboarding_complete)
+
+
+@router.get("/me/consentimentos")
+async def listar_consentimentos(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    O que o titular consentiu, e sob qual versao dos documentos.
+
+    `versao_atual: false` significa que os documentos foram revisados depois do
+    aceite - o consentimento e valido para o texto antigo, nao para o vigente.
+    """
+    return {
+        "versao_vigente": consent_service.VERSAO_DOCUMENTOS,
+        "consentimentos": await consent_service.situacao_atual(db, current_user.id),
+    }
+
+
+@router.post("/me/consentimentos/{tipo}/revogar", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("10/hour")
+async def revogar_consentimento(
+    request: Request,
+    tipo: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Revoga um consentimento (LGPD art. 8, §5º: revogacao a qualquer momento, por
+    procedimento gratuito e facilitado).
+
+    Nao apaga o aceite anterior - grava uma NOVA manifestacao negativa. O
+    historico e a prova; sobrescrever destruiria a evidencia de que houve aceite
+    valido no periodo em que os dados foram tratados.
+
+    `termos_e_privacidade` nao e revogavel por aqui: sem ele nao ha como prestar
+    o servico, e o caminho correto e a exclusao da conta (DELETE /auth/me), que
+    de fato apaga os dados.
+    """
+    if tipo == consent_service.TERMOS_E_PRIVACIDADE:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Para deixar de aceitar os termos, exclua a conta em DELETE /auth/me - "
+            "assim os dados sao efetivamente removidos, nao apenas marcados.",
+        )
+    if tipo not in {consent_service.USO_DADOS_ANONIMIZADOS}:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Consentimento desconhecido: {tipo}")
+
+    await consent_service.registrar(db, current_user, tipo, aceito=False, request=request)
+    await db.commit()
 
 
 @router.get("/me/export")

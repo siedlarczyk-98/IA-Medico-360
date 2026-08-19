@@ -413,7 +413,20 @@ TODA interação DEVE gerar um registro completo. Esses registros servem para au
 - Os dados vendidos DEVEM ser 100% anonimizados — sem possibilidade de identificação de médico ou paciente.
 - Os campos `specialty_detected` e `medication_mentioned` são os ativos primários para venda de insights.
 - Insights DEVEM ser agregados em nível estatístico (ex: "42% das consultas de cardiologia envolvem enalapril"), nunca em nível individual.
-- A plataforma DEVE manter `consent_log` explícito do usuário autorizando uso anonimizado (LGPD, Art. 7 e 11). ✅ Tabela criada / ❌ Fluxo de aceite ativo pendente
+- A plataforma DEVE manter `consent_log` explícito do usuário autorizando uso anonimizado (LGPD, Art. 7 e 11). ✅ Tabela criada / ✅ Infraestrutura de registro pronta / ❌ Consentimento específico de monetização não coletado
+
+> **BLOQUEIO REGULATÓRIO — leia antes de ativar esta regra.**
+> RN-DATA-001 **não pode ser ativada** enquanto o consentimento
+> `uso_dados_anonimizados` não estiver sendo coletado. O aceite de termos que o
+> onboarding registra hoje (`termos_e_privacidade`) **não cobre** este uso:
+> monetização é finalidade secundária sobre dado sensível de saúde e, pelo
+> Art. 11, exige consentimento **específico e destacado** — checkbox próprio,
+> desmarcado por padrão, separado do aceite obrigatório. Amarrar os dois
+> invalida ambos.
+>
+> A infraestrutura já existe (`app/services/consent_service.py`, constante
+> `USO_DADOS_ANONIMIZADOS`, rota de revogação). Falta a tela e a decisão de
+> produto — não falta código de base.
 - Dados de interações medicamentosas são especialmente valiosos para farmacovigilância.
 
 ---
@@ -534,7 +547,8 @@ A plataforma DEVE ser projetada com abordagem **Mobile First** (viewport base: 3
 | Exportação PDF/CSV | ⏳ Backlog | — |
 | Áudio / Whisper | ⏳ Backlog | — |
 | Métricas de cache hit rate | ⏳ Backlog | — |
-| Fluxo de consent ativo (LGPD) | ⏳ Backlog | Tabela criada |
+| Aceite de termos registrado (LGPD art. 8) | ✅ Implementado | `consent_logs` com IP, user-agent e versão do documento |
+| Consent específico de monetização (art. 11) | 🚫 Bloqueia RN-DATA-001 | Infra pronta; falta tela e decisão de produto |
 
 ### Frontend
 
