@@ -49,6 +49,19 @@ jobs:
       - name: pytest
         run: pytest -q --cov=app --cov-report=term --cov-fail-under=50
 
+      # A cadeia de migrations precisa aplicar num banco vazio. Isso ficou
+      # QUEBRADO por muito tempo (o schema nasceu de um create_all fora do
+      # Alembic) e só passou a ser verificável depois da migration de baseline.
+      # Falha diferente da de schema: o harness de teste monta o schema pelos
+      # models, então sem este passo uma migration quebrada passaria despercebida.
+      - name: migrations aplicam do zero
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:55433/medico360_migrations_test
+          JWT_SECRET_KEY: chave-de-ci-nao-usar-em-producao-com-32-bytes
+        run: |
+          PGPASSWORD=test psql -h localhost -p 55433 -U test -d medico360_test             -c 'CREATE DATABASE medico360_migrations_test'
+          alembic upgrade head
+
       # Falha em vulnerabilidade conhecida nas dependências fixadas.
       # `pdfplumber`/`openpyxl` processam arquivo enviado pelo usuário, então
       # CVE em parser é risco direto, não teórico.

@@ -89,13 +89,16 @@ async def engine():
             for schema in sorted({t.schema for t in Base.metadata.tables.values() if t.schema}):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
 
-            # `create_all` em vez de `alembic upgrade head` — e aqui não há escolha:
-            # a cadeia de migrations NÃO aplica num banco vazio. A `001` é a raiz
-            # (down_revision=None) e só cria `semantic_cache`; nenhuma migration cria
-            # `users`, `conversations` ou `interactions`. Essas tabelas nasceram de um
-            # `create_all` fora do Alembic, e as migrations seguintes são ALTERs em
-            # cima. Consequência: hoje o banco não pode ser reconstruído do zero, e o
-            # schema dos models é a única fonte de verdade completa.
+            # `create_all` em vez de `alembic upgrade head`: aqui o schema vem dos
+            # models, que é o que os testes exercitam, e recriá-lo é muito mais
+            # rápido que aplicar a cadeia inteira. A cadeia tem verificação própria
+            # no CI (job `migrations`), separando os dois tipos de falha.
+            #
+            # Diferença conhecida: os índices `semantic_cache_embedding_idx`
+            # (ivfflat) e `semantic_cache_mode_expires_idx` existem em produção mas
+            # não estão declarados nos models, então não são criados aqui. Nenhum
+            # teste depende deles — mas quem for testar performance do cache
+            # semântico precisa saber.
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         _schema_criado = True

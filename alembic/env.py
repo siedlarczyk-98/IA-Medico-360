@@ -10,8 +10,11 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.database import Base
 
-# Importar todos os models para que Alembic os detecte
-from app.models import models  # noqa: F401
+# Importar todos os models para que Alembic os detecte.
+# Precisa ser o PACOTE, não `app.models.models`: as tabelas de calculadora vivem
+# em `app.models.calculators` (schema `calculators`) e ficavam invisíveis ao
+# autogenerate, que geraria migrations incompletas sem avisar.
+from app.models import *  # noqa: F401, F403
 
 config = context.config
 settings = get_settings()
