@@ -144,7 +144,12 @@ jobs:
       # O e2e assina token com esta chave (ver calculadoras-app/e2e/helpers/auth.ts),
       # entao ela precisa ser a mesma em todos os passos - dai o GITHUB_ENV.
       - name: gera segredo efemero do job
-        run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+        run: |
+          SEGREDO="$(openssl rand -hex 32)"
+          echo "JWT_SECRET_KEY=$SEGREDO" >> "$GITHUB_ENV"
+          # O helper do Playwright assina o token com a MESMA chave, e procura
+          # em E2E_JWT_SECRET (ou num .env da raiz, que nao existe no CI).
+          echo "E2E_JWT_SECRET=$SEGREDO" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -156,6 +161,9 @@ jobs:
       # Mesma causa do `prepend_sys_path` que o alembic precisou.
       - run: python -m scripts.seed_calculators
       - run: python -m scripts.seed_risco_cv_sbc2025
+      # Sem este usuario o token assinado pelo Playwright e valido mas aponta
+      # para alguem que nao existe, e toda rota autenticada devolve 401.
+      - run: python -m scripts.seed_usuario_e2e
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
