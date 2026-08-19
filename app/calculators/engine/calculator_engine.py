@@ -38,7 +38,7 @@ async def execute_calculator(
     try:
         validated_inputs = validate_inputs(definition.fields, inputs)
     except CalculatorValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.errors)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, exc.errors)
 
     if definition.engine_type == "orchestrator":
         result, interpretation, interaction_id = await _delegate_to_orchestrator(
@@ -72,7 +72,7 @@ async def execute_calculator(
                 "Falha ao executar formula '%s' de '%s': %s", version.formula_key, slug, exc
             )
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 [{"loc": ["inputs"], "msg": "Inputs insuficientes ou inválidos para esta calculadora"}],
             )
         result = outcome["result"]

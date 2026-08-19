@@ -65,16 +65,10 @@ jobs:
       # Falha em vulnerabilidade conhecida nas dependências fixadas.
       # `pdfplumber`/`openpyxl` processam arquivo enviado pelo usuário, então
       # CVE em parser é risco direto, não teórico.
-      #
-      # As exceções abaixo são TODAS do starlette, que é dependência transitiva
-      # do FastAPI: corrigi-las exige subir fastapi 0.115 -> 0.141 (starlette
-      # 1.6). Esse salto foi testado — a suíte passa —, mas muda a estrutura
-      # interna de rotas e traz depreciações, então é decisão de release, não de
-      # CI. Remover estas exceções junto com o upgrade.
       - name: pip-audit
         run: |
           pip install pip-audit
-          pip-audit -r requirements.txt --strict             --ignore-vuln PYSEC-2026-161             --ignore-vuln PYSEC-2026-248             --ignore-vuln PYSEC-2026-249             --ignore-vuln PYSEC-2026-1941             --ignore-vuln PYSEC-2026-1942             --ignore-vuln PYSEC-2026-2280             --ignore-vuln PYSEC-2026-2281
+          pip-audit -r requirements.txt --strict
 
   frontend-app:
     runs-on: ubuntu-latest
