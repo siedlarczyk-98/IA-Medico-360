@@ -121,10 +121,26 @@ para qualquer e-mail informado.
 > continua sendo o backup do Railway, abaixo.
 
 1. Railway → Postgres → aba de backups → escolher o ponto de restauração.
-2. Restaurar para um banco **novo**, nunca por cima do atual.
-3. Validar: contagem de `users`, `conversations` e `interactions` compatível com o
-   esperado.
-4. Só então apontar `DATABASE_URL` para o banco restaurado e reiniciar.
+   **Anote a hora do snapshot** — sem ela o RPO não é calculável depois.
+2. Restaurar para um banco **novo**, nunca por cima do atual. **Marque início e
+   fim**: esse intervalo é o RTO real.
+3. Validar com o script, da sua máquina (não é preciso terminal no Railway — as
+   duas URLs saem de Railway → Postgres → *Connect*):
+
+   ```
+   python -m scripts.verificar_restore --origem "postgresql://..." --restaurado "postgresql://..."
+   ```
+
+   Ele só lê (pode apontar para produção como origem), compara **todas** as
+   tabelas — não só três —, confere a revisão do Alembic e sai com código 1 em
+   qualquer divergência. Conferir 3 tabelas escolhidas a olho deixaria passar
+   perda em `consent_logs` ou `audit_logs`, que existem por obrigação regulatória.
+4. Subir um ambiente de **teste** contra o restaurado e confirmar
+   `/api/v1/health/ready` (esse endpoint consulta o Postgres de verdade;
+   `/api/v1/health` não). **Nunca aponte produção para o banco restaurado** —
+   é assim que um ensaio vira incidente.
+5. Registrar aqui o RPO (distância entre o dado mais recente que o script mostra
+   e a hora do snapshot) e o RTO (o tempo do passo 2).
 
 **Pendente — lacuna conhecida, não fechada:** ninguém executou um restore de
 verdade ainda. Os números de RPO e RTO seguem **prometidos, não medidos**, e só
