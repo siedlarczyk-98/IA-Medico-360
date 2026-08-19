@@ -174,10 +174,40 @@ incidente.
 > (job `backend`, step "migrations aplicam do zero"). Isso reconstrói o **schema**,
 > não os **dados** — para dados, o caminho é o dump acima.
 
-**Estado atual — lacuna aberta:** RPO e RTO seguem **desconhecidos**, e enquanto
-não houver um primeiro dump guardado fora desta máquina eles são, na prática,
-infinitos. Registre aqui, assim que o primeiro ensaio for feito: data do dump,
-tempo do restore e resultado do `verificar_restore`.
+### Ensaio de 2026-08-19 — números medidos
+
+Primeiro ensaio real, ponta a ponta, contra o banco de produção. Não são
+estimativas:
+
+| Medida | Valor |
+|---|---|
+| Dump de produção | **27s**, 13,8 MiB, 30 tabelas com dados |
+| Restore num Postgres 18 vazio | **2s**, `pg_restore` sem erro |
+| Aplicação contra o banco restaurado | `/api/v1/health/ready` → **200**, `postgres.ok = true` |
+| **RTO mecânico** | **~30s** + o tempo humano de provisionar um banco novo |
+| **RPO** | **= idade do último dump** (hoje manual, sem agendamento) |
+
+Dados conferidos no restaurado: 42 `users`, 429 `conversations`, 521
+`interactions`, 395 `audit_logs`.
+
+**O RPO é o número frágil aqui.** Os 30 segundos de RTO são ótimos, mas de nada
+adiantam se o dump mais recente for de duas semanas atrás. Enquanto o backup for
+manual, o RPO é literalmente "quando alguém lembrou". Agendar o dump é o que
+transforma esse número em garantia.
+
+### Três achados do ensaio
+
+1. **O banco é compartilhado.** Além de `public` (21 tabelas) e `calculators`
+   (6), existe o schema `news` (3 tabelas) — é o `medico360-news`, com cadeia de
+   migrations própria (`news.alembic_version`). O dump acima cobre os três; um
+   restore recupera os dois serviços juntos.
+2. **Duas tabelas fora do versionamento:** `public.legacy_user_mapping` e
+   `public.company_legacy_mapping` existem em produção e **nenhuma migration as
+   cria**. Reconstruir o schema pelo Alembic não as recriaria. Ambas estão
+   **vazias** hoje, então o risco é baixo — mas é dívida registrada, não
+   invisível.
+3. **Nada do baseline falta em produção** — as migrations são um subconjunto do
+   que está lá, nunca o contrário. A cadeia não está atrasada.
 
 ---
 
