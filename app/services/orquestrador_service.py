@@ -7,7 +7,7 @@ import asyncio
 import inspect
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -33,13 +33,13 @@ from app.models.models import (
 )
 from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import get_provider_by_type
-from app.services.orquestrador_stream_service import _check_clarification
 from app.services.medication_extractor import extract_from_interaction
+from app.services.orquestrador_stream_service import _check_clarification
 from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
+from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, triage
 from app.services.usage_service import add_interaction_audit
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,7 @@ class OrquestradorService:
                         cache_hit=False,
                         status="pending_clarification",
                         clarification_questions=questions,
-                        started_at=datetime.now(timezone.utc),
+                        started_at=datetime.now(UTC),
                     )
                     self.db.add(pending)
                     await self.db.flush()
@@ -210,7 +210,7 @@ class OrquestradorService:
                 triage_confidence=confidence,
                 triage_category=mode,
                 cache_hit=False,
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
             self.db.add(interaction)
             await self.db.flush()
@@ -249,7 +249,7 @@ class OrquestradorService:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
             interaction.response_time_ms = elapsed_ms
             interaction.token_cost_usd = cost
-            interaction.completed_at = datetime.now(timezone.utc)
+            interaction.completed_at = datetime.now(UTC)
 
             # 8-10. Pós-processamento independente em paralelo: especialidade/tema,
             # medicamentos e validação PubMed (apenas modos clínicos; timeout 15s com
@@ -311,6 +311,8 @@ class OrquestradorService:
                     "prompt_length": len(prompt),
                     "total_cost_usd": str(cost),
                     "dlp_sanitized": dlp_result.was_sanitized,
+                    "dlp_replacements": dlp_result.replacement_count,
+                    "dlp_by_type": dlp_result.counts_by_type,
                     "specialty_detected": classification["specialty"],
                     "topic_detected": classification["topic"],
                     "medications": [m["medication_normalized"] for m in medications],
@@ -388,7 +390,7 @@ class OrquestradorService:
         result = await self.db.execute(
             select(ModelPricing).where(
                 ModelPricing.model_id == model_id,
-                ModelPricing.status == True,
+                ModelPricing.status.is_(True),
             )
         )
         model_info = result.scalar_one_or_none()
@@ -427,7 +429,7 @@ class OrquestradorService:
             result = await self.db.execute(
                 select(ModelPricing).where(
                     ModelPricing.model_id == fallback_model,
-                    ModelPricing.status == True,
+                    ModelPricing.status.is_(True),
                 )
             )
             model_info = result.scalar_one_or_none()
@@ -456,8 +458,8 @@ class OrquestradorService:
     # ── PHARMA_CHECK ─────────────────────────────────────────
 
     async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
-        from app.services.pharmadb_service import get_pharmadb_service
         from app.services.medication_extractor import extract_medications
+        from app.services.pharmadb_service import get_pharmadb_service
 
         pharmadb = get_pharmadb_service()
 

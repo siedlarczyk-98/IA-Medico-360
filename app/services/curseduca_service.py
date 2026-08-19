@@ -22,6 +22,7 @@ No-op enquanto `curseduca_validation_enabled` for False (default).
 import httpx
 from fastapi import HTTPException, status
 
+from app.core import circuit_breaker
 from app.core.config import get_settings
 from app.core.http_client import get_client
 
@@ -39,10 +40,18 @@ async def _fetch_member_status(email: str, api_base: str, api_key: str, access_t
     if access_token:
         headers["Authorization"] = f"Bearer {access_token}"
 
-    try:
-        resp = await get_client().get(
+    async def _consulta():
+        return await get_client().get(
             url, params={"email": email}, headers=headers, timeout=_TIMEOUT_SECONDS
         )
+
+    try:
+        # Disjuntor mais tolerante que os demais: abrir aqui bloqueia LOGIN, não
+        # só enriquecimento. Ainda assim protege contra a API pendurada segurando
+        # conexões enquanto vários alunos tentam entrar.
+        resp = await circuit_breaker.curseduca.chama(_consulta)
+    except circuit_breaker.CircuitoAberto as exc:
+        raise CurseducaNotConfigured(str(exc)) from exc
     except httpx.HTTPError as exc:
         raise CurseducaNotConfigured(f"Falha ao contatar a API da Curseduca: {exc}") from exc
 

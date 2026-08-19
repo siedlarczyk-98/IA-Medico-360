@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import delete as sql_delete, select, update
+from pydantic import BaseModel, field_validator
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.limiter import limiter
 
 from app.api.deps import COOKIE_NAME, get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.models.models import (
     AuditLog,
     Conversation,
@@ -34,7 +34,12 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     UserResponse,
 )
-from app.services import auth_service, cache_service, curseduca_service
+from app.services import (
+    auth_service,
+    cache_service,
+    curseduca_service,
+    data_subject_service,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -231,6 +236,22 @@ async def update_me(
     from app.services.auth_service import create_access_token
     token = create_access_token(current_user)
     return TokenResponse(access_token=token, onboarding_complete=current_user.onboarding_complete)
+
+
+@router.get("/me/export")
+@limiter.limit("5/hour")
+async def export_me(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Portabilidade (LGPD art. 18, V): devolve todos os dados do titular em JSON.
+
+    Limite baixo de propósito — a consulta varre todo o histórico do usuário e
+    não há razão legítima para pedir isso com frequência.
+    """
+    return await data_subject_service.exportar_dados(db, current_user)
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)

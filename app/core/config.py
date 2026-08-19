@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
+    # --- Rastreamento de erro (Sentry) ---
+    # Vazio desliga o Sentry. O scrubbing de PII em `app/core/error_tracking.py`
+    # é obrigatório: sem ele o prompt clínico bruto sai em cada evento de erro.
+    sentry_dsn: str = ""
+    sentry_release: str = ""
+
     # --- Observabilidade (Arize Phoenix) ---
     phoenix_api_key: str = ""
     phoenix_project_name: str = "medico-360"

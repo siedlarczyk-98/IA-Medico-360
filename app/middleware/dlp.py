@@ -34,6 +34,22 @@ class SanitizationResult:
     def replacement_count(self) -> int:
         return len(self.replacements)
 
+    @property
+    def counts_by_type(self) -> dict[str, int]:
+        """
+        Quantas substituições de cada tipo — a métrica que permite auditar o DLP
+        em produção sem olhar o conteúdo.
+
+        Serve para responder duas perguntas opostas com dado, não com opinião:
+        um salto em `nome_ner` sugere falso positivo (o NER começou a comer termo
+        clínico); ausência prolongada de `nome_*` num app de saúde sugere falso
+        negativo (nome passando direto). Ver `app/middleware/ner.py`.
+        """
+        contagem: dict[str, int] = {}
+        for r in self.replacements:
+            contagem[r["type"]] = contagem.get(r["type"], 0) + 1
+        return contagem
+
 
 class DLPMiddleware:
     """

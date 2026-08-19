@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 
 from app.api.v1.router import api_v1_router
 from app.calculators.formulas import load_all_formulas
-from app.core.config import get_settings
 from app.core import http_client
-from app.middleware import ner
+from app.core.config import get_settings
+from app.core.error_tracking import setup_sentry
+from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.telemetry import setup_phoenix
+from app.middleware import ner
 
 settings = get_settings()
 
@@ -36,8 +38,15 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup e shutdown hooks."""
-    # Startup
-    print(f"🚀 Médico 360 iniciando [{settings.app_env}]")
+    # Startup — logging primeiro, para o resto do boot já sair estruturado.
+    setup_logging(level=settings.log_level, json_output=settings.is_production)
+    logger.info("Médico 360 iniciando", extra={"env": settings.app_env})
+    if setup_sentry(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        release=settings.sentry_release or None,
+    ):
+        logger.info("Sentry ativo (scrubbing de PII habilitado)")
     setup_phoenix(
         api_key=settings.phoenix_api_key,
         project_name=settings.phoenix_project_name,
@@ -46,14 +55,14 @@ async def lifespan(app: FastAPI):
     await http_client.startup()
     # Carrega o modelo de NER do DLP fora do caminho da 1ª requisição (~1s).
     if not ner.warmup():
-        print("⚠️  NER do DLP indisponível — nomes sem palavra-gatilho não serão mascarados")
+        logger.warning("NER do DLP indisponível — nomes sem palavra-gatilho não serão mascarados")
     # Popula o registry de formulas no boot: um formula_key ausente falha
     # aqui, e nao na primeira execucao clinica em producao.
     load_all_formulas()
     yield
     # Shutdown
     await http_client.shutdown()
-    print("🛑 Médico 360 encerrando")
+    logger.info("Médico 360 encerrando")
 
 
 app = FastAPI(
@@ -82,6 +91,10 @@ if not settings.is_production:
 _cors_origins = list(dict.fromkeys(_cors_origins))  # dedup
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Registrado por último = executa primeiro: o request_id precisa existir antes
+# de qualquer outro middleware poder falhar.
+app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

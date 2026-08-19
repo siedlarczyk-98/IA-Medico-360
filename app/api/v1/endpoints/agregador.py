@@ -19,6 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.core.prompts import DISCLAIMER_RESPOSTA, build_agregador_prompt
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import ModelPricing, User
@@ -28,13 +29,11 @@ from app.schemas.agregador import (
     AIModelDisplay,
     HistorySearchParams,
     InteractionHistoryItem,
-    ModelResponse,
 )
 from app.services.agregador_service import AgregadorService
 from app.services.ai_providers import get_provider_by_type
 from app.services.file_extractor_service import resolve_file_context
 from app.services.usage_service import check_limit
-from app.core.limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ async def list_models(
     }
 
     result = await db.execute(
-        select(ModelPricing).where(ModelPricing.status == True).order_by(ModelPricing.provider)
+        select(ModelPricing).where(ModelPricing.status.is_(True)).order_by(ModelPricing.provider)
     )
     models = result.scalars().all()
 
@@ -167,7 +166,7 @@ async def agregador_stream(
     result = await db.execute(
         select(ModelPricing).where(
             ModelPricing.model_id.in_(body.models),
-            ModelPricing.status == True,
+            ModelPricing.status.is_(True),
         )
     )
     models_info = {m.model_id: m for m in result.scalars().all()}

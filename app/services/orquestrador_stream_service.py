@@ -12,9 +12,9 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import AsyncIterator
 from uuid import UUID
 
 from sqlalchemy import select
@@ -24,28 +24,27 @@ from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     SYSTEM_PROMPT_CLARIFICATION,
     SYSTEM_PROMPT_CLINICAL_REASONING,
-    SYSTEM_PROMPT_QUICK_SEARCH,
     SYSTEM_PROMPT_PRODUCTIVITY,
+    SYSTEM_PROMPT_QUICK_SEARCH,
     build_orquestrador_prompt,
 )
-from app.schemas.agregador import ConversationMessage
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Conversation,
     Interaction,
     InteractionMedication,
     InteractionResponse,
-    ModelPricing,
     PubmedValidation,
 )
+from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost, get_model_pricing
-from app.services.usage_service import add_interaction_audit, record_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import triage, is_off_topic_greeting, PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES
+from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, is_off_topic_greeting, triage
+from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +183,8 @@ class OrquestradorStreamService:
                         triage_confidence=1.0,
                         triage_category="OFF_TOPIC",
                         cache_hit=False,
-                        started_at=datetime.now(timezone.utc),
-                        completed_at=datetime.now(timezone.utc),
+                        started_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC),
                     )
                     db.add(interaction)
                     await db.flush()
@@ -273,7 +272,7 @@ class OrquestradorStreamService:
                             cache_hit=False,
                             status="pending_clarification",
                             clarification_questions=questions,
-                            started_at=datetime.now(timezone.utc),
+                            started_at=datetime.now(UTC),
                         )
                         db.add(pending)
                         await db.commit()
@@ -309,7 +308,7 @@ class OrquestradorStreamService:
                     triage_confidence=confidence,
                     triage_category=mode,
                     cache_hit=False,
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
                 )
                 db.add(interaction)
                 await db.flush()
@@ -383,7 +382,7 @@ class OrquestradorStreamService:
 
                 interaction.response_time_ms = elapsed_ms
                 interaction.token_cost_usd = cost
-                interaction.completed_at = datetime.now(timezone.utc)
+                interaction.completed_at = datetime.now(UTC)
 
                 # Pós-processamento independente roda em paralelo (specialty, meds, PubMed)
                 # — cortando segundos da latência até o evento `done`. O PubMed usa o
@@ -439,6 +438,8 @@ class OrquestradorStreamService:
                         "prompt_length": len(prompt),
                         "total_cost_usd": str(cost),
                         "dlp_sanitized": dlp_result.was_sanitized,
+                        "dlp_replacements": dlp_result.replacement_count,
+                        "dlp_by_type": dlp_result.counts_by_type,
                         "specialty_detected": classification["specialty"],
                         "topic_detected": classification["topic"],
                         "medications": [m["medication_normalized"] for m in medications],

@@ -7,7 +7,7 @@ Chamadas concorrentes a múltiplos providers com auditoria completa.
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -16,8 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.prompts import DISCLAIMER_RESPOSTA
-from app.services.pubmed_service import validate_with_pubmed
-from app.schemas.agregador import PubmedValidationResult, VerifiedCitationOut, PubMedArticleOut
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Conversation,
@@ -29,12 +27,16 @@ from app.schemas.agregador import (
     AgregadorRequest,
     AgregadorResponse,
     ModelResponse,
+    PubMedArticleOut,
+    PubmedValidationResult,
+    VerifiedCitationOut,
 )
 from app.services.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import Pricing, calculate_cost, get_model_pricing
-from app.services.usage_service import add_interaction_audit, record_cost
+from app.services.pubmed_service import validate_with_pubmed
 from app.services.specialty_detector import detect_specialty_and_topic
+from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,7 @@ class AgregadorService:
             prompt_text=sanitized_prompt,
             prompt_sanitized=dlp_result.was_sanitized,
             cache_hit=False,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         self.db.add(interaction)
         await self.db.flush()
@@ -168,7 +170,7 @@ class AgregadorService:
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         interaction.response_time_ms = elapsed_ms
         interaction.token_cost_usd = total_cost
-        interaction.completed_at = datetime.now(timezone.utc)
+        interaction.completed_at = datetime.now(UTC)
         await self.db.flush()
 
         # Commit cedo — dados essenciais garantidos mesmo que enriquecimento falhe
@@ -251,6 +253,7 @@ class AgregadorService:
                     "total_cost_usd": str(total_cost),
                     "dlp_sanitized": dlp_result.was_sanitized,
                     "dlp_replacements": dlp_result.replacement_count,
+                    "dlp_by_type": dlp_result.counts_by_type,
                     "specialty_detected": classification["specialty"],
                     "topic_detected": classification["topic"],
                     "medications": [m["medication_normalized"] for m in medications],
@@ -299,8 +302,8 @@ class AgregadorService:
             prompt_sanitized=prompt_sanitized,
             cache_hit=False,
             response_time_ms=elapsed_ms,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         self.db.add(interaction)
         await self.db.flush()

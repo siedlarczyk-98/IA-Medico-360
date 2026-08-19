@@ -10,8 +10,10 @@ import logging
 import time
 from datetime import timedelta
 
+import httpx
 import redis.asyncio as redis
 
+from app.core import circuit_breaker
 from app.core.config import get_settings
 from app.core.http_client import get_client
 
@@ -155,11 +157,19 @@ class PharmaDBService:
             headers = {"Authorization": f"Bearer {token}", **extra_headers}
             return await client.request(method, url, headers=headers, timeout=15, **kwargs)
 
-        resp = await _call()
-        if resp.status_code == 401:
-            self._jwt_token = None
+        async def _com_retry_de_token() -> "httpx.Response":
             resp = await _call()
-        resp.raise_for_status()
+            if resp.status_code == 401:
+                self._jwt_token = None
+                resp = await _call()
+            resp.raise_for_status()
+            return resp
+
+        # Sob disjuntor: quando o PharmaDB está lento, cada consulta esperaria
+        # 15s antes de desistir. Depois de 5 falhas seguidas o circuito abre e
+        # as chamadas falham na hora, devolvendo a degradação que o orquestrador
+        # já sabe mostrar ("checagem de interações temporariamente indisponível").
+        resp = await circuit_breaker.pharmadb.chama(_com_retry_de_token)
         return resp.json()
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
