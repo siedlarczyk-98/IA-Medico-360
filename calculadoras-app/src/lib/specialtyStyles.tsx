@@ -1,3 +1,13 @@
+/* eslint-disable react-refresh/only-export-components --
+ * Este arquivo e de HELPERS de estilo, nao de componentes: HEART/DROP/VIRUS/PULSE
+ * sao fabricas de icone que recebem uma cor e devolvem SVG, e a exportacao
+ * publica e `getSpecialtyStyle`, uma funcao comum.
+ *
+ * A regra existe para o fast refresh do Vite funcionar bem em ARQUIVOS DE
+ * COMPONENTE — e uma preocupacao de experiencia de desenvolvimento, sem efeito
+ * em producao. Separar em dois arquivos so para satisfaze-la deixaria o mapa de
+ * especialidades longe dos icones que ele referencia, o que e pior de ler.
+ */
 import type { ReactNode } from 'react';
 
 interface SpecialtyStyle {

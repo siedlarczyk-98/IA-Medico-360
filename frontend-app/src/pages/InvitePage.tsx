@@ -6,23 +6,25 @@ import { setToken } from '../lib/auth';
 export function InvitePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [error, setError] = useState('');
+  const [erroDaChamada, setErroDaChamada] = useState('');
+
+  // Parametro ausente e estado DERIVADO da URL: da para calcular no render.
+  // Antes era `setError` dentro do efeito, o que dispara um render em
+  // cascata so para mostrar uma mensagem que ja se sabia de antemao.
+  const token = searchParams.get('token');
+  const error = erroDaChamada || (!token ? 'Link de convite inválido.' : '');
 
   useEffect(() => {
-    const token = searchParams.get('token');
-    if (!token) {
-      setError('Link de convite inválido.');
-      return;
-    }
+    if (!token) return;
     acceptInvite(token)
       .then(res => {
         setToken(res.access_token);
         navigate(res.onboarding_complete ? '/' : '/onboarding', { replace: true });
       })
       .catch(err => {
-        setError(err instanceof Error ? err.message : 'Link inválido ou expirado.');
+        setErroDaChamada(err instanceof Error ? err.message : 'Link inválido ou expirado.');
       });
-  }, []);
+  }, [token]);
 
   return (
     <div style={{

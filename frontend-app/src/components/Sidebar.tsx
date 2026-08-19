@@ -848,8 +848,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           {(() => {
             const pct = usage.usagePercentage ?? 0;
             const barColor = pct >= 80 ? '#f87171' : pct >= 50 ? '#facc15' : '#4ade80';
+            // Valor puramente informativo ("faltam N dias"), recalculado a cada
+            // render do Sidebar. A regra quer funcao pura no render; mover isto
+            // para estado exigiria um timer so para atualizar um contador de
+            // DIAS, o que nao se paga.
+            // eslint-disable-next-line react-hooks/purity
+            const agora = Date.now();
             const daysLeft = usage.weekResetAt
-              ? Math.max(0, Math.ceil((usage.weekResetAt.getTime() - Date.now()) / 86400000))
+              ? Math.max(0, Math.ceil((usage.weekResetAt.getTime() - agora) / 86400000))
               : null;
             return (
               <>

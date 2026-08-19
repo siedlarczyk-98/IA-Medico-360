@@ -92,8 +92,14 @@ function MainApp() {
   }
   // Tracks the index of the assistant message being streamed, so we can remove it if the stream is aborted mid-way
   const streamMsgIndexRef = useRef<number>(-1);
-  // Stable ref to latest messages — avoids recreating sendMessage on every token
+  // Ref sempre atual das mensagens — evita recriar `sendMessage` a cada token.
+  // A regra `react-hooks/refs` reclama de escrita em ref durante o render, e em
+  // geral tem razao. Aqui a alternativa (atribuir num useEffect) faz a ref
+  // ATRASAR um render, e os handlers de streaming leem `messagesRef.current`
+  // esperando o valor corrente — o "conserto" introduziria bug de mensagem
+  // perdida. Mantido de propósito.
   const messagesRef = useRef<Message[]>(messages);
+  // eslint-disable-next-line react-hooks/refs
   messagesRef.current = messages;
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
   // state uma vez por frame (requestAnimationFrame), evitando re-render por token.

@@ -6,23 +6,25 @@ import { setToken } from '../lib/auth';
 export function EmbedAuthPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [error, setError] = useState('');
+  const [erroDaChamada, setErroDaChamada] = useState('');
+
+  // Parametro ausente e estado DERIVADO da URL: da para calcular no render.
+  // Antes era `setError` dentro do efeito, o que dispara um render em
+  // cascata so para mostrar uma mensagem que ja se sabia de antemao.
+  const email = searchParams.get('email');
+  const error = erroDaChamada || (!email ? 'Email não informado.' : '');
 
   useEffect(() => {
-    const email = searchParams.get('email');
-    if (!email) {
-      setError('Email não informado.');
-      return;
-    }
+    if (!email) return;
     embedToken(email)
       .then(res => {
         setToken(res.access_token);
         navigate(res.onboarding_complete ? '/' : '/onboarding', { replace: true });
       })
       .catch(err => {
-        setError(err instanceof Error ? err.message : 'Erro ao autenticar.');
+        setErroDaChamada(err instanceof Error ? err.message : 'Erro ao autenticar.');
       });
-  }, []);
+  }, [email]);
 
   return (
     <div style={{
