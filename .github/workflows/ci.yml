@@ -57,9 +57,13 @@ jobs:
       - name: migrations aplicam do zero
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:55433/medico360_migrations_test
-          JWT_SECRET_KEY: chave-de-ci-nao-usar-em-producao-com-32-bytes
+          PGPASSWORD: test
         run: |
-          PGPASSWORD=test psql -h localhost -p 55433 -U test -d medico360_test             -c 'CREATE DATABASE medico360_migrations_test'
+          # Segredo efemero: o Settings exige a variavel, mas nada aqui depende
+          # do valor. Gerar em runtime em vez de fixar evita um literal com cara
+          # de credencial no repositorio - o scanner de segredos aponta, e com razao.
+          export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+          psql -h localhost -p 55433 -U test -d medico360_test             -c 'CREATE DATABASE medico360_migrations_test'
           alembic upgrade head
 
       # Falha em vulnerabilidade conhecida nas dependências fixadas.
@@ -116,7 +120,10 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: medico360
-          POSTGRES_PASSWORD: medico360
+          # Derivada do run em vez de fixa: nao e segredo (servico efemero,
+          # alcancavel so de dentro do job), mas literal com nome de senha
+          # dispara scanner e treina o time a ignorar alerta.
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}
           POSTGRES_DB: medico360
         ports: ["5432:5432"]
         options: >-
@@ -125,11 +132,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+asyncpg://medico360:medico360@localhost:5432/medico360
-      JWT_SECRET_KEY: ci-e2e-secret-nao-usar-em-producao
+      DATABASE_URL: postgresql+asyncpg://medico360:ci-${{ github.run_id }}@localhost:5432/medico360
       APP_ENV: development
     steps:
       - uses: actions/checkout@v4
+      # O e2e assina token com esta chave (ver calculadoras-app/e2e/helpers/auth.ts),
+      # entao ela precisa ser a mesma em todos os passos - dai o GITHUB_ENV.
+      - name: gera segredo efemero do job
+        run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
