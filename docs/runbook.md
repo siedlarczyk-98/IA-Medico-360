@@ -110,46 +110,74 @@ para qualquer e-mail informado.
 
 ## Restaurar o banco
 
+> ### LEIA PRIMEIRO: o Railway NÃO faz backup deste banco
+>
+> Verificado em 2026-08-19 no painel: a aba *Backups* diz
+> *"This service's volume does not have any backups"* — backup e PITR são
+> exclusivos do plano **Pro**, e este serviço não está nele.
+>
+> Ou seja: **não existe ponto de restauração para clicar.** Se o volume do
+> Postgres se perder, a única recuperação possível é a partir de um dump feito
+> manualmente (abaixo). Versões anteriores deste runbook mandavam "escolher o
+> ponto de restauração no Railway" — instrução que não funcionava e custaria os
+> primeiros minutos de um incidente.
+
+### Fazer um backup (o que protege você hoje)
+
+```
+python -m scripts.backup_producao --dsn "postgresql://..."
+```
+
+A URL sai de Railway → Postgres → *Connect*. Só faz leitura na origem. O script
+escolhe a imagem do `pg_dump` conforme a versão do servidor, grava
+`backups/medico360-<data>Z.dump` e **verifica com `pg_restore -l` que o arquivo é
+legível** — arquivo com tamanho não prova nada, dump truncado também tem tamanho.
+
+Depois, o passo que o script não faz por você: **subir o arquivo para o Drive.**
+Dump que só existe no mesmo disco não sobrevive ao incidente que mais assusta.
+
+> **Seu RPO é a idade do último dump.** Um dump semanal significa aceitar perder
+> até uma semana. Se isso não é aceitável, ou o backup vira rotina agendada, ou
+> o serviço sobe para um plano com PITR — e aí o ensaio abaixo continua valendo,
+> porque PITR contratado e nunca testado é promessa, não garantia.
+
+### Restaurar
+
+```
+docker run --rm -i pgvector/pgvector:pg16   pg_restore -d "postgresql://URL_DO_BANCO_NOVO" --no-owner --no-privileges < backups/ARQUIVO.dump
+```
+
+Sempre para um banco **novo**, nunca por cima do atual. Marque início e fim: esse
+intervalo é o RTO real.
+
+### Conferir que o restore veio íntegro
+
+```
+python -m scripts.verificar_restore --origem "postgresql://..." --restaurado "postgresql://..."
+```
+
+Só lê (pode apontar para produção como origem). Compara **todas** as tabelas de
+todos os schemas — `public` e `calculators` —, confere a revisão do Alembic e sai
+com código 1 em qualquer divergência. Conferir três tabelas a olho deixaria passar
+perda em `consent_logs` ou `audit_logs`, que existem por obrigação regulatória.
+
+Por fim, suba um ambiente de **teste** contra o banco restaurado e confirme
+`/api/v1/health/ready` (esse consulta o Postgres de verdade; `/api/v1/health` não).
+**Nunca aponte produção para o banco restaurado** — é assim que um ensaio vira
+incidente.
+
 > ### Sobre reconstruir o schema
 >
 > Isto já foi uma limitação: o schema nascia de um `create_all` fora do Alembic e
 > `alembic upgrade head` num banco vazio falhava. Hoje existe a migration de
 > baseline (`000_baseline`), e o CI prova a cada push que a cadeia aplica do zero
-> (job `backend`, step "migrations aplicam do zero").
->
-> Isso reconstrói o **schema**, não os **dados**. Para recuperar dados, o caminho
-> continua sendo o backup do Railway, abaixo.
+> (job `backend`, step "migrations aplicam do zero"). Isso reconstrói o **schema**,
+> não os **dados** — para dados, o caminho é o dump acima.
 
-1. Railway → Postgres → aba de backups → escolher o ponto de restauração.
-   **Anote a hora do snapshot** — sem ela o RPO não é calculável depois.
-2. Restaurar para um banco **novo**, nunca por cima do atual. **Marque início e
-   fim**: esse intervalo é o RTO real.
-3. Validar com o script, da sua máquina (não é preciso terminal no Railway — as
-   duas URLs saem de Railway → Postgres → *Connect*):
-
-   ```
-   python -m scripts.verificar_restore --origem "postgresql://..." --restaurado "postgresql://..."
-   ```
-
-   Ele só lê (pode apontar para produção como origem), compara **todas** as
-   tabelas — não só três —, confere a revisão do Alembic e sai com código 1 em
-   qualquer divergência. Conferir 3 tabelas escolhidas a olho deixaria passar
-   perda em `consent_logs` ou `audit_logs`, que existem por obrigação regulatória.
-4. Subir um ambiente de **teste** contra o restaurado e confirmar
-   `/api/v1/health/ready` (esse endpoint consulta o Postgres de verdade;
-   `/api/v1/health` não). **Nunca aponte produção para o banco restaurado** —
-   é assim que um ensaio vira incidente.
-5. Registrar aqui o RPO (distância entre o dado mais recente que o script mostra
-   e a hora do snapshot) e o RTO (o tempo do passo 2).
-
-**Pendente — lacuna conhecida, não fechada:** ninguém executou um restore de
-verdade ainda. Os números de RPO e RTO seguem **prometidos, não medidos**, e só
-deixam de ser quando alguém com acesso ao painel do Railway fizer o ensaio:
-restaurar um ponto recente para um banco novo cronometrando início e fim, conferir
-as contagens de `users`, `conversations` e `interactions` contra o original, subir
-um ambiente de teste (nunca produção) contra o banco restaurado e registrar aqui os
-tempos reais. Enquanto isso não acontecer, trate o plano de recuperação como não
-testado.
+**Estado atual — lacuna aberta:** RPO e RTO seguem **desconhecidos**, e enquanto
+não houver um primeiro dump guardado fora desta máquina eles são, na prática,
+infinitos. Registre aqui, assim que o primeiro ensaio for feito: data do dump,
+tempo do restore e resultado do `verificar_restore`.
 
 ---
 

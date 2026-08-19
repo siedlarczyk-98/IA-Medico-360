@@ -52,39 +52,48 @@ def _normaliza(dsn: str) -> str:
     return dsn
 
 
-async def _tabelas(con) -> list[str]:
-    """A lista sai do banco de origem: nenhuma tabela nova escapa da conferencia."""
+async def _tabelas(con) -> list[tuple[str, str]]:
+    """
+    A lista sai do banco de origem: nenhuma tabela nova escapa da conferencia.
+
+    TODOS os schemas de aplicacao, nao so `public` - as calculadoras vivem em
+    `calculators`, e restringir a `public` deixaria 6 tabelas fora da conferencia
+    (era o bug que este script existe para nao cometer).
+    """
     linhas = await con.fetch(
         """
-        SELECT tablename FROM pg_tables
-        WHERE schemaname = 'public' AND tablename <> 'alembic_version'
-        ORDER BY tablename
+        SELECT schemaname, tablename FROM pg_tables
+        WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+          AND tablename <> 'alembic_version'
+        ORDER BY schemaname, tablename
         """
     )
-    return [linha["tablename"] for linha in linhas]
+    return [(linha["schemaname"], linha["tablename"]) for linha in linhas]
 
 
-async def _tem_created_at(con, tabela: str) -> bool:
+async def _tem_created_at(con, schema: str, tabela: str) -> bool:
     return bool(
         await con.fetchval(
             """
             SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'created_at'
+            WHERE table_schema = $1 AND table_name = $2 AND column_name = 'created_at'
             """,
+            schema,
             tabela,
         )
     )
 
 
-async def _fotografa(con, tabelas: list[str]) -> dict[str, tuple[int, datetime | None]]:
+async def _fotografa(con, tabelas: list[tuple[str, str]]) -> dict[tuple[str, str], tuple[int, datetime | None]]:
     """Contagem e dado mais recente de cada tabela. Aspas duplas: o nome vem do banco."""
-    foto: dict[str, tuple[int, datetime | None]] = {}
-    for tabela in tabelas:
-        total = await con.fetchval(f'SELECT count(*) FROM "{tabela}"')
+    foto: dict[tuple[str, str], tuple[int, datetime | None]] = {}
+    for schema, tabela in tabelas:
+        alvo = f'"{schema}"."{tabela}"'
+        total = await con.fetchval(f"SELECT count(*) FROM {alvo}")
         recente = None
-        if await _tem_created_at(con, tabela):
-            recente = await con.fetchval(f'SELECT max(created_at) FROM "{tabela}"')
-        foto[tabela] = (total, recente)
+        if await _tem_created_at(con, schema, tabela):
+            recente = await con.fetchval(f"SELECT max(created_at) FROM {alvo}")
+        foto[(schema, tabela)] = (total, recente)
     return foto
 
 
@@ -126,21 +135,23 @@ async def executar(dsn_origem: str, dsn_destino: str) -> int:
 
     ausentes = [t for t in tabelas_origem if t not in tabelas_destino]
     if ausentes:
-        problemas.append(f"{len(ausentes)} tabela(s) nao existem no restaurado: {', '.join(ausentes)}")
+        nomes = ", ".join(f"{s}.{t}" for s, t in ausentes)
+        problemas.append(f"{len(ausentes)} tabela(s) nao existem no restaurado: {nomes}")
 
-    print(f"{'tabela':<28} {'origem':>10} {'restaurado':>12}   dado mais recente (origem)")
-    print("-" * 92)
-    for tabela in tabelas_origem:
-        total_origem, recente = foto_origem[tabela]
-        if tabela in ausentes:
-            print(f"{tabela:<28} {total_origem:>10} {'AUSENTE':>12}")
+    print(f"{'tabela':<40} {'origem':>10} {'restaurado':>12}   dado mais recente (origem)")
+    print("-" * 100)
+    for chave in tabelas_origem:
+        nome = f"{chave[0]}.{chave[1]}"
+        total_origem, recente = foto_origem[chave]
+        if chave in ausentes:
+            print(f"{nome:<40} {total_origem:>10} {'AUSENTE':>12}")
             continue
-        total_destino, _ = foto_destino[tabela]
+        total_destino, _ = foto_destino[chave]
         if total_origem != total_destino:
-            problemas.append(f"{tabela}: {total_origem} na origem, {total_destino} no restaurado")
+            problemas.append(f"{nome}: {total_origem} na origem, {total_destino} no restaurado")
         marca = "" if total_origem == total_destino else "   <-- DIVERGE"
         carimbo = recente.isoformat(sep=" ", timespec="seconds") if recente else "-"
-        print(f"{tabela:<28} {total_origem:>10} {total_destino:>12}   {carimbo}{marca}")
+        print(f"{nome:<40} {total_origem:>10} {total_destino:>12}   {carimbo}{marca}")
 
     # O RPO real e a distancia entre este carimbo e a hora do snapshot. Sem este
     # numero, RPO segue sendo promessa - que e o que o runbook admitia.

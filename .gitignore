@@ -30,3 +30,7 @@ calculadoras-app/playwright-report/
 .coverage
 coverage.xml
 htmlcov/
+
+# Dumps de backup: dado real de producao, NUNCA versionado.
+backups/
+*.dump
