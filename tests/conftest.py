@@ -18,6 +18,7 @@ SQLite não serve — os modelos usam JSONB e UUID do dialeto PostgreSQL.
 
 import os
 import uuid
+from decimal import Decimal
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRAVA DE BANCO — precisa vir antes de importar qualquer coisa de `app`
@@ -38,22 +39,22 @@ if "test" not in _nome_banco.lower():
 
 # A partir daqui, todo `get_settings()` enxerga o banco de teste.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-os.environ.setdefault("JWT_SECRET_KEY", "chave-de-teste-nao-usar-em-producao")
+os.environ.setdefault("JWT_SECRET_KEY", "chave-de-teste-nao-usar-em-producao-com-32-bytes-ou-mais")
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 
-import pytest  # noqa: E402
-import pytest_asyncio  # noqa: E402
-from httpx import ASGITransport, AsyncClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
-from sqlalchemy.pool import NullPool  # noqa: E402
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.database import Base, get_db  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models.models import Conversation, Folder, User  # noqa: E402
-from app.services import auth_service  # noqa: E402
+from app.core.config import get_settings
+from app.core.database import Base, get_db
+from app.main import app
+from app.models.models import Conversation, Folder, ModelPricing, User
+from app.services import auth_service
 
 # Confere que a trava pegou: se o cache do settings foi populado antes daqui,
 # o teste rodaria contra o banco errado sem avisar.
@@ -104,23 +105,34 @@ async def engine():
 
 
 @pytest_asyncio.fixture
-async def db(engine) -> AsyncSession:
+async def db_conn(engine):
     """
-    Sessão por teste dentro de uma transação revertida no fim.
+    Conexão do teste, presa numa transação que sofre rollback no fim.
 
-    Cada teste enxerga um banco limpo sem pagar o custo de recriar o schema:
-    a conexão fica presa numa transação externa que sofre rollback ao final,
-    então nada do que o teste escreveu sobrevive.
+    Exposta separadamente porque alguns serviços (o streaming do Orquestrador)
+    abrem a própria sessão via `session_factory` em vez de receber `get_db`.
+    Para testá-los sem escapar do isolamento, monta-se uma factory sobre esta
+    mesma conexão — ver `tests/test_orquestrador_stream.py`.
     """
     async with engine.connect() as conn:
         trans = await conn.begin()
-        factory = async_sessionmaker(bind=conn, expire_on_commit=False)
-        session = factory()
         try:
-            yield session
+            yield conn
         finally:
-            await session.close()
             await trans.rollback()
+
+
+@pytest_asyncio.fixture
+async def db(db_conn) -> AsyncSession:
+    """
+    Sessão por teste. Nada do que o teste escreve sobrevive: a conexão está
+    numa transação externa revertida em `db_conn`.
+    """
+    session = async_sessionmaker(bind=db_conn, expire_on_commit=False)()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 @pytest_asyncio.fixture
@@ -201,6 +213,129 @@ async def conversation_factory(db):
         return conv
 
     return _create
+
+
+@pytest_asyncio.fixture
+async def model_pricing_factory(db):
+    """
+    Registra um modelo na tabela de preços.
+
+    Limpa o cache de `pricing.py` antes e depois: ele é um TTLCache de módulo
+    (1h) e, sem isso, o preço de um teste vazaria para os seguintes.
+    """
+    from app.services import pricing
+
+    pricing._pricing_cache.clear()
+
+    async def _create(
+        model_id: str = "modelo-teste",
+        provider_type: str = "anthropic",
+        input_per_million: str = "3.00",
+        output_per_million: str = "15.00",
+        status: bool = True,
+    ) -> ModelPricing:
+        mp = ModelPricing(
+            model_id=model_id,
+            provider=provider_type,
+            provider_type=provider_type,
+            display_name=model_id,
+            input_per_million=Decimal(input_per_million),
+            output_per_million=Decimal(output_per_million),
+            status=status,
+        )
+        db.add(mp)
+        await db.flush()
+        pricing._pricing_cache.clear()
+        return mp
+
+    yield _create
+    pricing._pricing_cache.clear()
+
+
+@pytest_asyncio.fixture
+async def calculator_factory(db):
+    """
+    Calculadora completa e executável: especialidade + definição + campos + versão.
+
+    Usa a fórmula real `cockcroft_gault_v1` (a de menos campos) para que
+    `/execute` percorra o motor de verdade, não um mock.
+    """
+    from app.calculators import cache as catalogo_cache
+    from app.models.calculators import (
+        CalculatorDefinition,
+        CalculatorField,
+        CalculatorStatusEnum,
+        CalculatorVersion,
+        EngineTypeEnum,
+        Specialty,
+    )
+
+    # O catálogo é cacheado in-process por 300s. Sem limpar, a calculadora criada
+    # aqui fica invisível para o endpoint (e o catálogo vaza entre testes).
+    catalogo_cache.clear()
+
+    async def _create(slug: str = "cockcroft-gault", formula_key: str = "cockcroft_gault_v1"):
+        sufixo = uuid.uuid4().hex[:6]
+        especialidade = Specialty(name=f"Nefrologia {sufixo}", slug=f"nefrologia-{sufixo}")
+        db.add(especialidade)
+        await db.flush()
+
+        calc = CalculatorDefinition(
+            specialty_id=especialidade.id,
+            slug=slug,
+            name="Clearance de Creatinina (Cockcroft-Gault)",
+            description="Estimativa de função renal.",
+            engine_type=EngineTypeEnum.FORMULA.value,
+            status=CalculatorStatusEnum.ACTIVE.value,
+        )
+        db.add(calc)
+        await db.flush()
+
+        campos = [
+            ("idade", "Idade", "NUMBER", "anos"),
+            ("peso_kg", "Peso", "NUMBER", "kg"),
+            ("altura_cm", "Altura", "NUMBER", "cm"),
+            ("creatinina_mgdl", "Creatinina", "NUMBER", "mg/dL"),
+            ("sexo", "Sexo", "SELECT", None),
+            ("tipo_peso", "Tipo de peso", "SELECT", None),
+        ]
+        opcoes = {
+            "sexo": [{"value": "M", "label": "Masculino"}, {"value": "F", "label": "Feminino"}],
+            "tipo_peso": [
+                {"value": "real", "label": "Real"},
+                {"value": "ideal", "label": "Ideal"},
+                {"value": "ajustado", "label": "Ajustado"},
+            ],
+        }
+        for ordem, (chave, rotulo, tipo, unidade) in enumerate(campos):
+            db.add(CalculatorField(
+                calculator_id=calc.id, key=chave, label=rotulo, field_type=tipo,
+                unit=unidade, required=True, display_order=ordem,
+                options=opcoes.get(chave),
+            ))
+
+        db.add(CalculatorVersion(
+            calculator_id=calc.id, version_number=1,
+            formula_key=formula_key, is_active=True,
+            clinical_reference="Cockcroft & Gault, 1976",
+        ))
+        await db.flush()
+        await db.refresh(calc)
+        catalogo_cache.clear()
+        return calc
+
+    yield _create
+    catalogo_cache.clear()
+
+
+INPUTS_COCKCROFT_VALIDOS = {
+    "idade": 65,
+    "peso_kg": 70,
+    "altura_cm": 170,
+    "creatinina_mgdl": 1.2,
+    "sexo": "M",
+    "tipo_peso": "real",
+}
 
 
 def auth_headers(user: User) -> dict[str, str]:
