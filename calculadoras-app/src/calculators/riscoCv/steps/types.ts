@@ -1,12 +1,10 @@
-import type { CalculatorField } from '../../../api/calculators';
-import type { FormSpec } from '../../formSpecs';
+import type { RiskLevel, WizardState } from '../riskTypes';
 
-export interface StepProps {
-  fields: CalculatorField[];
-  formSpec: FormSpec | undefined;
-  values: Record<string, unknown>;
-  onChange: (key: string, value: unknown) => void;
-  aiFilledKeys?: Set<string>;
-  fieldErrors?: Record<string, string>;
-  showErrors?: boolean;
+/** Contrato de props dos steps do wizard — porta literal do padrão da referência. */
+export interface WizardStepProps {
+  state: WizardState;
+  onChange: (updates: Partial<WizardState>) => void;
+  onResult: (level: RiskLevel) => void;
+  onNext: () => void;
+  onBack?: () => void;
 }

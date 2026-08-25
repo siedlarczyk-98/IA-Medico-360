@@ -1,58 +1,54 @@
-import { FieldWidget } from '../../../components/FieldWidget';
-import { Card, CardHeader, FieldGroup, Separator, SubHeading } from '../ui';
-import { IconHeartPulse } from '../icons';
-import { makeFieldVisibility, pickField } from '../visibility';
-import type { StepProps } from './types';
+import { Card, CardHeader, CheckItem, Button } from '../ui';
+import { IconHeartPulse, IconChevronRight, IconChevronLeft } from '../icons';
+import type { WizardStepProps } from './types';
 
-export function AltoRiscoStep({ fields, formSpec, values, onChange, aiFilledKeys, fieldErrors, showErrors }: StepProps) {
-  const isVisible = makeFieldVisibility(formSpec, 'alto_risco', values);
+/** Porta literal de `Step3HighRisk.tsx` (app de referência). */
 
-  const field = (key: string) => {
-    const def = pickField(fields, key);
-    if (!def || !isVisible(key)) return null;
-    return (
-      <FieldWidget
-        key={key}
-        field={def}
-        value={values[key]}
-        onChange={v => onChange(key, v)}
-        aiPrefilled={aiFilledKeys?.has(key)}
-        error={fieldErrors?.[key]}
-        showError={showErrors}
-      />
-    );
-  };
+export function AltoRiscoStep({ state, onChange, onResult, onNext, onBack }: WizardStepProps) {
+  const hasHighRisk = state.ateroscleroseSubclinica || state.ldl190 || state.lpa180 || state.cac100a300;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <Card>
         <CardHeader
-          icon={<IconHeartPulse size={18} color="var(--red)" />}
-          iconColor="var(--red)"
-          title="Doença aterosclerótica e marcadores"
-          description="Marque as condições de alto risco presentes."
+          icon={<IconHeartPulse size={18} color="var(--risk-high)" />}
+          iconColor="var(--risk-high)"
+          title="Condições de alto risco"
+          description="Marque se alguma condição de alto risco está presente."
         />
-
-        <SubHeading>Aterosclerose subclínica</SubHeading>
-        <FieldGroup>
-          {field('doenca_aterosclerotica_significativa')}
-          {field('cac_ua')}
-          {field('cac_percentil_gt75')}
-          {field('placa_carotidea_lt50')}
-          {field('placa_angiotc_lt50')}
-          {field('aaa_conhecido')}
-        </FieldGroup>
-
-        <Separator />
-
-        <SubHeading>Marcadores lipídicos</SubHeading>
-        <FieldGroup>
-          {field('ldl_mgdl')}
-          {field('lpa_mgdl')}
-          {field('lpa_nmol')}
-          {field('hipercolesterolemia_familiar')}
-        </FieldGroup>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <CheckItem
+            checked={state.ateroscleroseSubclinica}
+            onChange={v => onChange({ ateroscleroseSubclinica: v })}
+            label="Aterosclerose subclínica"
+            description="Placa carotídea ou femoral, aneurisma de aorta abdominal"
+          />
+          <CheckItem
+            checked={state.ldl190}
+            onChange={v => onChange({ ldl190: v })}
+            label="LDL-c ≥ 190 mg/dL"
+          />
+          <CheckItem
+            checked={state.lpa180}
+            onChange={v => onChange({ lpa180: v })}
+            label="Lp(a) > 180 mg/dL (ou > 390 nmol/L)"
+          />
+          <CheckItem
+            checked={state.cac100a300}
+            onChange={v => onChange({ cac100a300: v })}
+            label="CAC entre 100 e 300 UA"
+          />
+        </div>
       </Card>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <Button variant="outline" onClick={onBack}>
+          <IconChevronLeft size={16} /> Voltar
+        </Button>
+        <Button onClick={() => (hasHighRisk ? onResult('high') : onNext())}>
+          {hasHighRisk ? 'Ver Resultado (Alto)' : 'Próximo'} <IconChevronRight size={16} />
+        </Button>
+      </div>
     </div>
   );
 }
