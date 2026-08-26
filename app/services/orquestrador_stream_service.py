@@ -17,105 +17,50 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
-    SYSTEM_PROMPT_CLARIFICATION,
-    SYSTEM_PROMPT_CLINICAL_REASONING,
-    SYSTEM_PROMPT_PRODUCTIVITY,
-    SYSTEM_PROMPT_QUICK_SEARCH,
     build_orquestrador_prompt,
 )
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
-    Conversation,
     Interaction,
     InteractionMedication,
     InteractionResponse,
     PubmedValidation,
 )
 from app.schemas.agregador import ConversationMessage
-from app.services.ai_providers import OpenAIProvider, get_provider_by_type
+from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
+from app.services.orquestrador_modes import (
+    EFFORT_MAX_TOKENS,
+    FALLBACK_MODELS,
+    GREETING_REPLY,
+    MODE_MODEL_MAP,
+    MODE_TEMPERATURE_MAP,
+    PHARMA_CHECK_MIN_CONFIDENCE,
+    PHARMA_MODES,
+)
+from app.services.orquestrador_shared import (
+    build_enriched_prompt,
+    check_clarification,
+    ensure_conversation,
+    resolve_clarification_prompt,
+)
 from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, is_off_topic_greeting, triage
+from app.services.triage_service import is_off_topic_greeting, triage
 from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
 
-def _make_title(prompt: str) -> str:
-    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
-    if prompt.startswith('[Imagem:'):
-        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
-    elif '---\n\n' in prompt:
-        prompt = prompt.split('---\n\n', 1)[1]
-    return prompt[:100] + ('...' if len(prompt) > 100 else '')
-
-MODE_MODEL_MAP = {
-    "QUICK_SEARCH": "sonar-pro",
-    "CLINICAL_REASONING": "claude-sonnet-4-6",
-    "PRODUCTIVITY": "gpt-5.4-nano",
-}
-
-MODE_PROMPT_MAP = {
-    "QUICK_SEARCH": SYSTEM_PROMPT_QUICK_SEARCH,
-    "CLINICAL_REASONING": SYSTEM_PROMPT_CLINICAL_REASONING,
-    "PRODUCTIVITY": SYSTEM_PROMPT_PRODUCTIVITY,
-}
-
-MODE_TEMPERATURE_MAP = {
-    "QUICK_SEARCH": 0.0,
-    "CLINICAL_REASONING": 0.0,
-    "PRODUCTIVITY": 0.7,
-}
-
-# Efeito real do toggle Rápido/Detalhado: limita o tamanho da resposta,
-# o que reduz tanto o tempo de geração quanto o custo em tokens de saída.
-EFFORT_MAX_TOKENS = {
-    "rápido": 700,
-    "detalhado": 4096,
-}
-
-
-_clarification_provider = OpenAIProvider()
-_CLARIFICATION_MODEL = "gpt-5.4-nano"
-
-
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-async def _check_clarification(prompt: str) -> dict:
-    """
-    Chama Haiku para verificar se o caso clínico tem contexto suficiente.
-    Retorna {"sufficient": True} ou {"sufficient": False, "questions": [...]}.
-    Falha silenciosa: se der erro, assume suficiente para não bloquear o fluxo.
-    """
-    try:
-        response = await _clarification_provider.complete(
-            model_id=_CLARIFICATION_MODEL,
-            prompt=prompt,
-            system_prompt=SYSTEM_PROMPT_CLARIFICATION,
-            temperature=0.0,
-            timeout=8,
-        )
-        raw = response.text.strip()
-        # Remove possível markdown ```json ... ```
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw.strip())
-    except Exception as e:
-        logger.warning(f"Clarification check falhou: {e}. Assumindo suficiente.")
-        return {"sufficient": True}
 
 
 class OrquestradorStreamService:
@@ -156,8 +101,8 @@ class OrquestradorStreamService:
             try:
                 # 1. Resolução de prompt: se há respostas de clarificação, monta contexto completo
                 if clarification_answers and conversation_id:
-                    prompt = await self._resolve_clarification_prompt(
-                        db, conversation_id, clarification_answers
+                    prompt = await resolve_clarification_prompt(
+                        db, self.user_id, conversation_id, clarification_answers
                     )
 
                 # 2. DLP
@@ -168,11 +113,7 @@ class OrquestradorStreamService:
                 # gastar uma chamada de modelo. Independe do modo selecionado na UI,
                 # já que um modo explícito pula a triagem automática (ver item 3).
                 if is_off_topic_greeting(sanitized_prompt):
-                    conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
-                    greeting_reply = (
-                        "Olá! Sou o assistente do Médico 360. Pode me perguntar sobre posologia, "
-                        "protocolos, interações medicamentosas ou descrever um caso clínico que eu ajudo."
-                    )
+                    conv_id = await ensure_conversation(db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
                     interaction = Interaction(
                         conversation_id=conv_id,
                         user_id=self.user_id,
@@ -192,12 +133,12 @@ class OrquestradorStreamService:
                     db.add(InteractionResponse(
                         interaction_id=interaction.id,
                         model_used="off_topic_shortcut",
-                        response_text=greeting_reply,
+                        response_text=GREETING_REPLY,
                     ))
                     await db.commit()
 
                     yield _sse("start", {"mode": "OFF_TOPIC", "triage_confidence": 1.0})
-                    yield _sse("token", {"text": greeting_reply})
+                    yield _sse("token", {"text": GREETING_REPLY})
                     yield _sse("done", {
                         "interaction_id": str(interaction.id),
                         "conversation_id": str(conv_id),
@@ -213,15 +154,7 @@ class OrquestradorStreamService:
                     return
 
                 # 2b. Enriquecer prompt com histórico (cache usa sanitized_prompt; modelo usa enriched_prompt)
-                if history:
-                    parts = ["[Conversa anterior]"]
-                    for msg in history[-10:]:
-                        role_label = "Médico" if msg.role == "user" else "Assistente"
-                        parts.append(f"{role_label}: {msg.content[:800]}")
-                    parts.append("[Pergunta atual]")
-                    enriched_prompt = "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
-                else:
-                    enriched_prompt = sanitized_prompt
+                enriched_prompt = build_enriched_prompt(sanitized_prompt, history)
 
                 # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
                 # resolver o sub-modo correto (bula, receita, genérico, interação),
@@ -256,10 +189,10 @@ class OrquestradorStreamService:
 
                 # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
                 if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
-                    clarification = await _check_clarification(sanitized_prompt)
+                    clarification = await check_clarification(sanitized_prompt)
                     if not clarification.get("sufficient", True):
                         questions = clarification.get("questions", [])
-                        conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
+                        conv_id = await ensure_conversation(db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
                         pending = Interaction(
                             conversation_id=conv_id,
                             user_id=self.user_id,
@@ -297,8 +230,8 @@ class OrquestradorStreamService:
                         # este caminho retornava aqui, sem criar conversa nem
                         # interação: a mensagem inteira sumia do histórico, não
                         # só as referências.
-                        conv_id = await self._ensure_conversation(
-                            db, conversation_id, sanitized_prompt, folder_id=folder_id
+                        conv_id = await ensure_conversation(
+                            db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id
                         )
                         cached_interaction = Interaction(
                             conversation_id=conv_id,
@@ -341,7 +274,7 @@ class OrquestradorStreamService:
                         return
 
                 # 4. Conversation + Interaction
-                conv_id = await self._ensure_conversation(db, conversation_id, sanitized_prompt, folder_id=folder_id)
+                conv_id = await ensure_conversation(db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
                 interaction = Interaction(
                     conversation_id=conv_id,
                     user_id=self.user_id,
@@ -588,12 +521,7 @@ class OrquestradorStreamService:
                 yield _sse("error", {"message": "Erro interno. Tente novamente."})
 
     async def _fallback_complete(self, db, mode: str, prompt: str, system_prompt: str) -> dict:
-        fallbacks = {
-            "QUICK_SEARCH": ["gemini-2.5-flash"],
-            "CLINICAL_REASONING": ["gpt-4o", "gemini-2.5-flash"],
-            "PRODUCTIVITY": ["gemini-2.5-flash"],
-        }
-        for fallback_model in fallbacks.get(mode, []):
+        for fallback_model in FALLBACK_MODELS.get(mode, []):
             model_info = await get_model_pricing(db, fallback_model)
             if not model_info:
                 continue
@@ -615,60 +543,3 @@ class OrquestradorStreamService:
             "tokens_out": None,
         }
 
-    async def _resolve_clarification_prompt(
-        self, db, conversation_id: UUID, clarification_answers: str
-    ) -> str:
-        """
-        Busca a Interaction pending_clarification da conversa e monta o prompt
-        consolidado: pergunta original + perguntas + respostas do médico.
-        Se não encontrar, retorna apenas as respostas (fallback sem perda).
-        """
-        result = await db.execute(
-            select(Interaction).where(
-                Interaction.conversation_id == conversation_id,
-                Interaction.user_id == self.user_id,
-                Interaction.status == "pending_clarification",
-            ).order_by(Interaction.started_at.desc()).limit(1)
-        )
-        pending = result.scalar_one_or_none()
-
-        if not pending:
-            return clarification_answers
-
-        questions = pending.clarification_questions or []
-        questions_text = "\n".join(f"- {q}" for q in questions)
-
-        consolidated = (
-            f"{pending.prompt_text}\n\n"
-            f"Informações complementares solicitadas:\n{questions_text}\n\n"
-            f"Respostas do médico:\n{clarification_answers}"
-        )
-
-        # Marca a interaction pendente como substituída
-        pending.status = "resolved"
-        await db.flush()
-
-        return consolidated
-
-    async def _ensure_conversation(self, db, conversation_id: UUID | None, prompt: str, folder_id: UUID | None = None) -> UUID:
-        if conversation_id:
-            result = await db.execute(
-                select(Conversation).where(
-                    Conversation.id == conversation_id,
-                    Conversation.user_id == self.user_id,
-                )
-            )
-            conv = result.scalar_one_or_none()
-            if conv:
-                return conv.id
-
-        title = _make_title(prompt)
-        conv = Conversation(
-            user_id=self.user_id,
-            title=title,
-            feature="ORQUESTRADOR",
-            folder_id=folder_id,
-        )
-        db.add(conv)
-        await db.flush()
-        return conv.id

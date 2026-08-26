@@ -7,6 +7,11 @@ import unicodedata
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.services import cache_service
+from app.services.orquestrador_modes import (
+    PHARMA_CHECK_MIN_CONFIDENCE,
+    PHARMA_MODES,
+    VALID_MODES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,21 +100,16 @@ Exemplos — OFF_TOPIC:
 
 Pergunta: {prompt}"""
 
-VALID_MODES = {
-    "QUICK_SEARCH",
-    "CLINICAL_REASONING",
-    "PHARMA_CHECK",
-    "PHARMA_BULA",
-    "PHARMA_RECEITA",
-    "PHARMA_GENERICO",
-    "PRODUCTIVITY",
-    "OFF_TOPIC",
-}
-
-PHARMA_MODES = {"PHARMA_CHECK", "PHARMA_BULA", "PHARMA_RECEITA", "PHARMA_GENERICO"}
-
-# Threshold mínimo de confiança para acionar o PharmaDB.
-PHARMA_CHECK_MIN_CONFIDENCE = 0.90
+# Reexportados de `orquestrador_modes`, que é onde os modos passaram a ser
+# definidos. Mantidos como nome deste módulo porque é daqui que o resto do
+# código já os importava — mover os imports junto seria churn sem ganho.
+__all__ = [
+    "PHARMA_CHECK_MIN_CONFIDENCE",
+    "PHARMA_MODES",
+    "VALID_MODES",
+    "is_off_topic_greeting",
+    "triage",
+]
 
 
 async def triage(prompt: str) -> dict:

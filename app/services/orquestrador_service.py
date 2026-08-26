@@ -16,14 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
-    SYSTEM_PROMPT_CLINICAL_REASONING,
-    SYSTEM_PROMPT_PRODUCTIVITY,
-    SYSTEM_PROMPT_QUICK_SEARCH,
     build_orquestrador_prompt,
 )
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
-    Conversation,
     Interaction,
     InteractionMedication,
     InteractionResponse,
@@ -34,35 +30,29 @@ from app.models.models import (
 from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
-from app.services.orquestrador_stream_service import _check_clarification
+from app.services.orquestrador_modes import (
+    GREETING_REPLY,
+    MODE_MODEL_MAP,
+    MODE_TEMPERATURE_MAP,
+    PHARMA_CHECK_MIN_CONFIDENCE,
+    PHARMA_MODES,
+)
+from app.services.orquestrador_shared import (
+    build_enriched_prompt,
+    check_clarification,
+    ensure_conversation,
+    resolve_clarification_prompt,
+)
 from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
 from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, triage
+from app.services.triage_service import is_off_topic_greeting, triage
 from app.services.usage_service import add_interaction_audit
 
 logger = logging.getLogger(__name__)
 
-
-def _make_title(prompt: str) -> str:
-    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
-    if prompt.startswith('[Imagem:'):
-        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
-    elif '---\n\n' in prompt:
-        prompt = prompt.split('---\n\n', 1)[1]
-    return prompt[:100] + ('...' if len(prompt) > 100 else '')
-
-MODE_MODEL_MAP = {
-    "QUICK_SEARCH": "sonar-pro",
-    "CLINICAL_REASONING": "claude-sonnet-4-6",
-    "PHARMA_CHECK": None,
-    "PHARMA_BULA": None,
-    "PHARMA_RECEITA": None,
-    "PHARMA_GENERICO": None,
-    "PRODUCTIVITY": "gpt-5.4-nano",
-}
 
 # Configuração por modo PharmaDB: (método de busca, método de formatação, rótulo).
 # Os três fluxos compartilham a mesma lógica — só mudam essas três peças.
@@ -72,18 +62,6 @@ PHARMA_MODE_CONFIG = {
     "PHARMA_GENERICO": ("buscar_genericos", "formatar_genericos", "genéricos"),
 }
 
-# temperature=0 para modos clínicos garante respostas consistentes e reproduzíveis
-MODE_TEMPERATURE_MAP = {
-    "QUICK_SEARCH": 0.0,
-    "CLINICAL_REASONING": 0.0,
-    "PRODUCTIVITY": 0.7,
-}
-
-MODE_PROMPT_MAP = {
-    "QUICK_SEARCH": SYSTEM_PROMPT_QUICK_SEARCH,
-    "CLINICAL_REASONING": SYSTEM_PROMPT_CLINICAL_REASONING,
-    "PRODUCTIVITY": SYSTEM_PROMPT_PRODUCTIVITY,
-}
 
 
 class OrquestradorService:
@@ -113,22 +91,24 @@ class OrquestradorService:
 
             # 1. Resolução de prompt: se há respostas de clarificação, monta contexto completo
             if clarification_answers and conversation_id:
-                prompt = await self._resolve_clarification_prompt(conversation_id, clarification_answers)
+                prompt = await resolve_clarification_prompt(self.db, self.user_id, conversation_id, clarification_answers)
 
             # 2. DLP
             dlp_result = await sanitize_prompt_async(prompt)
             sanitized_prompt = dlp_result.sanitized_text
 
+            # 2a. Saudação / mensagem sem conteúdo clínico — atalho local, sem
+            # gastar chamada de modelo. O streaming já tratava; aqui não, e a
+            # triagem PODE devolver OFF_TOPIC: o modo caía em _handle_ai_agent,
+            # onde MODE_MODEL_MAP["OFF_TOPIC"] estourava KeyError e o médico
+            # recebia erro interno por ter dito "bom dia".
+            if is_off_topic_greeting(sanitized_prompt):
+                return await self._responder_saudacao(
+                    conversation_id, sanitized_prompt, dlp_result, folder_id, start_time
+                )
+
             # 2b. Enriquecer prompt com histórico
-            if history:
-                parts = ["[Conversa anterior]"]
-                for msg in history[-10:]:
-                    role_label = "Médico" if msg.role == "user" else "Assistente"
-                    parts.append(f"{role_label}: {msg.content[:800]}")
-                parts.append("[Pergunta atual]")
-                enriched_prompt = "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
-            else:
-                enriched_prompt = sanitized_prompt
+            enriched_prompt = build_enriched_prompt(sanitized_prompt, history)
 
             # 3. Triagem
             # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage
@@ -159,10 +139,10 @@ class OrquestradorService:
 
             # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
             if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
-                clarification = await _check_clarification(sanitized_prompt)
+                clarification = await check_clarification(sanitized_prompt)
                 if not clarification.get("sufficient", True):
                     questions = clarification.get("questions", [])
-                    conv_id = await self._ensure_conversation(conversation_id, sanitized_prompt, folder_id=folder_id)
+                    conv_id = await ensure_conversation(self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
                     pending = Interaction(
                         conversation_id=conv_id,
                         user_id=self.user_id,
@@ -197,7 +177,7 @@ class OrquestradorService:
                     return {**cached, "cache_hit": True}
 
             # 4. Conversation
-            conv_id = await self._ensure_conversation(conversation_id, sanitized_prompt, folder_id=folder_id)
+            conv_id = await ensure_conversation(self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
 
             # 5. Interaction
             interaction = Interaction(
@@ -577,58 +557,53 @@ class OrquestradorService:
         fallback["is_fallback"] = True
         return fallback
 
-    # ── Clarification ─────────────────────────────────────────
+    # Clarificação e resolução de conversa vivem em `orquestrador_shared`:
+    # eram idênticas às do serviço de streaming, com `self.db` como única
+    # diferença.
 
-    async def _resolve_clarification_prompt(
-        self, conversation_id: UUID, clarification_answers: str
-    ) -> str:
-        result = await self.db.execute(
-            select(Interaction).where(
-                Interaction.conversation_id == conversation_id,
-                Interaction.user_id == self.user_id,
-                Interaction.status == "pending_clarification",
-            ).order_by(Interaction.started_at.desc()).limit(1)
+    async def _responder_saudacao(
+        self, conversation_id, sanitized_prompt: str, dlp_result, folder_id, start_time: float
+    ) -> dict:
+        """Espelha o atalho de saudação do streaming, para os dois responderem igual."""
+        conv_id = await ensure_conversation(
+            self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id
         )
-        pending = result.scalar_one_or_none()
-
-        if not pending:
-            return clarification_answers
-
-        questions = pending.clarification_questions or []
-        questions_text = "\n".join(f"- {q}" for q in questions)
-
-        consolidated = (
-            f"{pending.prompt_text}\n\n"
-            f"Informações complementares solicitadas:\n{questions_text}\n\n"
-            f"Respostas do médico:\n{clarification_answers}"
-        )
-
-        pending.status = "resolved"
-        await self.db.flush()
-
-        return consolidated
-
-    # ── Conversation ─────────────────────────────────────────
-
-    async def _ensure_conversation(self, conversation_id: UUID | None, prompt: str, folder_id: UUID | None = None) -> UUID:
-        if conversation_id:
-            result = await self.db.execute(
-                select(Conversation).where(
-                    Conversation.id == conversation_id,
-                    Conversation.user_id == self.user_id,
-                )
-            )
-            conv = result.scalar_one_or_none()
-            if conv:
-                return conv.id
-
-        title = _make_title(prompt)
-        conv = Conversation(
+        interaction = Interaction(
+            conversation_id=conv_id,
             user_id=self.user_id,
-            title=title,
+            company_id=self.company_id,
             feature="ORQUESTRADOR",
-            folder_id=folder_id,
+            mode="OFF_TOPIC",
+            prompt_text=sanitized_prompt,
+            prompt_sanitized=dlp_result.was_sanitized,
+            triage_confidence=1.0,
+            triage_category="OFF_TOPIC",
+            cache_hit=False,
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
-        self.db.add(conv)
+        self.db.add(interaction)
         await self.db.flush()
-        return conv.id
+        self.db.add(InteractionResponse(
+            interaction_id=interaction.id,
+            model_used="off_topic_shortcut",
+            response_text=GREETING_REPLY,
+        ))
+        await self.db.flush()
+
+        return {
+            "status": "ok",
+            "cache_hit": False,
+            "interaction_id": str(interaction.id),
+            "conversation_id": str(conv_id),
+            "mode": "OFF_TOPIC",
+            "triage_confidence": 1.0,
+            "model_used": "off_topic_shortcut",
+            "is_fallback": False,
+            "response_text": GREETING_REPLY,
+            "tokens_in": None,
+            "tokens_out": None,
+            "cost_usd": 0.0,
+            "total_response_time_ms": int((time.monotonic() - start_time) * 1000),
+            "disclaimer": DISCLAIMER_RESPOSTA,
+        }
