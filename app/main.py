@@ -80,10 +80,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────
 _app_origins = [settings.frontend_url, settings.calculadoras_url]
-_cors_origins = _app_origins + settings.embed_allowed_origins
+_cors_origins = _app_origins + settings.embed_allowed_origins + settings.landing_pages_origins
 if not settings.is_production:
     # localhost e 127.0.0.1 são tratados como origens distintas pelo browser
-    for _o in _app_origins:
+    for _o in _app_origins + settings.landing_pages_origins:
         _cors_origins += [
             _o.replace("localhost", "127.0.0.1"),
             _o.replace("127.0.0.1", "localhost"),

@@ -1,0 +1,51 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.limiter import limiter
+from app.models.landing_pages import FinanceAnswer, LandingPage, Submission
+from app.schemas.landing_pages import FinanceSubmissionRequest, SubmissionResponse
+
+router = APIRouter(prefix="/landing-pages", tags=["landing-pages"])
+
+
+async def _get_landing_page_id(db: AsyncSession, slug: str) -> uuid.UUID:
+    result = await db.execute(select(LandingPage.id).where(LandingPage.slug == slug))
+    landing_page_id = result.scalar_one_or_none()
+    if landing_page_id is None:
+        # So acontece se o seed do catalogo (migration 000b) nao rodou nesse banco.
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"LP '{slug}' não cadastrada")
+    return landing_page_id
+
+
+@router.post("/finance/submit", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
+async def submit_finance_interest(
+    request: Request,
+    body: FinanceSubmissionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    landing_page_id = await _get_landing_page_id(db, "finance")
+
+    submission = Submission(
+        landing_page_id=landing_page_id,
+        name=body.name,
+        email=body.email,
+        email_missing=body.email_missing,
+    )
+    db.add(submission)
+    await db.flush()
+
+    db.add(
+        FinanceAnswer(
+            submission_id=submission.id,
+            career_stage=body.career_stage,
+            main_pain_point=body.main_pain_point,
+        )
+    )
+    await db.commit()
+
+    return SubmissionResponse()

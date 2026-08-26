@@ -1,0 +1,149 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Médico 360 — design system.
+ *
+ * Paleta do manual da marca: petróleo / azul profundo (autoridade),
+ * verde vibrante (ação e vitalidade), verde menta e algodão (respiro).
+ * O app é escuro por natureza, então :root já carrega o tema escuro.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+
+  --color-petrol: var(--petrol);
+  --color-petrol-deep: var(--petrol-deep);
+  --color-mint: var(--mint);
+  --color-cotton: var(--cotton);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  --petrol-deep: oklch(0.17 0.028 186);
+  --petrol: oklch(0.235 0.035 185);
+  --brand: oklch(0.8 0.19 155);
+  --brand-foreground: oklch(0.18 0.03 186);
+  --brand-soft: oklch(0.42 0.09 160);
+  --mint: oklch(0.87 0.075 160);
+  --cotton: oklch(0.968 0.012 150);
+
+  --background: oklch(0.17 0.028 186);
+  --foreground: oklch(0.968 0.012 150);
+  --card: oklch(0.222 0.032 185);
+  --card-foreground: oklch(0.968 0.012 150);
+  --popover: oklch(0.222 0.032 185);
+  --popover-foreground: oklch(0.968 0.012 150);
+  --primary: oklch(0.8 0.19 155);
+  --primary-foreground: oklch(0.18 0.03 186);
+  --secondary: oklch(0.27 0.034 185);
+  --secondary-foreground: oklch(0.968 0.012 150);
+  --muted: oklch(0.27 0.034 185);
+  --muted-foreground: oklch(0.73 0.028 165);
+  --accent: oklch(0.31 0.05 172);
+  --accent-foreground: oklch(0.968 0.012 150);
+  --destructive: oklch(0.62 0.2 22);
+  --destructive-foreground: oklch(0.98 0.01 150);
+  --border: oklch(0.32 0.03 184);
+  --input: oklch(0.3 0.03 184);
+  --ring: oklch(0.8 0.19 155);
+
+  --sidebar: oklch(0.145 0.024 186);
+  --sidebar-foreground: oklch(0.92 0.015 155);
+  --sidebar-primary: oklch(0.8 0.19 155);
+  --sidebar-primary-foreground: oklch(0.18 0.03 186);
+  --sidebar-accent: oklch(0.24 0.045 168);
+  --sidebar-accent-foreground: oklch(0.86 0.13 158);
+  --sidebar-border: oklch(0.26 0.026 186);
+  --sidebar-ring: oklch(0.8 0.19 155);
+
+  --shadow-panel: 0 24px 60px -30px oklch(0.1 0.02 186 / 0.85);
+  --glow-brand: 0 0 0 1px color-mix(in oklab, var(--brand) 35%, transparent),
+    0 18px 50px -28px color-mix(in oklab, var(--brand) 60%, transparent);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Grafismo 360: arco recortado de círculo, usado como elemento de marca. */
+@utility arc-360 {
+  border-radius: 9999px;
+  border: 14px solid var(--color-brand);
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  transform: rotate(45deg);
+}
+
+@utility panel {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-panel);
+}
+
+@utility glow-brand {
+  box-shadow: var(--glow-brand);
+}

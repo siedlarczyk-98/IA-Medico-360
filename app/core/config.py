@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # (lista JSON, ex.: '["https://a.com","https://b.com"]') para adicionar parceiros sem alterar código.
     embed_allowed_origins: list[str] = ["https://adminportalmedico360.curseduca.pro"]
 
+    # --- Landing Pages ---
+    # Cada LP (lp-financas, lp-contabilidade, ...) tem seu proprio dominio Railway;
+    # adicionar via env LANDING_PAGES_ORIGINS (lista JSON) conforme sobem novas LPs.
+    landing_pages_origins: list[str] = ["http://localhost:5175"]
+
     # Validação server-to-server de membro Curseduca (plano 2.1). Fail-closed quando
     # habilitada: sem base+key configuradas, o embed retorna 503 em vez de abrir.
     curseduca_validation_enabled: bool = False
