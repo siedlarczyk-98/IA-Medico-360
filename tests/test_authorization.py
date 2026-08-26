@@ -73,6 +73,19 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("PUT", "/api/v1/calculators/{slug}/favorite"): AUTENTICADA,
     ("DELETE", "/api/v1/calculators/{slug}/favorite"): AUTENTICADA,
     ("GET", "/api/v1/calculators/{slug}/history"): AUTENTICADA,
+    # PREVENT roda para um médico logado, como as demais calculadoras —
+    # a rota declara Depends(get_current_user).
+    ("POST", "/api/v1/prevent/calculate"): AUTENTICADA,
+    # Landing pages: formulários de interesse abertos, preenchidos por quem
+    # ainda NÃO tem conta — é esse o propósito da página. A proteção é rate
+    # limit, como nos demais fluxos de entrada, não token.
+    ("GET", "/api/v1/landing-pages/{slug}/check"): PUBLICA,
+    ("POST", "/api/v1/landing-pages/finance/submit"): PUBLICA,
+    ("POST", "/api/v1/landing-pages/accounting/submit"): PUBLICA,
+    ("POST", "/api/v1/landing-pages/partners/submit"): PUBLICA,
+    # Exceção entre as LPs: esta é o formulário exibido DENTRO do produto,
+    # e declara Depends(get_current_user).
+    ("POST", "/api/v1/landing-pages/calculators/submit"): AUTENTICADA,
     # Uploads e uso
     ("POST", "/api/v1/uploads/extract"): AUTENTICADA,
     ("GET", "/api/v1/users/usage"): AUTENTICADA,
