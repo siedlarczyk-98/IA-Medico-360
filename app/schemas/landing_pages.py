@@ -26,3 +26,7 @@ class AccountingSubmissionRequest(_LeadBase):
 
 class SubmissionResponse(BaseModel):
     ok: bool = True
+
+
+class AlreadySubmittedResponse(BaseModel):
+    already_submitted: bool

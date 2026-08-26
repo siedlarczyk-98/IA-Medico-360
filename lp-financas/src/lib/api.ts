@@ -3,6 +3,15 @@ import { getLeadFromUrl } from './lead'
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
+export async function checkAlreadySubmitted(email: string) {
+  const response = await fetch(
+    `${BASE}/api/v1/landing-pages/finance/check?email=${encodeURIComponent(email)}`,
+  )
+  if (!response.ok) return false
+  const data = (await response.json()) as { already_submitted: boolean }
+  return data.already_submitted
+}
+
 export async function submitFinanceInterest(data: FinanceInterestInput) {
   const lead = getLeadFromUrl()
 

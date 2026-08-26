@@ -1,15 +1,16 @@
 import { CheckCircle2, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { submitFinanceInterest } from '@/lib/api'
+import { checkAlreadySubmitted, submitFinanceInterest } from '@/lib/api'
 import {
   careerStages,
   financeInterestSchema,
   painPoints,
   type FinanceInterestInput,
 } from '@/lib/finance-interest-schema'
+import { getLeadFromUrl } from '@/lib/lead'
 
 const emptyForm: FinanceInterestInput = {
   careerStage: '',
@@ -22,8 +23,18 @@ const selectClass =
 export function InterestForm() {
   const [form, setForm] = useState<FinanceInterestInput>(emptyForm)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [status, setStatus] = useState<'idle' | 'sending' | 'done'>('idle')
+  const leadEmail = getLeadFromUrl().email
+  const [status, setStatus] = useState<'checking' | 'idle' | 'sending' | 'done'>(
+    leadEmail ? 'checking' : 'idle',
+  )
   const [serverError, setServerError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!leadEmail) return
+    checkAlreadySubmitted(leadEmail).then((already) => {
+      setStatus(already ? 'done' : 'idle')
+    })
+  }, [leadEmail])
 
   function update<K extends keyof FinanceInterestInput>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -63,6 +74,10 @@ export function InterestForm() {
       setServerError('Algo deu errado no envio. Tente novamente em instantes.')
       setStatus('idle')
     }
+  }
+
+  if (status === 'checking') {
+    return <div className="panel h-40 animate-pulse p-8" aria-hidden />
   }
 
   if (status === 'done') {

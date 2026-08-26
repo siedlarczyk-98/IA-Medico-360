@@ -1,9 +1,9 @@
 import { CheckCircle2, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { submitAccountingInterest } from '@/lib/api'
+import { checkAlreadySubmitted, submitAccountingInterest } from '@/lib/api'
 import {
   accountantStatuses,
   accountingInterestSchema,
@@ -14,6 +14,7 @@ import {
   willingnessToPayOptions,
   type AccountingInterestInput,
 } from '@/lib/accounting-interest-schema'
+import { getLeadFromUrl } from '@/lib/lead'
 
 const emptyForm: AccountingInterestInput = {
   careerStage: '',
@@ -59,8 +60,18 @@ function SelectField({
 export function LeadForm() {
   const [form, setForm] = useState<AccountingInterestInput>(emptyForm)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [status, setStatus] = useState<'idle' | 'sending' | 'done'>('idle')
+  const leadEmail = getLeadFromUrl().email
+  const [status, setStatus] = useState<'checking' | 'idle' | 'sending' | 'done'>(
+    leadEmail ? 'checking' : 'idle',
+  )
   const [serverError, setServerError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!leadEmail) return
+    checkAlreadySubmitted(leadEmail).then((already) => {
+      setStatus(already ? 'done' : 'idle')
+    })
+  }, [leadEmail])
 
   function update<K extends keyof AccountingInterestInput>(key: K, value: AccountingInterestInput[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -109,6 +120,10 @@ export function LeadForm() {
       setServerError('Algo deu errado no envio. Tente novamente em instantes.')
       setStatus('idle')
     }
+  }
+
+  if (status === 'checking') {
+    return <div className="panel h-64 animate-pulse p-10" aria-hidden />
   }
 
   if (status === 'done') {
