@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { tratarEnterParaEnviar, DICA_ENVIO } from '../lib/enterParaEnviar';
 
 interface Props {
   onSend: (answers: string) => void;
 }
 
 export function ClarificationPrompt({ onSend }: Props) {
+  const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   const filled = value.trim().length > 0;
@@ -41,7 +44,7 @@ export function ClarificationPrompt({ onSend }: Props) {
           rows={3}
           value={value}
           onChange={handleInput}
-          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit(); }}
+          onKeyDown={e => tratarEnterParaEnviar(e, { isMobile, submit })}
           placeholder="Ex: Paciente masculino, 62 anos. Sintomas há 3 dias. HAS e DM2 controlados."
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
@@ -50,7 +53,7 @@ export function ClarificationPrompt({ onSend }: Props) {
           }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>
+          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
           <button
             onClick={submit}
             disabled={!filled}

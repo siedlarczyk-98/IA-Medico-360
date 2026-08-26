@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { extractFile, ACCEPTED_FILE_TYPES, type ExtractResult } from '../api/uploads';
 import { chipNeutral, iconButtonBase } from '../lib/styles';
+import { tratarEnterParaEnviar, DICA_ENVIO } from '../lib/enterParaEnviar';
 
 export type Effort = 'rápido' | 'detalhado';
 export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY';
@@ -69,7 +70,7 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
+    tratarEnterParaEnviar(e, { isMobile, submit });
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -357,7 +358,7 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
           </div>
 
           <div style={{ flex: 1 }} />
-          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>⌘ + ⏎ enviar</span>}
+          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
           <button
             onClick={submit}
             disabled={!filled || disabled || sendBlocked}
