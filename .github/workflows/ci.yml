@@ -94,6 +94,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc -b --noEmit
+      # Vitest + jsdom. Roda antes do build: falha de teste deve aparecer como
+      # falha de teste, nao como build verde de codigo quebrado.
+      - run: npm test
       - run: npm run build
 
   calculadoras-app:
