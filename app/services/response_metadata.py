@@ -62,6 +62,50 @@ def build_response_metadata(
     return meta or None
 
 
+def build_metadata_from_cached(payload: dict) -> dict | None:
+    """
+    Mesma coisa, a partir do payload guardado no cache semântico.
+
+    O payload é o `done_payload` já serializado, então as listas do PubMed
+    chegam como dicts (`cited_guidelines_verified`/`newer_guidelines_found`) e
+    não como objetos — daí não dar para reusar `build_response_metadata`.
+
+    Existe para que uma resposta servida do cache entre no histórico com as
+    mesmas referências que a original: sem isto, quem recebesse o cache veria
+    uma resposta sem fontes.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    meta: dict = {}
+
+    citations = payload.get("citations")
+    if isinstance(citations, list) and citations:
+        meta["citations"] = list(citations)
+
+    cited = [
+        {"title": c.get("title"), "pmid": c.get("pmid"), "verified": bool(c.get("verified"))}
+        for c in payload.get("cited_guidelines_verified") or []
+        if isinstance(c, dict)
+    ]
+    newer = [
+        {
+            "pmid": a.get("pmid"),
+            # O payload do cache grava a chave como `title`; a UI espera
+            # `article_title`. Aceita as duas para não depender da versão do
+            # payload que foi gravada.
+            "article_title": a.get("article_title") or a.get("title"),
+            "abstract_snippet": a.get("abstract_snippet") or None,
+        }
+        for a in payload.get("newer_guidelines_found") or []
+        if isinstance(a, dict)
+    ]
+    if cited or newer:
+        meta["pubmed_validation"] = {"cited_verified": cited, "newer_guidelines": newer}
+
+    return meta or None
+
+
 def read_response_metadata(extra_metadata: Any) -> tuple[list[str], dict | None]:
     """
     Lê `extra_metadata` de volta como (citations, pubmed_validation).

@@ -54,7 +54,7 @@ function chipModeFor(mode: string): string | undefined {
  * o agregador o convertia. O bloco existia na ChatView sem ninguém alimentá-lo.
  */
 function pubmedFromDone(
-  event: Extract<StreamEvent, { type: 'done' }>,
+  event: Extract<StreamEvent, { type: 'done' | 'cache_hit' }>,
 ): PubmedValidation | undefined {
   const cited = (event.cited_guidelines_verified ?? []).map(c => ({
     title: c.title, pmid: c.pmid, verified: c.verified,
@@ -199,7 +199,14 @@ function MainApp() {
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
           const chipMode = chipModeFor(event.mode);
-          setMessages(prev => [...prev, { role: 'assistant', content: event.response_text, mode: chipMode }]);
+          const cachedPubmed = pubmedFromDone(event);
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: event.response_text,
+            mode: chipMode,
+            ...(event.citations && event.citations.length > 0 ? { citations: event.citations } : {}),
+            ...(cachedPubmed ? { pubmed_validation: cachedPubmed } : {}),
+          }]);
           return;
         }
         if (event.type === 'token') {

@@ -41,7 +41,7 @@ from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.pubmed_service import validate_with_pubmed
-from app.services.response_metadata import build_response_metadata
+from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, is_off_topic_greeting, triage
@@ -293,7 +293,51 @@ class OrquestradorStreamService:
                         db, mode, sanitized_prompt
                     )
                     if cached is not None:
-                        yield _sse("cache_hit", {**cached, "cache_hit": True})
+                        # A resposta do cache TAMBÉM entra no histórico. Antes
+                        # este caminho retornava aqui, sem criar conversa nem
+                        # interação: a mensagem inteira sumia do histórico, não
+                        # só as referências.
+                        conv_id = await self._ensure_conversation(
+                            db, conversation_id, sanitized_prompt, folder_id=folder_id
+                        )
+                        cached_interaction = Interaction(
+                            conversation_id=conv_id,
+                            user_id=self.user_id,
+                            company_id=self.company_id,
+                            feature="ORQUESTRADOR",
+                            mode=mode,
+                            prompt_text=sanitized_prompt,
+                            prompt_sanitized=dlp_result.was_sanitized,
+                            triage_confidence=confidence,
+                            triage_category=mode,
+                            cache_hit=True,
+                            confidence_score=cached.get("confidence_score"),
+                            specialty_detected=cached.get("specialty_detected"),
+                            topic_detected=cached.get("topic_detected"),
+                            started_at=datetime.now(UTC),
+                            completed_at=datetime.now(UTC),
+                        )
+                        db.add(cached_interaction)
+                        await db.flush()
+                        db.add(InteractionResponse(
+                            interaction_id=cached_interaction.id,
+                            model_used=cached.get("model_used") or "cache",
+                            response_text=cached.get("response_text") or "",
+                            cost_usd=Decimal("0"),
+                            extra_metadata=build_metadata_from_cached(cached),
+                        ))
+                        await db.commit()
+
+                        # Os ids do payload são os da interação que POPULOU o
+                        # cache — de outro usuário, já que o cache é global por
+                        # modo. Devolvê-los faria o cliente apontar para uma
+                        # conversa que não é dele.
+                        yield _sse("cache_hit", {
+                            **cached,
+                            "cache_hit": True,
+                            "conversation_id": str(conv_id),
+                            "interaction_id": str(cached_interaction.id),
+                        })
                         return
 
                 # 4. Conversation + Interaction
@@ -496,6 +540,9 @@ class OrquestradorStreamService:
                         ],
                         "total_response_time_ms": elapsed_ms,
                         "disclaimer": DISCLAIMER_RESPOSTA,
+                        # Sem esta chave, quem recebesse a resposta pelo cache
+                        # a veria sem fontes — a original tem, a cacheada não.
+                        "citations": perplexity_citations,
                     }
                     await store_response(
                         db, mode, _cache_normalized, _cache_embedding, done_payload,
