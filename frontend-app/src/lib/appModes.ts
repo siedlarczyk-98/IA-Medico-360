@@ -12,6 +12,18 @@ export interface AppModeInfo {
   bullets: string[];
 }
 
+/**
+ * Modos expostos na interface.
+ *
+ * O Agregador foi retirado daqui: o produto passou a ser o Orquestrador. A
+ * remoção é só de superfície — o backend, as rotas `/agregador/*` e os testes
+ * continuam intactos, e as conversas antigas seguem no banco. Para trazê-lo de
+ * volta, este array é o ponto de partida (ver git para o que foi removido de
+ * App.tsx e Topbar.tsx junto).
+ *
+ * O tipo `AppMode` mantém 'agregador' porque conversas gravadas ainda carregam
+ * `feature: 'AGREGADOR'` e precisam ser reconhecidas para serem filtradas.
+ */
 export const APP_MODES: AppModeInfo[] = [
   {
     key: 'orquestrador',
@@ -23,18 +35,6 @@ export const APP_MODES: AppModeInfo[] = [
       'A plataforma escolhe e valida a resposta pra você',
       'Checa citações em fontes científicas (PubMed, diretrizes)',
       'Ideal se você não quer se preocupar com qual IA usar',
-    ],
-  },
-  {
-    key: 'agregador',
-    label: 'Agregador',
-    shortLabel: 'Agr.',
-    tagline: 'Para comparar ferramentas',
-    desc: 'Escolha a ferramenta que mais se adapta à sua necessidade. Acesse diretamente Claude, GPT, Gemini e outros — sem triagem automática.',
-    bullets: [
-      'Você escolhe manualmente qual IA usar',
-      'Sem validação científica automática das respostas',
-      'Ideal se você já sabe qual modelo prefere usar',
     ],
   },
 ];

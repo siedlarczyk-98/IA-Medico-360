@@ -3,20 +3,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import { ModeIntro } from './components/ModeIntro';
 import { EmptyState } from './components/EmptyState';
 import { ChatView } from './components/ChatView';
 import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
-import { ModelSelector } from './components/ModelSelector';
-import { EmptyStateAgregador } from './components/EmptyStateAgregador';
 import type { Effort, OrchestratorMode, Attachment } from './components/InputBar';
 import { streamQuery, queryOrquestrador, type Message } from './api/orquestrador';
-import { streamAgregador } from './api/agregador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
-import { MODE_INTRO_SEEN_KEY, MODE_PREFERENCE_KEY, type AppMode } from './lib/appModes';
 
 // Páginas de auth são carregadas sob demanda (não fazem parte da rota principal).
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -67,13 +62,6 @@ function MainApp() {
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [mode, setMode] = useState<AppMode>(
-    () => (localStorage.getItem(MODE_PREFERENCE_KEY) as AppMode | null) ?? 'orquestrador'
-  );
-  const [modeIntroSeen, setModeIntroSeen] = useState(
-    () => localStorage.getItem(MODE_INTRO_SEEN_KEY) === '1'
-  );
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | undefined>();
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
   const [selectedMode, setSelectedMode] = useState<OrchestratorMode>('QUICK_SEARCH');
@@ -82,23 +70,12 @@ function MainApp() {
   const [usageTick, setUsageTick] = useState(0);
   const pendingFolderIdRef = useRef<string | undefined>(undefined);
   const pendingFolderNameRef = useRef<string | undefined>(undefined);
-  const [currentAttachment, setCurrentAttachment] = useState<Attachment | null>(null);
+  // O anexo em edição não é mais espelhado em estado do App: ele só servia para
+  // as checagens de visão do Agregador. O InputBar já entrega o anexo direto ao
+  // `sendMessage`, que é quem precisa dele.
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
-  const [webSearch, setWebSearch] = useState<Record<string, boolean>>({});
 
-  function handleWebSearchChange(modelId: string, enabled: boolean) {
-    setWebSearch(prev => ({ ...prev, [modelId]: enabled }));
-  }
-
-  const activeModelId = selectedModels[0];
-  const isPerplexitySelected = !!activeModelId && activeModelId.includes('sonar');
-  const showWebSearch = mode === 'agregador' && !!activeModelId && !isPerplexitySelected;
-  const activeModelWebSearch = activeModelId ? (webSearch[activeModelId] ?? false) : false;
-
-  function handleWebSearchToggle() {
-    if (activeModelId) handleWebSearchChange(activeModelId, !webSearch[activeModelId]);
-  }
   // Id da mensagem de assistente em streaming, para removê-la se o stream for
   // abortado no meio. Guardamos o id e não o índice: índice envelhece assim que
   // qualquer outra mensagem entra na lista.
@@ -269,104 +246,13 @@ function MainApp() {
     }
   }, [cancelFlush, scheduleFlush]);
 
-  const runAgregador = useCallback(async (prompt: string, priorMessages: Message[], effort: Effort = 'detalhado', file_id?: string) => {
-    if (selectedModels.length === 0) return;
-    abortRef.current?.abort();
-    cancelFlush();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setStreaming(true);
-
-    // Uma mensagem por modelo, identificada pelo model_id
-    const buffers: Record<string, string> = {};
-    // baseIndex garante que buscamos/atualizamos apenas mensagens desta sessão de streaming,
-    // evitando sobrescrever respostas de perguntas anteriores com o mesmo model_id
-    let baseIndex = -1;
-    // Conjunto de model_ids já materializados como mensagem (criação é síncrona;
-    // atualizações subsequentes são agrupadas via requestAnimationFrame).
-    const created = new Set<string>();
-
-    const flushBuffers = () => {
-      setMessages(prev => {
-        const next = [...prev];
-        for (const mid of created) {
-          const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
-          if (idx !== -1) next[idx] = { ...next[idx], content: buffers[mid] };
-        }
-        return next;
-      });
-    };
-
-    const folderIdForStream = pendingFolderIdRef.current;
-
-    try {
-      const history = priorMessages.map(m => ({ role: m.role, content: m.content }));
-      for await (const event of streamAgregador(prompt, selectedModels, ctrl.signal, activeConvId, history, effort, folderIdForStream, webSearch, file_id)) {
-        if (event.type === 'delta') {
-          const mid = event.model_id;
-          buffers[mid] = (buffers[mid] ?? '') + event.delta;
-          if (!created.has(mid)) {
-            created.add(mid);
-            setMessages(prev => {
-              if (baseIndex === -1) baseIndex = prev.length;
-              return [...prev, { role: 'assistant', content: buffers[mid], mode: mid }];
-            });
-          } else {
-            scheduleFlush(flushBuffers);
-          }
-        }
-        if (event.type === 'complete') {
-          if (event.citations && event.citations.length > 0) {
-            const mid = event.model_id;
-            setMessages(prev => {
-              const next = [...prev];
-              const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
-              if (idx !== -1) next[idx] = { ...next[idx], citations: event.citations };
-              return next;
-            });
-          }
-        }
-        if (event.type === 'pubmed') {
-          const mid = event.model_id;
-          setMessages(prev => {
-            const next = [...prev];
-            const idx = next.findIndex((m, i) => i >= baseIndex && m.role === 'assistant' && m.mode === mid);
-            if (idx !== -1) next[idx] = { ...next[idx], pubmed_validation: { cited_verified: event.cited_verified, newer_guidelines: event.newer_guidelines } };
-            return next;
-          });
-        }
-        if (event.type === 'done') {
-          setActiveConvId(event.conversation_id);
-          pendingFolderIdRef.current = undefined;
-          setPendingFolderName(undefined);
-          queryClient.invalidateQueries({ queryKey: ['conversations'] });
-        }
-        if (event.type === 'error') {
-          const errMsg = event.error || 'Tempo limite excedido ou erro no modelo. Tente novamente.';
-          setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${errMsg}` }]);
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Erro ao conectar com o servidor.' }]);
-    } finally {
-      cancelFlush();
-      flushBuffers();
-      setStreaming(false);
-      setUsageTick(t => t + 1);
-    }
-  }, [selectedModels, activeConvId, cancelFlush, scheduleFlush]);
 
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachment?: Attachment) => {
     const priorMessages = messagesRef.current;
-    if (mode === 'orquestrador') {
-      runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages, file_id: attachment?.fileId });
-    } else {
-      runAgregador(text, priorMessages, effort, attachment?.fileId);
-    }
+    runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages, file_id: attachment?.fileId });
     setMessages(prev => [...prev, { role: 'user', content: text, attachmentName: attachment?.name }]);
     setScrollTrigger(n => n + 1);
-  }, [mode, activeConvId, selectedMode, runOrquestrador, runAgregador]);
+  }, [activeConvId, selectedMode, runOrquestrador]);
 
   const sendClarification = useCallback((answers: string) => {
     if (!clarification) return;
@@ -400,56 +286,23 @@ function MainApp() {
       const detail = await getConversation(id);
       setMessages(detail.messages);
       setActiveConvId(detail.id);
-      const isAgregador = detail.feature === 'AGREGADOR';
-      setMode(isAgregador ? 'agregador' : 'orquestrador');
-      if (isAgregador) {
-        const models = [...new Set(
-          detail.messages
-            .filter(m => m.role === 'assistant' && m.mode)
-            .map(m => m.mode as string)
-        )];
-        setSelectedModels(models.length > 0 ? models : selectedModels);
-      }
     } catch {
       handleNew();
     }
-  }, [handleNew, selectedModels]);
-
-  const handleModeChange = useCallback((m: AppMode) => {
-    setMode(m);
-    handleNew();
   }, [handleNew]);
 
   // Referência estável: inline, esta prop invalidaria o memo do Sidebar a cada
   // frame de streaming, re-renderizando toda a lista de conversas.
   const toggleSidebar = useCallback(() => setSidebarOpen(o => !o), []);
 
-  const handleChooseInitialMode = useCallback((m: AppMode) => {
-    setMode(m);
-    localStorage.setItem(MODE_PREFERENCE_KEY, m);
-    localStorage.setItem(MODE_INTRO_SEEN_KEY, '1');
-    setModeIntroSeen(true);
-  }, []);
-
   const showClarification = clarification && !streaming;
-  const agregadorBlocked = mode === 'agregador' && selectedModels.length === 0;
-
-  if (!modeIntroSeen) {
-    return (
-      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <ModeIntro userName={currentUser?.firstName} onChoose={handleChooseInitialMode} />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={handleSelectConversation} open={sidebarOpen} onToggle={toggleSidebar} usageTick={usageTick} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Topbar title={topbarTitle} mode={mode} onModeChange={handleModeChange} onMenuToggle={toggleSidebar} />
+        <Topbar title={topbarTitle} onMenuToggle={toggleSidebar} />
         {pendingFolderName && messages.length === 0 && (
           <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
@@ -459,37 +312,18 @@ function MainApp() {
           </div>
         )}
 
-        {mode === 'agregador' && messages.length > 0 && (
-          <ModelSelector selected={selectedModels} onChange={setSelectedModels} max={1} locked hasImageAttached={currentAttachment?.fileType === 'image'} />
-        )}
-
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {messages.length === 0 && !streaming ? (
-            mode === 'agregador' ? (
-              <>
-                <EmptyStateAgregador selected={selectedModels} onChange={setSelectedModels} hasImageAttached={currentAttachment?.fileType === 'image'} />
-                <InputBar onSend={sendMessage} disabled={streaming} sendBlocked={agregadorBlocked}
-                  placeholder={agregadorBlocked ? 'Selecione um modelo acima para começar.' : undefined}
-                  onAttachmentChange={setCurrentAttachment}
-                  webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
-                  onWebSearchToggle={showWebSearch ? handleWebSearchToggle : undefined} />
-              </>
-            ) : (
-              <>
-                <EmptyState userName={currentUser?.firstName} onModeSelect={setSelectedMode} selectedMode={selectedMode} />
-                <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode}
-                  onAttachmentChange={setCurrentAttachment} />
-              </>
-            )
+            <>
+              <EmptyState userName={currentUser?.firstName} onModeSelect={setSelectedMode} selectedMode={selectedMode} />
+              <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
+            </>
           ) : (
             <>
-              <ChatView messages={messages} streaming={streaming} streamingMode={mode === 'orquestrador' ? selectedMode : undefined} scrollToBottomTrigger={scrollTrigger} />
+              <ChatView messages={messages} streaming={streaming} streamingMode={selectedMode} scrollToBottomTrigger={scrollTrigger} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
-                : <InputBar onSend={sendMessage} disabled={streaming} sendBlocked={agregadorBlocked} mode={mode === 'orquestrador' ? selectedMode : undefined} onModeChange={mode === 'orquestrador' ? setSelectedMode : undefined}
-                    onAttachmentChange={setCurrentAttachment}
-                    webSearchEnabled={showWebSearch ? activeModelWebSearch : undefined}
-                    onWebSearchToggle={showWebSearch ? handleWebSearchToggle : undefined} />
+                : <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
               }
             </>
           )}

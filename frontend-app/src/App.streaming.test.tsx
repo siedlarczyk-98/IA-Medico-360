@@ -17,7 +17,6 @@ import userEvent from '@testing-library/user-event';
 import App from './App';
 import { renderComProvedores, streamEmLote, tokensEDone } from './test/utils';
 import { streamQuery } from './api/orquestrador';
-import { MODE_INTRO_SEEN_KEY, MODE_PREFERENCE_KEY } from './lib/appModes';
 
 vi.mock('./lib/auth', () => ({
   isAuthenticated: () => true,
@@ -52,11 +51,6 @@ vi.mock('./api/usage', () => ({
   getUserUsage: vi.fn(async () => ({ has_limit: false, usage_percentage: null, week_reset_at: null })),
 }));
 
-vi.mock('./api/agregador', () => ({
-  fetchModels: vi.fn(async () => []),
-  streamAgregador: vi.fn(),
-}));
-
 vi.mock('./api/orquestrador', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api/orquestrador')>()),
   streamQuery: vi.fn(),
@@ -76,10 +70,6 @@ async function enviarPergunta(texto = 'monte uma anamnese') {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Sem estas marcas o App abre na tela de escolha de modo (ModeIntro) e o
-  // campo de pergunta nem chega a ser renderizado.
-  localStorage.setItem(MODE_INTRO_SEEN_KEY, '1');
-  localStorage.setItem(MODE_PREFERENCE_KEY, 'orquestrador');
 });
 
 describe('streaming do orquestrador', () => {

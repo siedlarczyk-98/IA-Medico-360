@@ -35,11 +35,19 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const usage = useUserUsage(usageTick);
   const queryClient = useQueryClient();
 
-  const { data: conversations = [] } = useQuery<ConversationSummary[]>({
+  const { data: todasConversas = [] } = useQuery<ConversationSummary[]>({
     queryKey: ['conversations'],
     queryFn: listConversations,
     staleTime: 60_000,
   });
+
+  // Conversas antigas do Agregador saem da lista junto com o modo. Sem este
+  // filtro elas continuariam abríveis, e abrir uma delas levaria a uma tela
+  // que não existe mais. O dado permanece no banco — isto é só a vista.
+  const conversations = useMemo(
+    () => todasConversas.filter(c => c.feature !== 'AGREGADOR'),
+    [todasConversas],
+  );
 
   const { data: folders = [] } = useQuery<Folder[]>({
     queryKey: ['folders'],
