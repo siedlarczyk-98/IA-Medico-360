@@ -13,6 +13,11 @@ import { DropZoneNoPasta } from './sidebar/DropZoneNoPasta';
 import { groupByDate } from './sidebar/groupByDate';
 import { ctxItemStyle, menuItemStyle } from './sidebar/styles';
 
+export const SIDEBAR_PINNED_KEY = 'm360_sidebar_pinned';
+
+/** Largura do trilho colapsado, em px. */
+const RAIL_WIDTH = 56;
+
 interface Props {
   activeId?: string;
   onNew: (folderId?: string, folderName?: string) => void;
@@ -118,12 +123,20 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
   });
 
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
+  // `pinned` é a preferência persistida (fixada por clique); `hovering` é
+  // efêmero. A barra abre quando qualquer um dos dois é verdadeiro.
+  //
+  // Chave nova, e não a antiga 'sidebarCollapsed': o valor '1' significava
+  // COLAPSADA e agora significaria FIXADA ABERTA — o oposto. Reaproveitá-la
+  // entregaria a cada usuário existente exatamente o contrário do que ele
+  // tinha. Com chave nova todo mundo começa colapsado, que é o pedido.
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_PINNED_KEY) === '1'; } catch { return false; }
   });
   useEffect(() => {
-    try { localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
-  }, [collapsed]);
+    try { localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? '1' : '0'); } catch { /* ignore */ }
+  }, [pinned]);
+  const [hovering, setHovering] = useState(false);
 
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -244,17 +257,16 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
 
   if (isMobile && !open) return null;
 
-  if (!isMobile && collapsed) {
-    return (
-      <aside style={{
-        width: 56, flexShrink: 0, height: '100%',
+  const rail = (
+      <aside data-testid="sidebar-rail" style={{
+        width: RAIL_WIDTH, flexShrink: 0, height: '100%',
         borderRight: '1px solid var(--line2)',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         background: '#fbfdf7', padding: '14px 0',
       }}>
         <button
-          onClick={() => setCollapsed(false)}
-          title="Expandir barra lateral"
+          onClick={() => setPinned(true)}
+          title="Fixar barra lateral aberta"
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', marginBottom: 14 }}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -316,11 +328,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           />
         )}
       </aside>
-    );
-  }
+  );
 
   const aside = (
-    <aside style={{
+    <aside data-testid="sidebar-panel" style={{
       width: 260, flexShrink: 0, height: '100%',
       borderRight: '1px solid var(--line2)',
       display: 'flex', flexDirection: 'column',
@@ -334,7 +345,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       {!isMobile && (
         <div style={{ padding: '10px 10px 0', display: 'flex', justifyContent: 'flex-end' }}>
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={() => { setPinned(false); setHovering(false); }}
             title="Recolher barra lateral"
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}
           >
@@ -642,13 +653,37 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     </aside>
   );
 
-  if (!isMobile) return aside;
+  if (isMobile) {
+    return (
+      <>
+        <div onClick={onToggle} style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.35)' }} />
+        {aside}
+      </>
+    );
+  }
 
+  // Fixada por clique: ocupa espaço no fluxo e o hover não a fecha.
+  if (pinned) return aside;
+
+  // Não fixada: o trilho fica no fluxo e o painel aparece SOBREPOSTO no hover.
+  // Sobrepor em vez de empurrar é deliberado — com push, o chat inteiro se
+  // desloca toda vez que o mouse encosta na borda esquerda da tela.
   return (
-    <>
-      <div onClick={onToggle} style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.35)' }} />
-      {aside}
-    </>
+    <div
+      style={{ position: 'relative', width: RAIL_WIDTH, flexShrink: 0, height: '100%' }}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+    >
+      {rail}
+      {hovering && (
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 150,
+          boxShadow: '2px 0 20px rgba(0,0,0,0.12)',
+        }}>
+          {aside}
+        </div>
+      )}
+    </div>
   );
 }
 
