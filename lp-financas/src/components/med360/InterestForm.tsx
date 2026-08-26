@@ -31,9 +31,12 @@ export function InterestForm() {
 
   useEffect(() => {
     if (!leadEmail) return
-    checkAlreadySubmitted(leadEmail).then((already) => {
-      setStatus(already ? 'done' : 'idle')
-    })
+    checkAlreadySubmitted(leadEmail)
+      .then((already) => setStatus(already ? 'done' : 'idle'))
+      // Falha no check (rede, CORS, backend fora) nao pode travar a LP num
+      // skeleton pra sempre — melhor deixar preencher de novo do que
+      // esconder o form inteiro por causa de um GET que falhou.
+      .catch(() => setStatus('idle'))
   }, [leadEmail])
 
   function update<K extends keyof FinanceInterestInput>(key: K, value: string) {
