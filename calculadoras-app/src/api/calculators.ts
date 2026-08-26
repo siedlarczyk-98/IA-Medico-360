@@ -153,3 +153,20 @@ export function favoriteCalculator(slug: string): Promise<void> {
 export function unfavoriteCalculator(slug: string): Promise<void> {
   return withoutBody('DELETE', `/calculators/${slug}/favorite`);
 }
+
+export class AlreadyRequestedError extends Error {}
+
+export async function requestCalculators(calculators: string[], notifyOnAvailability: boolean): Promise<void> {
+  const res = await fetch(`${BASE}/api/v1/landing-pages/calculators/submit`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ calculators, notify_on_availability: notifyOnAvailability }),
+  });
+
+  if (res.status === 409) throw new AlreadyRequestedError('Você já registrou esse pedido');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
+  }
+}

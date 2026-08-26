@@ -3,6 +3,7 @@ import type { CalculatorListItem } from '../api/calculators';
 import { useCalculators } from '../hooks/useCalculators';
 import { useToggleFavorite } from '../hooks/useFavorites';
 import { CalculatorCard } from '../components/CalculatorCard';
+import { RequestCalculatorModal } from '../components/RequestCalculatorModal';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { logout } from '../lib/auth';
 import { getSpecialtyStyle } from '../lib/specialtyStyles';
@@ -13,6 +14,7 @@ export function CalculatorsListPage() {
   const toggleFavorite = useToggleFavorite();
   const [specialtyFilter, setSpecialtyFilter] = useState<'all' | 'favorites' | string>('all');
   const [search, setSearch] = useState('');
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
 
   const favoriteCount = useMemo(
     () => (allCalculators ?? []).filter(c => c.is_favorite).length,
@@ -244,6 +246,27 @@ export function CalculatorsListPage() {
               ▾
             </span>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setRequestModalOpen(true)}
+            style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 14px',
+              borderRadius: 20,
+              border: '1px solid var(--petrol)',
+              background: 'none',
+              color: 'var(--petrol)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            + Solicitar calculadora
+          </button>
         </div>
 
         {isLoading && (
@@ -283,6 +306,8 @@ export function CalculatorsListPage() {
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
       `}</style>
+
+      <RequestCalculatorModal open={requestModalOpen} onClose={() => setRequestModalOpen(false)} />
     </div>
   );
 }

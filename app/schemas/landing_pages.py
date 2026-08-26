@@ -24,6 +24,13 @@ class AccountingSubmissionRequest(_LeadBase):
     pain_points: list[str] = Field(min_length=1)
 
 
+class CalculatorSubmissionRequest(BaseModel):
+    """Vem de dentro do produto (medico ja autenticado) — nome/email sao os da conta."""
+
+    calculators: list[str] = Field(min_length=1)
+    notify_on_availability: bool = False
+
+
 class SubmissionResponse(BaseModel):
     ok: bool = True
 

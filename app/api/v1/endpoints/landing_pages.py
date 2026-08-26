@@ -4,18 +4,22 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.landing_pages import (
     AccountingAnswer,
     AccountingPainSelection,
+    CalculatorSelection,
     FinanceAnswer,
     LandingPage,
     Submission,
 )
+from app.models.models import User
 from app.schemas.landing_pages import (
     AccountingSubmissionRequest,
     AlreadySubmittedResponse,
+    CalculatorSubmissionRequest,
     FinanceSubmissionRequest,
     SubmissionResponse,
 )
@@ -132,6 +136,46 @@ async def submit_accounting_interest(
     db.add_all(
         AccountingPainSelection(submission_id=submission.id, option=option)
         for option in body.pain_points
+    )
+    await db.commit()
+
+    return SubmissionResponse()
+
+
+@router.post("/calculators/submit", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
+async def submit_calculators_interest(
+    request: Request,
+    body: CalculatorSubmissionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Solicitação feita de dentro do módulo de calculadoras (médico logado) —
+    diferente das outras LPs, aqui a identidade vem da conta, não do body."""
+    existing = await db.execute(
+        select(Submission.id)
+        .join(LandingPage, LandingPage.id == Submission.landing_page_id)
+        .where(LandingPage.slug == "calculators", Submission.user_id == current_user.id)
+        .limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Você já registrou esse pedido")
+
+    landing_page_id = await _get_landing_page_id(db, "calculators")
+
+    submission = Submission(
+        landing_page_id=landing_page_id,
+        user_id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        notify_on_availability=body.notify_on_availability,
+    )
+    db.add(submission)
+    await db.flush()
+
+    db.add_all(
+        CalculatorSelection(submission_id=submission.id, option=option)
+        for option in body.calculators
     )
     await db.commit()
 

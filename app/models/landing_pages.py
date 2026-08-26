@@ -38,11 +38,16 @@ class Submission(Base):
     landing_page_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey(f"{SCHEMA}.landing_pages.id", ondelete="RESTRICT"), nullable=False
     )
+    # Preenchido quando a submissao vem de dentro do produto (medico logado).
+    # Fica nulo no fluxo de embed anonimo (accounting/finance), onde so ha
+    # nome/email soltos vindos da URL.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     name: Mapped[str | None] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(255))
     email_missing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     phone: Mapped[str | None] = mapped_column(String(30))
     lgpd_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notify_on_availability: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     landing_page: Mapped["LandingPage"] = relationship(back_populates="submissions")
