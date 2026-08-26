@@ -60,7 +60,21 @@ class AccountingAnswer(Base):
     income_method: Mapped[str] = mapped_column(String(100), nullable=False)
     accountant_status: Mapped[str] = mapped_column(String(100), nullable=False)
     revenue_range: Mapped[str] = mapped_column(String(100), nullable=False)
-    main_pain_point: Mapped[str] = mapped_column(String(100), nullable=False)
+    willingness_to_pay: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    submission: Mapped["Submission"] = relationship()
+
+
+class AccountingPainSelection(Base):
+    __tablename__ = "accounting_pain_selections"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.submissions.id", ondelete="CASCADE"), nullable=False
+    )
+    option: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     submission: Mapped["Submission"] = relationship()

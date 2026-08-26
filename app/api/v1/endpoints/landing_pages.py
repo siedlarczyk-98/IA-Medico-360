@@ -6,8 +6,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.models.landing_pages import FinanceAnswer, LandingPage, Submission
-from app.schemas.landing_pages import FinanceSubmissionRequest, SubmissionResponse
+from app.models.landing_pages import (
+    AccountingAnswer,
+    AccountingPainSelection,
+    FinanceAnswer,
+    LandingPage,
+    Submission,
+)
+from app.schemas.landing_pages import (
+    AccountingSubmissionRequest,
+    FinanceSubmissionRequest,
+    SubmissionResponse,
+)
 
 router = APIRouter(prefix="/landing-pages", tags=["landing-pages"])
 
@@ -45,6 +55,43 @@ async def submit_finance_interest(
             career_stage=body.career_stage,
             main_pain_point=body.main_pain_point,
         )
+    )
+    await db.commit()
+
+    return SubmissionResponse()
+
+
+@router.post("/accounting/submit", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
+async def submit_accounting_interest(
+    request: Request,
+    body: AccountingSubmissionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    landing_page_id = await _get_landing_page_id(db, "accounting")
+
+    submission = Submission(
+        landing_page_id=landing_page_id,
+        name=body.name,
+        email=body.email,
+        email_missing=body.email_missing,
+    )
+    db.add(submission)
+    await db.flush()
+
+    db.add(
+        AccountingAnswer(
+            submission_id=submission.id,
+            career_stage=body.career_stage,
+            income_method=body.income_method,
+            accountant_status=body.accountant_status,
+            revenue_range=body.revenue_range,
+            willingness_to_pay=body.willingness_to_pay,
+        )
+    )
+    db.add_all(
+        AccountingPainSelection(submission_id=submission.id, option=option)
+        for option in body.pain_points
     )
     await db.commit()
 
