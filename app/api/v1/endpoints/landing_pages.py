@@ -13,6 +13,8 @@ from app.models.landing_pages import (
     CalculatorSelection,
     FinanceAnswer,
     LandingPage,
+    PartnerAnswer,
+    PartnerCategorySelection,
     Submission,
 )
 from app.models.models import User
@@ -21,6 +23,7 @@ from app.schemas.landing_pages import (
     AlreadySubmittedResponse,
     CalculatorSubmissionRequest,
     FinanceSubmissionRequest,
+    PartnerSubmissionRequest,
     SubmissionResponse,
 )
 
@@ -29,7 +32,7 @@ router = APIRouter(prefix="/landing-pages", tags=["landing-pages"])
 # Slugs vem do catalogo (migration 000b). Validar contra essa lista antes de
 # consultar evita 500 generico quando o path param e arbitrario (GET /check
 # recebe slug do usuario, diferente dos POSTs de submit que usam slug fixo).
-ALLOWED_SLUGS = {"finance", "accounting", "benefits", "calculators"}
+ALLOWED_SLUGS = {"finance", "accounting", "benefits", "calculators", "partners"}
 
 
 async def _get_landing_page_id(db: AsyncSession, slug: str) -> uuid.UUID:
@@ -136,6 +139,43 @@ async def submit_accounting_interest(
     db.add_all(
         AccountingPainSelection(submission_id=submission.id, option=option)
         for option in body.pain_points
+    )
+    await db.commit()
+
+    return SubmissionResponse()
+
+
+@router.post("/partners/submit", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
+async def submit_partner_interest(
+    request: Request,
+    body: PartnerSubmissionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if await _already_submitted(db, "partners", body.email):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Você já registrou seu interesse nesta LP")
+
+    landing_page_id = await _get_landing_page_id(db, "partners")
+
+    submission = Submission(
+        landing_page_id=landing_page_id,
+        name=body.name,
+        email=body.email,
+        email_missing=body.email_missing,
+    )
+    db.add(submission)
+    await db.flush()
+
+    db.add(
+        PartnerAnswer(
+            submission_id=submission.id,
+            career_stage=body.career_stage,
+            desired_brands=body.desired_brands,
+        )
+    )
+    db.add_all(
+        PartnerCategorySelection(submission_id=submission.id, option=option)
+        for option in body.categories
     )
     await db.commit()
 

@@ -24,6 +24,12 @@ class AccountingSubmissionRequest(_LeadBase):
     pain_points: list[str] = Field(min_length=1)
 
 
+class PartnerSubmissionRequest(_LeadBase):
+    career_stage: str = Field(min_length=1, max_length=100)
+    categories: list[str] = Field(min_length=1)
+    desired_brands: str | None = Field(default=None, max_length=300)
+
+
 class CalculatorSubmissionRequest(BaseModel):
     """Vem de dentro do produto (medico ja autenticado) — nome/email sao os da conta."""
 

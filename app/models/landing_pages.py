@@ -114,6 +114,35 @@ class BenefitSelection(Base):
     submission: Mapped["Submission"] = relationship()
 
 
+class PartnerAnswer(Base):
+    __tablename__ = "partner_answers"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.submissions.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    career_stage: Mapped[str] = mapped_column(String(100), nullable=False)
+    desired_brands: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    submission: Mapped["Submission"] = relationship()
+
+
+class PartnerCategorySelection(Base):
+    __tablename__ = "partner_category_selections"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.submissions.id", ondelete="CASCADE"), nullable=False
+    )
+    option: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    submission: Mapped["Submission"] = relationship()
+
+
 class CalculatorSelection(Base):
     __tablename__ = "calculator_selections"
     __table_args__ = {"schema": SCHEMA}
