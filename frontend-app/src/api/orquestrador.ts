@@ -16,6 +16,14 @@ export interface PubmedValidation {
 }
 
 export interface Message {
+  /**
+   * Identidade estável da mensagem enquanto ela está sendo transmitida.
+   * Existe para que os handlers de streaming localizem a mensagem por id e não
+   * por índice: o índice é resolvido de forma assíncrona pelo React e produzia
+   * mensagens duplicadas/congeladas. Ausente em mensagens vindas do histórico,
+   * que nunca são atualizadas em vôo.
+   */
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   mode?: string;

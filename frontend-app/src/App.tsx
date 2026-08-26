@@ -35,6 +35,15 @@ const BACKEND_TO_CHIP: Record<string, string> = {
   PRODUCTIVITY:      'produtividade',
 };
 
+// Identidade da mensagem em streaming. Contador de módulo, e não crypto.randomUUID(),
+// porque o valor precisa ser gerado de forma síncrona em qualquer ambiente (o
+// jsdom dos testes inclusive) e só precisa ser único dentro da aba.
+let streamMsgSeq = 0;
+function nextStreamMsgId(): string {
+  streamMsgSeq += 1;
+  return `stream-${streamMsgSeq}`;
+}
+
 // OFF_TOPIC (saudações/mensagens triviais) não ganha badge — é só uma resposta simples.
 function chipModeFor(mode: string): string | undefined {
   if (mode === 'OFF_TOPIC') return undefined;
@@ -90,8 +99,10 @@ function MainApp() {
   function handleWebSearchToggle() {
     if (activeModelId) handleWebSearchChange(activeModelId, !webSearch[activeModelId]);
   }
-  // Tracks the index of the assistant message being streamed, so we can remove it if the stream is aborted mid-way
-  const streamMsgIndexRef = useRef<number>(-1);
+  // Id da mensagem de assistente em streaming, para removê-la se o stream for
+  // abortado no meio. Guardamos o id e não o índice: índice envelhece assim que
+  // qualquer outra mensagem entra na lista.
+  const streamMsgIdRef = useRef<string | null>(null);
   // Ref sempre atual das mensagens — evita recriar `sendMessage` a cada token.
   // A regra `react-hooks/refs` reclama de escrita em ref durante o render, e em
   // geral tem razao. Aqui a alternativa (atribuir num useEffect) faz a ref
@@ -131,11 +142,13 @@ function MainApp() {
     abortRef.current?.abort();
     cancelFlush();
 
-    // Remove partial assistant message left by an aborted previous stream
-    const prevStreamIdx = streamMsgIndexRef.current;
-    if (prevStreamIdx !== -1) {
-      setMessages(prev => prev.slice(0, prevStreamIdx));
-      streamMsgIndexRef.current = -1;
+    // Remove a mensagem parcial deixada por um stream anterior abortado.
+    // Filtra pelo id em vez de truncar a lista a partir de um índice: o índice
+    // antigo derrubaria junto qualquer mensagem que tenha entrado depois dele.
+    const prevStreamId = streamMsgIdRef.current;
+    if (prevStreamId !== null) {
+      setMessages(prev => prev.filter(m => m.id !== prevStreamId));
+      streamMsgIdRef.current = null;
     }
 
     const ctrl = new AbortController();
@@ -144,14 +157,24 @@ function MainApp() {
     setClarification(null);
 
     const acc = { current: '' };
-    let assistantIndex = -1;
+    // Atribuído de forma SÍNCRONA na chegada do primeiro token (ver abaixo).
+    // Já foi um índice resolvido dentro do updater do setMessages, o que criava
+    // uma mensagem nova a cada token que chegasse antes do React processar a
+    // atualização anterior — a resposta saía picotada em vários balões.
+    let assistantId: string | null = null;
+
+    // Localiza a mensagem pelo id. Devolve -1 se ela já não estiver na lista
+    // (conversa trocada, stream abortado), e nesse caso o update é descartado.
+    const indexOfAssistant = (list: Message[]) =>
+      assistantId === null ? -1 : list.findIndex(m => m.id === assistantId);
 
     const flushAssistant = () => {
-      if (assistantIndex === -1) return;
+      if (assistantId === null) return;
       setMessages(prev => {
-        if (assistantIndex >= prev.length) return prev;
+        const idx = indexOfAssistant(prev);
+        if (idx === -1) return prev;
         const next = [...prev];
-        next[assistantIndex] = { ...next[assistantIndex], content: acc.current };
+        next[idx] = { ...next[idx], content: acc.current };
         return next;
       });
     };
@@ -181,12 +204,15 @@ function MainApp() {
         }
         if (event.type === 'token') {
           acc.current += event.text;
-          if (assistantIndex === -1) {
-            setMessages(prev => {
-              assistantIndex = prev.length;
-              streamMsgIndexRef.current = prev.length;
-              return [...prev, { role: 'assistant', content: acc.current }];
-            });
+          if (assistantId === null) {
+            // A marcação acontece AQUI, fora do updater, para que o próximo
+            // token já veja `assistantId` preenchido mesmo que o React ainda
+            // não tenha aplicado este setMessages. O updater fica puro — o que
+            // também o torna seguro sob a dupla invocação do StrictMode.
+            const id = nextStreamMsgId();
+            assistantId = id;
+            streamMsgIdRef.current = id;
+            setMessages(prev => [...prev, { id, role: 'assistant', content: acc.current }]);
           } else {
             scheduleFlush(flushAssistant);
           }
@@ -197,12 +223,13 @@ function MainApp() {
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
           const chipMode = chipModeFor(event.mode);
-          if (assistantIndex !== -1) {
+          if (assistantId !== null) {
             setMessages(prev => {
-              if (assistantIndex >= prev.length) return prev;
+              const idx = indexOfAssistant(prev);
+              if (idx === -1) return prev;
               const next = [...prev];
-              next[assistantIndex] = {
-                ...next[assistantIndex],
+              next[idx] = {
+                ...next[idx],
                 mode: chipMode,
                 ...(event.citations && event.citations.length > 0 ? { citations: event.citations } : {}),
               };
@@ -233,7 +260,10 @@ function MainApp() {
     } finally {
       cancelFlush();
       flushAssistant();
-      streamMsgIndexRef.current = -1;
+      // Só limpa se a ref ainda apontar para ESTE stream. Num abort, quem
+      // aborta já leu a ref e a reatribuiu antes deste `finally` rodar —
+      // limpar sem checar apagaria a marcação do stream que acabou de começar.
+      if (streamMsgIdRef.current === assistantId) streamMsgIdRef.current = null;
       setStreaming(false);
       setUsageTick(t => t + 1);
     }

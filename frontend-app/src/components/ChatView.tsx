@@ -88,7 +88,7 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
 
 const UserMessage = memo(function UserMessage({ content, attachmentName }: { content: string; attachmentName?: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
+    <div data-testid="user-message" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
       <div style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
         {attachmentName && (
           <div style={{
@@ -120,7 +120,7 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
   ), [content]);
 
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 24 }}>
+    <div data-testid="assistant-message" style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 24 }}>
       <AssistantAvatar />
       <div style={{ flex: 1, minWidth: 0, paddingTop: 4 }}>
         {mode && (
