@@ -18,14 +18,7 @@ from app.services.orquestrador_modes import (
     VALID_MODES,
     OrquestradorMode,
 )
-from app.services.orquestrador_shared import build_enriched_prompt, make_title
-
-
-class MensagemFake:
-    def __init__(self, role, content):
-        self.role = role
-        self.content = content
-
+from app.services.orquestrador_shared import make_title
 
 # ── Modos ────────────────────────────────────────────────────────────────────
 
@@ -62,39 +55,8 @@ def test_enum_e_a_lista_de_modos_validos_nao_divergem():
     assert VALID_MODES == {m.value for m in OrquestradorMode}
 
 
-# ── Montagem de contexto ─────────────────────────────────────────────────────
-
-def test_sem_historico_o_prompt_passa_intacto():
-    # O prompt de cache depende disto: histórico embutido daria a cada conversa
-    # uma chave própria e o cache nunca acertaria.
-    assert build_enriched_prompt("dor torácica", None) == "dor torácica"
-    assert build_enriched_prompt("dor torácica", []) == "dor torácica"
-
-
-def test_historico_vira_bloco_rotulado():
-    prompt = build_enriched_prompt("e agora?", [
-        MensagemFake("user", "paciente com cefaleia"),
-        MensagemFake("assistant", "considerar enxaqueca"),
-    ])
-    assert "[Conversa anterior]" in prompt
-    assert "Médico: paciente com cefaleia" in prompt
-    assert "Assistente: considerar enxaqueca" in prompt
-    # A pergunta atual precisa ser a ultima coisa que o modelo le.
-    assert prompt.rstrip().endswith("Médico: e agora?")
-
-
-def test_janela_de_historico_mantem_as_mensagens_MAIS_RECENTES():
-    historico = [MensagemFake("user", f"msg{i}") for i in range(30)]
-    prompt = build_enriched_prompt("atual", historico)
-
-    assert "msg29" in prompt
-    assert "msg0" not in prompt
-
-
-def test_mensagem_longa_e_truncada():
-    prompt = build_enriched_prompt("atual", [MensagemFake("user", "x" * 5000)])
-    assert "x" * 800 in prompt
-    assert "x" * 801 not in prompt
+# A montagem de contexto (antes `build_enriched_prompt`, hoje turnos com
+# orçamento de tokens) tem casa própria em tests/test_contexto.py.
 
 
 # ── Titulo ───────────────────────────────────────────────────────────────────

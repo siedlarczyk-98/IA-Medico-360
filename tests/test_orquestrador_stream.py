@@ -86,9 +86,12 @@ def sem_dependencias_externas(monkeypatch):
     async def _sem_redis_set(*a, **k):
         return None
 
+    # Sem `raising=False`: se o nome mudar de novo, é melhor o teste quebrar do
+    # que passar a não desligar nada silenciosamente — foi o que aconteceu
+    # quando `_check_clarification` virou `check_clarification`.
     monkeypatch.setattr(
-        "app.services.orquestrador_stream_service._check_clarification",
-        _sem_clarificacao, raising=False,
+        "app.services.orquestrador_stream_service.check_clarification",
+        _sem_clarificacao,
     )
     # Sem isso cada teste paga o timeout de conexão do Redis, que não existe no CI.
     monkeypatch.setattr("app.services.cache_service.get_json", _sem_redis_get)

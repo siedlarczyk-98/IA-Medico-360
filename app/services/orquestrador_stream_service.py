@@ -43,9 +43,9 @@ from app.services.orquestrador_modes import (
     PHARMA_MODES,
 )
 from app.services.orquestrador_shared import (
-    build_enriched_prompt,
     check_clarification,
     ensure_conversation,
+    load_context_messages,
     resolve_clarification_prompt,
 )
 from app.services.pricing import calculate_cost, get_model_pricing
@@ -153,8 +153,11 @@ class OrquestradorStreamService:
                     })
                     return
 
-                # 2b. Enriquecer prompt com histórico (cache usa sanitized_prompt; modelo usa enriched_prompt)
-                enriched_prompt = build_enriched_prompt(sanitized_prompt, history)
+                # 2b. Histórico: lido do BANCO, não do que o cliente mandou.
+                # O parâmetro `history` da requisição é ignorado de propósito —
+                # ver `conversation_history.load_history`. O cache continua
+                # usando `sanitized_prompt`, sem histórico.
+                history_messages = await load_context_messages(db, self.user_id, conversation_id)
 
                 # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
                 # resolver o sub-modo correto (bula, receita, genérico, interação),
@@ -316,11 +319,12 @@ class OrquestradorStreamService:
                 try:
                     async for token in provider.stream(
                         model_id,
-                        enriched_prompt,
+                        sanitized_prompt,
                         system_prompt=system_prompt,
                         temperature=temperature,
                         image_content=image_content,
                         max_tokens=max_tokens,
+                        history=history_messages,
                     ):
                         if token.delta:
                             full_text += token.delta
@@ -333,7 +337,9 @@ class OrquestradorStreamService:
                 except Exception as e:
                     logger.warning(f"Stream falhou em {model_id}: {e}. Tentando fallback completo...")
                     is_fallback = True
-                    fallback_result = await self._fallback_complete(db, mode, enriched_prompt, system_prompt)
+                    fallback_result = await self._fallback_complete(
+                        db, mode, sanitized_prompt, system_prompt, history=history_messages
+                    )
                     full_text = fallback_result.get("text", "")
                     tokens_in = fallback_result.get("tokens_in")
                     tokens_out = fallback_result.get("tokens_out")
@@ -520,14 +526,16 @@ class OrquestradorStreamService:
                 await db.rollback()
                 yield _sse("error", {"message": "Erro interno. Tente novamente."})
 
-    async def _fallback_complete(self, db, mode: str, prompt: str, system_prompt: str) -> dict:
+    async def _fallback_complete(
+        self, db, mode: str, prompt: str, system_prompt: str, history: list[dict] | None = None
+    ) -> dict:
         for fallback_model in FALLBACK_MODELS.get(mode, []):
             model_info = await get_model_pricing(db, fallback_model)
             if not model_info:
                 continue
             try:
                 provider = get_provider_by_type(model_info.provider_type)
-                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt)
+                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt, history=history)
                 return {
                     "text": response.text,
                     "model_id": fallback_model,

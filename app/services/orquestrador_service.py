@@ -31,6 +31,7 @@ from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
+    FALLBACK_MODELS,
     GREETING_REPLY,
     MODE_MODEL_MAP,
     MODE_TEMPERATURE_MAP,
@@ -38,9 +39,9 @@ from app.services.orquestrador_modes import (
     PHARMA_MODES,
 )
 from app.services.orquestrador_shared import (
-    build_enriched_prompt,
     check_clarification,
     ensure_conversation,
+    load_context_messages,
     resolve_clarification_prompt,
 )
 from app.services.pricing import calculate_cost
@@ -107,8 +108,10 @@ class OrquestradorService:
                     conversation_id, sanitized_prompt, dlp_result, folder_id, start_time
                 )
 
-            # 2b. Enriquecer prompt com histórico
-            enriched_prompt = build_enriched_prompt(sanitized_prompt, history)
+            # 2b. Histórico lido do BANCO, não do que o cliente mandou. O
+            # parâmetro `history` da requisição é ignorado de propósito —
+            # ver `conversation_history.load_history`.
+            history_messages = await load_context_messages(self.db, self.user_id, conversation_id)
 
             # 3. Triagem
             # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage
@@ -198,11 +201,11 @@ class OrquestradorService:
 
             # 5. Roteamento pro agente
             if mode == "PHARMA_CHECK":
-                agent_response = await self._handle_pharma_check(enriched_prompt, interaction.id)
+                agent_response = await self._handle_pharma_check(sanitized_prompt, interaction.id)
             elif mode in PHARMA_MODE_CONFIG:
-                agent_response = await self._handle_pharma(enriched_prompt, mode)
+                agent_response = await self._handle_pharma(sanitized_prompt, mode)
             else:
-                agent_response = await self._handle_ai_agent(mode, enriched_prompt, image_content=image_content)
+                agent_response = await self._handle_ai_agent(mode, sanitized_prompt, image_content=image_content, history=history_messages)
 
             # 6. Salvar resposta
             cost = Decimal("0")
@@ -372,7 +375,7 @@ class OrquestradorService:
 
 # ── Agente de IA ─────────────────────────────────────────
 
-    async def _handle_ai_agent(self, mode: str, prompt: str, image_content: dict | None = None) -> dict:
+    async def _handle_ai_agent(self, mode: str, prompt: str, image_content: dict | None = None, history: list[dict] | None = None) -> dict:
         model_id = MODE_MODEL_MAP[mode]
         system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
 
@@ -392,7 +395,7 @@ class OrquestradorService:
 
         try:
             response = await provider.complete(
-                model_id, prompt, system_prompt=system_prompt, temperature=temperature, image_content=image_content
+                model_id, prompt, system_prompt=system_prompt, temperature=temperature, image_content=image_content, history=history
             )
             return {
                 "text": response.text,
@@ -403,18 +406,12 @@ class OrquestradorService:
             }
         except Exception as e:
             logger.warning(f"Falha no {model_id}: {e}. Tentando fallback...")
-            return await self._try_fallback(mode, prompt, system_prompt, str(e))
+            return await self._try_fallback(mode, prompt, system_prompt, str(e), history=history)
 
     # ── Fallback ─────────────────────────────────────────────
 
-    async def _try_fallback(self, mode: str, prompt: str, system_prompt: str, original_error: str) -> dict:
-        fallbacks = {
-            "QUICK_SEARCH": ["gemini-2.5-flash"],
-            "CLINICAL_REASONING": ["gpt-4o", "gemini-2.5-flash"],
-            "PRODUCTIVITY": ["gemini-2.5-flash"],
-        }
-
-        for fallback_model in fallbacks.get(mode, []):
+    async def _try_fallback(self, mode: str, prompt: str, system_prompt: str, original_error: str, history: list[dict] | None = None) -> dict:
+        for fallback_model in FALLBACK_MODELS.get(mode, []):
             result = await self.db.execute(
                 select(ModelPricing).where(
                     ModelPricing.model_id == fallback_model,
@@ -427,7 +424,7 @@ class OrquestradorService:
 
             try:
                 provider = get_provider_by_type(model_info.provider_type)
-                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt)
+                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt, history=history)
                 return {
                     "text": response.text,
                     "model_id": fallback_model,

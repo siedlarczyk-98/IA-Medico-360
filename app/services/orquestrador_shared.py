@@ -21,15 +21,14 @@ from sqlalchemy import select
 from app.core.prompts import SYSTEM_PROMPT_CLARIFICATION
 from app.models.models import Conversation, Interaction
 from app.services.ai_providers import OpenAIProvider
+from app.services.context_budget import (
+    DEFAULT_HISTORY_TOKEN_BUDGET,
+    fit_turns_to_budget,
+    turns_to_messages,
+)
+from app.services.conversation_history import load_history
 
 logger = logging.getLogger(__name__)
-
-# Janela de histórico enviada ao modelo. São MENSAGENS, não turnos — dez
-# mensagens são cinco idas e voltas.
-HISTORY_WINDOW = 10
-# Corte por mensagem, em caracteres. É uma aproximação grosseira de orçamento
-# de contexto; a Fase 4 do plano a substitui por contagem de tokens.
-HISTORY_CHARS_PER_MESSAGE = 800
 
 _clarification_provider = OpenAIProvider()
 _CLARIFICATION_MODEL = "gpt-5.4-nano"
@@ -44,23 +43,29 @@ def make_title(prompt: str) -> str:
     return prompt[:100] + ('...' if len(prompt) > 100 else '')
 
 
-def build_enriched_prompt(sanitized_prompt: str, history) -> str:
+async def load_context_messages(
+    db,
+    user_id: UUID,
+    conversation_id: UUID | None,
+    budget_tokens: int = DEFAULT_HISTORY_TOKEN_BUDGET,
+) -> list[dict]:
     """
-    Achata o histórico num único prompt de usuário.
+    Histórico da conversa como lista de turnos, pronta para o provider.
 
-    O prompt de cache continua sendo o `sanitized_prompt` sem histórico — a
-    separação é deliberada, senão cada conversa teria chave de cache própria e
-    o cache nunca acertaria.
+    Substituiu o achatamento em texto (`[Conversa anterior] Médico: ...`) que
+    era enviado como uma única mensagem `user`. Duas mudanças:
+
+    - Os papéis viram papéis de verdade. O modelo distinguia quem falou o quê
+      por um rótulo dentro do texto, que ele podia ignorar ou confundir com
+      conteúdo; agora a distinção é estrutural.
+    - O corte é por orçamento de tokens, não por 800 caracteres por mensagem.
+
+    O prompt usado para o cache semântico continua sendo o texto atual sem
+    histórico — a separação é deliberada, senão cada conversa teria chave de
+    cache própria e o cache nunca acertaria.
     """
-    if not history:
-        return sanitized_prompt
-
-    parts = ["[Conversa anterior]"]
-    for msg in history[-HISTORY_WINDOW:]:
-        role_label = "Médico" if msg.role == "user" else "Assistente"
-        parts.append(f"{role_label}: {msg.content[:HISTORY_CHARS_PER_MESSAGE]}")
-    parts.append("[Pergunta atual]")
-    return "\n".join(parts) + f"\nMédico: {sanitized_prompt}"
+    turns = await load_history(db, user_id, conversation_id)
+    return turns_to_messages(fit_turns_to_budget(turns, budget_tokens))
 
 
 async def ensure_conversation(

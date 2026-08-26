@@ -58,11 +58,11 @@ class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
     @abstractmethod
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         ...
 
     @abstractmethod
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         ...
 
 
@@ -82,7 +82,7 @@ class AnthropicProvider(BaseProvider):
             {"type": "text", "text": prompt},
         ]
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         payload: dict = {
@@ -90,7 +90,7 @@ class AnthropicProvider(BaseProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
             "system": sys_prompt,
-            "messages": [{"role": "user", "content": self._build_user_content(prompt, image_content)}],
+            "messages": [*(history or []), {"role": "user", "content": self._build_user_content(prompt, image_content)}],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()
@@ -133,7 +133,7 @@ class AnthropicProvider(BaseProvider):
             _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
             return result
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         tokens_in: int | None = None
@@ -143,7 +143,7 @@ class AnthropicProvider(BaseProvider):
             "stream": True,
             "temperature": temperature,
             "system": sys_prompt,
-            "messages": [{"role": "user", "content": self._build_user_content(prompt, image_content)}],
+            "messages": [*(history or []), {"role": "user", "content": self._build_user_content(prompt, image_content)}],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()
@@ -241,7 +241,7 @@ class OpenAIProvider(BaseProvider):
             ],
         }]
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         async with async_llm_span("openai", model_id, prompt) as span:
@@ -306,6 +306,7 @@ class OpenAIProvider(BaseProvider):
                     "model": model_id,
                     "messages": [
                         {"role": "system", "content": sys_prompt},
+                        *(history or []),
                         {"role": "user", "content": self._build_user_content(prompt, image_content)},
                     ],
                     "max_completion_tokens": max_tokens,
@@ -327,7 +328,7 @@ class OpenAIProvider(BaseProvider):
             _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
             return result
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
         span = start_llm_span("openai", model_id, prompt)
@@ -399,6 +400,7 @@ class OpenAIProvider(BaseProvider):
                     "model": model_id,
                     "messages": [
                         {"role": "system", "content": sys_prompt},
+                        *(history or []),
                         {"role": "user", "content": self._build_user_content(prompt, image_content)},
                     ],
                     "max_completion_tokens": max_tokens,
@@ -454,7 +456,25 @@ class GeminiProvider(BaseProvider):
         parts.append({"text": prompt})
         return parts
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
+    @staticmethod
+    def _history_to_contents(history: list[dict] | None) -> list:
+        """
+        Traduz o histórico para o formato do Gemini.
+
+        Duas diferenças em relação aos outros provedores: o papel do assistente
+        chama-se `model`, e o texto vai dentro de `parts` em vez de `content`.
+        """
+        if not history:
+            return []
+        return [
+            {
+                "role": "model" if m.get("role") == "assistant" else "user",
+                "parts": [{"text": m.get("content", "")}],
+            }
+            for m in history
+        ]
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
@@ -463,7 +483,7 @@ class GeminiProvider(BaseProvider):
         client = get_client()
         payload: dict = {
             "system_instruction": {"parts": [{"text": sys_prompt}]},
-            "contents": [{"parts": self._build_parts(prompt, image_content)}],
+            "contents": [*self._history_to_contents(history), {"role": "user", "parts": self._build_parts(prompt, image_content)}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
         }
         if web_search:
@@ -496,7 +516,7 @@ class GeminiProvider(BaseProvider):
             _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
             return result
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
@@ -505,7 +525,7 @@ class GeminiProvider(BaseProvider):
         client = get_client()
         payload: dict = {
             "system_instruction": {"parts": [{"text": sys_prompt}]},
-            "contents": [{"parts": self._build_parts(prompt, image_content)}],
+            "contents": [*self._history_to_contents(history), {"role": "user", "parts": self._build_parts(prompt, image_content)}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
         }
         if web_search:
@@ -584,7 +604,7 @@ class PerplexityProvider(BaseProvider):
             return f"[Descrição automática da imagem]\n{image_content['fallback_text']}\n\n---\n\n{prompt}"
         return prompt
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         prompt = self._apply_image_fallback(prompt, image_content)
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
         client = get_client()
@@ -599,6 +619,11 @@ class PerplexityProvider(BaseProvider):
                     "model": model_id,
                     "messages": [
                         {"role": "system", "content": sys_prompt},
+                        # A API exige alternância estrita começando por `user`
+                        # depois do system. `fit_turns_to_budget` já garante
+                        # isso ao nunca devolver histórico iniciado por
+                        # assistente.
+                        *(history or []),
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": max_tokens,
@@ -623,12 +648,12 @@ class PerplexityProvider(BaseProvider):
             _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
             return result
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         # Perplexity não retorna usage no modo streaming — usamos complete() para
         # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
         span = start_llm_span("perplexity", model_id, prompt)
         try:
-            response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content, max_tokens=max_tokens)
+            response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content, max_tokens=max_tokens, history=history)
             chunk_size = 20
             text = response.text
             for i in range(0, len(text), chunk_size):
@@ -670,13 +695,30 @@ class DlpEnforcingProvider(BaseProvider):
     def __init__(self, inner: BaseProvider):
         self._inner = inner
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> ProviderResponse:
-        safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
-        return await self._inner.complete(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens)
+    async def _sanitize_history(self, history: list[dict] | None) -> list[dict] | None:
+        """
+        Sanitiza cada mensagem do histórico.
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096) -> AsyncIterator[StreamToken]:
+        Sem isto, a rede de segurança teria um buraco do tamanho da conversa:
+        o prompt atual sairia limpo, mas o mesmo dado de paciente escrito três
+        mensagens atrás viajaria intacto para o provedor a cada nova pergunta.
+        """
+        if not history:
+            return history
+        return [
+            {**m, "content": (await sanitize_prompt_async(m.get("content", ""))).sanitized_text}
+            for m in history
+        ]
+
+    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
-        async for token in self._inner.stream(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens):
+        safe_history = await self._sanitize_history(history)
+        return await self._inner.complete(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history)
+
+    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
+        safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
+        safe_history = await self._sanitize_history(history)
+        async for token in self._inner.stream(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history):
             yield token
 
 
