@@ -37,6 +37,7 @@ from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_stream_service import _check_clarification
 from app.services.pricing import calculate_cost
 from app.services.pubmed_service import validate_with_pubmed
+from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, triage
@@ -296,6 +297,14 @@ class OrquestradorService:
                     abstract_snippet=a.abstract_snippet or None,
                     relevance_score=0.0,
                 ))
+
+            # Referências junto da resposta, para sobreviverem ao reload.
+            # `citations` vem só do caminho de streaming (Perplexity); aqui
+            # normalmente é None e o helper simplesmente as omite.
+            ir.extra_metadata = build_response_metadata(
+                pubmed=pubmed,
+                citations=agent_response.get("citations"),
+            )
 
             # 11. Audit log
             add_interaction_audit(

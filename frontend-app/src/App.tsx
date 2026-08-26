@@ -8,7 +8,7 @@ import { ChatView } from './components/ChatView';
 import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import type { Effort, OrchestratorMode, Attachment } from './components/InputBar';
-import { streamQuery, queryOrquestrador, type Message } from './api/orquestrador';
+import { streamQuery, queryOrquestrador, type Message, type StreamEvent, type PubmedValidation } from './api/orquestrador';
 import { isAuthenticated, isTokenExpired } from './lib/auth';
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
@@ -43,6 +43,29 @@ function nextStreamMsgId(): string {
 function chipModeFor(mode: string): string | undefined {
   if (mode === 'OFF_TOPIC') return undefined;
   return BACKEND_TO_CHIP[mode] ?? mode;
+}
+
+/**
+ * Converte as listas do PubMed do formato do evento `done` para o formato que
+ * a ChatView consome. Devolve undefined quando não há nada — um bloco
+ * "Referências verificadas" vazio é pior que bloco nenhum.
+ *
+ * Sem isto o orquestrador nunca exibia PubMed: o dado vinha no `done`, mas só
+ * o agregador o convertia. O bloco existia na ChatView sem ninguém alimentá-lo.
+ */
+function pubmedFromDone(
+  event: Extract<StreamEvent, { type: 'done' }>,
+): PubmedValidation | undefined {
+  const cited = (event.cited_guidelines_verified ?? []).map(c => ({
+    title: c.title, pmid: c.pmid, verified: c.verified,
+  }));
+  const newer = (event.newer_guidelines_found ?? []).map(a => ({
+    pmid: a.pmid,
+    article_title: a.article_title ?? a.title ?? '',
+    abstract_snippet: a.abstract_snippet ?? '',
+  }));
+  if (cited.length === 0 && newer.length === 0) return undefined;
+  return { cited_verified: cited, newer_guidelines: newer };
 }
 
 interface PendingClarification {
@@ -200,6 +223,7 @@ function MainApp() {
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
           const chipMode = chipModeFor(event.mode);
+          const pubmed = pubmedFromDone(event);
           if (assistantId !== null) {
             setMessages(prev => {
               const idx = indexOfAssistant(prev);
@@ -209,6 +233,7 @@ function MainApp() {
                 ...next[idx],
                 mode: chipMode,
                 ...(event.citations && event.citations.length > 0 ? { citations: event.citations } : {}),
+                ...(pubmed ? { pubmed_validation: pubmed } : {}),
               };
               return next;
             });
@@ -284,7 +309,14 @@ function MainApp() {
     setPendingFolderName(undefined);
     try {
       const detail = await getConversation(id);
-      setMessages(detail.messages);
+      // O backend devolve o modo cru ("PRODUCTIVITY"); ao vivo a mensagem passa
+      // por chipModeFor. Sem esta conversão a conversa reaberta mostrava o nome
+      // interno do modo no lugar do chip — mesma resposta com duas aparências.
+      setMessages(detail.messages.map(m =>
+        m.role === 'assistant' && m.mode
+          ? { ...m, mode: chipModeFor(m.mode) }
+          : m
+      ));
       setActiveConvId(detail.id);
     } catch {
       handleNew();

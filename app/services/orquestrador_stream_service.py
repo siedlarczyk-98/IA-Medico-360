@@ -41,6 +41,7 @@ from app.services.ai_providers import OpenAIProvider, get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.pubmed_service import validate_with_pubmed
+from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import PHARMA_CHECK_MIN_CONFIDENCE, PHARMA_MODES, is_off_topic_greeting, triage
@@ -424,6 +425,14 @@ class OrquestradorStreamService:
                         abstract_snippet=a.abstract_snippet or None,
                         relevance_score=0.0,
                     ))
+
+                # Referências junto da resposta. Sem isto elas só existiam no
+                # evento SSE `done` e sumiam ao reabrir a conversa — o "as
+                # referências se perdem no histórico" relatado.
+                ir.extra_metadata = build_response_metadata(
+                    pubmed=pubmed,
+                    citations=perplexity_citations,
+                )
 
                 add_interaction_audit(
                     db,

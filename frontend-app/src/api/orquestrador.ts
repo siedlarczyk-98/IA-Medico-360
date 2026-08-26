@@ -39,7 +39,16 @@ export type StreamEvent =
   | { type: 'token';         text: string }
   | { type: 'cache_hit';     response_text: string; conversation_id: string; mode: string; model_used: string }
   | { type: 'clarification'; conversation_id: string; questions: string[] }
-  | { type: 'done';          conversation_id: string; mode: string; model_used: string; citations?: string[] }
+  // O backend nomeia as listas do PubMed de forma diferente do que a UI
+  // consome (`pubmed_validation`); a conversão fica no handler do `done`.
+  | { type: 'done';
+      conversation_id: string;
+      mode: string;
+      model_used: string;
+      citations?: string[];
+      cited_guidelines_verified?: Array<{ title: string; pmid: string | null; verified: boolean }>;
+      newer_guidelines_found?: Array<{ pmid: string; title?: string; article_title?: string; abstract_snippet?: string }>;
+    }
   | { type: 'error';         status?: string; message: string };
 
 export interface StreamParams {

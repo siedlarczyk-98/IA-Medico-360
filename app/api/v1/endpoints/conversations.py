@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.models import Conversation, Interaction, User
 from app.schemas.conversations import ConversationDetail, ConversationMessage, ConversationSummary
+from app.services.response_metadata import read_response_metadata
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -72,19 +73,25 @@ async def get_conversation(
         if conv.feature == "AGREGADOR":
             for resp in sorted(interaction.responses, key=lambda r: r.created_at):
                 if not resp.error_message:
+                    citations, pubmed = read_response_metadata(resp.extra_metadata)
                     messages.append(ConversationMessage(
                         role="assistant",
                         content=resp.response_text,
                         mode=resp.model_used,
+                        citations=citations,
+                        pubmed_validation=pubmed,
                     ))
         else:
             # ORQUESTRADOR — single response, mode comes from interaction
             for resp in sorted(interaction.responses, key=lambda r: r.created_at):
                 if not resp.error_message:
+                    citations, pubmed = read_response_metadata(resp.extra_metadata)
                     messages.append(ConversationMessage(
                         role="assistant",
                         content=resp.response_text,
                         mode=interaction.mode,
+                        citations=citations,
+                        pubmed_validation=pubmed,
                     ))
                     break
 
