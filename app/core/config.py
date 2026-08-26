@@ -3,11 +3,12 @@ Médico 360 — Configuração centralizada via pydantic-settings.
 Carrega variáveis de .env ou variáveis de ambiente do Railway.
 """
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -63,8 +64,26 @@ class Settings(BaseSettings):
 
     # --- Landing Pages ---
     # Cada LP (lp-financas, lp-contabilidade, ...) tem seu proprio dominio Railway;
-    # adicionar via env LANDING_PAGES_ORIGINS (lista JSON) conforme sobem novas LPs.
-    landing_pages_origins: list[str] = ["http://localhost:5175"]
+    # adicionar via env LANDING_PAGES_ORIGINS conforme sobem novas LPs.
+    # `NoDecode` desliga o auto-parse JSON do pydantic-settings pra esse campo: por
+    # padrao ele roda ANTES de qualquer field_validator e derruba o processo inteiro
+    # no import se a env nao vier com colchetes/aspas exatos (foi o que aconteceu em
+    # producao). O validator abaixo assume o parsing e aceita formatos mais tolerantes.
+    landing_pages_origins: Annotated[list[str], NoDecode] = ["http://localhost:5175"]
+
+    @field_validator("landing_pages_origins", mode="before")
+    @classmethod
+    def _parse_landing_pages_origins(cls, v: object) -> object:
+        """Aceita JSON array (`["a","b"]`), CSV (`a,b`) ou uma URL unica (`a`)."""
+        if not isinstance(v, str) or not v.strip():
+            return v
+        stripped = v.strip()
+        if stripped.startswith("["):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+        return [origin.strip() for origin in stripped.split(",") if origin.strip()]
 
     # Validação server-to-server de membro Curseduca (plano 2.1). Fail-closed quando
     # habilitada: sem base+key configuradas, o embed retorna 503 em vez de abrir.
