@@ -57,22 +57,42 @@ resposta pobre e não entende por quê.
 
 ---
 
-## 3. Contagem de tokens é estimativa, não medição
+## 3. ~~Contagem de tokens não medida~~ — MEDIDO em 2026-08-27
 
-**O que é.** `app/services/context_budget.py` estima tokens por uma razão fixa de
-3,5 caracteres por token. Não há tokenizador.
+**Resultado.** 54 interações com `tokens_in` gravado, isolando as que não tinham
+histórico, anexo nem busca web somados à contagem. Medianas de chars/token:
 
-**Por que assim.** `tiktoken` só vale para OpenAI e o projeto fala com quatro
-provedores; um tokenizador por provedor seria dependência pesada para uma
-decisão que só precisa ser conservadora. A razão é deliberadamente baixa: errar
-para menos manda menos contexto (seguro), errar para mais estoura a janela.
+| Modelo | n | Mediana | Mínimo |
+|---|---|---|---|
+| `claude-sonnet-4-6` (raciocínio clínico) | 19 | **3.17** | 2.55 |
+| `claude-sonnet-4-20250514` | 20 | 4.13 | 2.75 |
+| `gpt-5.4-nano` | 15 | 4.40 | 3.32 |
+| global | 54 | 3.55 | 2.55 |
 
-**Sintoma se estiver errada:** o médico recebe menos contexto do que caberia. Não
-quebra, só empobrece — e por isso é invisível.
+`CHARS_PER_TOKEN` passou de 3.5 para **3.2**, seguindo a mediana do modelo que
+carrega o uso clínico. Há teste travando o valor dentro do intervalo medido.
 
-**O que falta:** medir o erro real da estimativa contra o `tokens_in` que os
-providers já devolvem em `ProviderResponse`. O dado para calibrar já está sendo
-gravado em `interaction_responses.tokens_in`, sem ninguém olhar.
+**Duas correções de raciocínio que valem mais que o número:**
+
+1. O 3.5 estava documentado como "conservador". Não era — é a mediana global, e
+   mediana erra metade das vezes para cada lado (46% de subestimativa na
+   medição). O número estava razoável; a justificativa escrita é que era falsa.
+
+2. Subestimar aqui é **inofensivo**. O orçamento de 6000 tokens está muito
+   abaixo da janela dos modelos (200k no Sonnet); errar 30% para menos manda
+   7800 em vez de 6000 e nada estoura. O orçamento é controle de custo e ruído,
+   não proteção contra limite técnico — o que inverte a intuição usual e
+   justifica calibrar pela mediana em vez de por percentil pessimista.
+
+**Armadilhas da medição, registradas para quem repetir:** o `prompt_tokens` do
+Perplexity inclui o conteúdo buscado na web (razões absurdas, excluído da
+amostra); e a partir de 2026-08-27 o histórico e o contexto de pasta viajam como
+mensagens separadas, entrando no `tokens_in` sem estar no `prompt_text` —
+amostras a partir dessa data não servem para calibrar.
+
+**O que ainda falta:** uma razão por modelo em vez de uma global. Hoje a
+estimativa fica folgada no GPT e no Sonnet antigo, o que só faz enviar um pouco
+menos de contexto do que caberia.
 
 ---
 

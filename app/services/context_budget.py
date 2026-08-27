@@ -9,17 +9,40 @@ mensagens curtas cabiam folgadas, dez mensagens longas estouravam.
 **A contagem é uma estimativa, não exata.** Não há tokenizador aqui de
 propósito: `tiktoken` só vale para OpenAI, e o projeto fala com quatro
 provedores. Um tokenizador por provedor seria dependência pesada para uma
-decisão que só precisa ser conservadora — o objetivo é não estourar a janela,
-e errar para menos é seguro (manda-se menos contexto), errar para mais não é.
+decisão que precisa apenas ser razoável.
+
+**Errar para menos aqui é inofensivo.** O orçamento (6000 tokens) está muito
+abaixo da janela de qualquer modelo em uso — 200k no Sonnet. Subestimar em 30%
+significa enviar 7800 tokens em vez de 6000: nada estoura. O orçamento é
+controle de CUSTO e de ruído, não proteção contra limite técnico. Isso
+inverte a intuição comum sobre contagem de tokens, e é o motivo de a razão
+abaixo ser calibrada pela mediana e não por um percentil pessimista.
 """
 
 from dataclasses import dataclass
 
-# Português técnico com jargão médico e siglas fragmenta mais que inglês comum.
-# 3.5 chars/token é conservador de propósito: subestimar a razão superestima a
-# contagem, e superestimar a contagem faz cortar contexto a mais — o lado
-# seguro do erro.
-CHARS_PER_TOKEN = 3.5
+# Razão caracteres/token, medida contra dados reais em 2026-08-27.
+#
+# Fonte: 54 interações com `tokens_in` gravado, isolando as que não tinham
+# histórico, anexo nem busca web somados à contagem (ver docs/debitos.md #3).
+# Medianas por modelo:
+#
+#   claude-sonnet-4-6 (raciocínio clínico)  3.17   ← o que carrega o uso clínico
+#   claude-sonnet-4-20250514                4.13
+#   gpt-5.4-nano                            4.40
+#   global                                  3.55
+#   pior caso observado                     2.55
+#
+# O valor segue a mediana do modelo de raciocínio clínico, arredondada para
+# baixo: é ele que recebe os textos longos e densos — evolução, exames, siglas —
+# que tokenizam pior. Nos demais a estimativa fica folgada, o que só faz enviar
+# um pouco menos de contexto do que caberia.
+#
+# Antes disto o valor era 3.5, descrito no código como "conservador". Não era:
+# 3.5 é a mediana GLOBAL, e uma mediana erra metade das vezes para cada lado —
+# a medição mostrou subestimativa em 46% dos casos. O número estava razoável, o
+# raciocínio declarado sobre ele é que estava errado.
+CHARS_PER_TOKEN = 3.2
 
 # Piso por mensagem: mesmo uma resposta de uma palavra custa a marcação de
 # papel e os delimitadores que o provedor acrescenta.

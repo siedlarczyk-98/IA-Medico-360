@@ -226,3 +226,39 @@ async def test_contexto_montado_sai_no_formato_dos_providers(db, user, conversat
 
     assert all(set(m) == {"role", "content"} for m in mensagens)
     assert all(m["role"] in {"user", "assistant"} for m in mensagens)
+
+
+# ── Calibração da estimativa contra dados reais ──────────────────────────────
+# Medida em 2026-08-27 sobre 54 interações com `tokens_in` gravado, isolando as
+# que não tinham histórico, anexo nem busca web somados à contagem.
+
+def test_razao_esta_dentro_do_intervalo_medido():
+    """
+    A razão precisa ficar entre o pior caso observado e a mediana global.
+
+    Abaixo de 2.55 (pior caso real) a estimativa vira pessimismo sem base —
+    corta contexto que caberia. Acima de 3.55 (mediana global) ela passa a
+    subestimar sistematicamente até no texto mais leve.
+    """
+    from app.services.context_budget import CHARS_PER_TOKEN
+
+    assert 2.55 <= CHARS_PER_TOKEN <= 3.55, (
+        "valor fora do intervalo medido em produção — se a medição foi refeita, "
+        "atualize os limites junto com o número e a fonte em docs/debitos.md"
+    )
+
+
+def test_estimativa_bate_com_caso_real_de_texto_clinico_denso():
+    """
+    Caso real da amostra: 2928 caracteres de evolução clínica custaram 1112
+    tokens no claude-sonnet-4-6 (razão 2.63). A estimativa não pode errar feio
+    justamente no tipo de texto que o produto mais processa.
+    """
+    from app.services.context_budget import estimate_tokens
+
+    estimado = estimate_tokens("x" * 2928)
+    real = 1112
+
+    assert 0.7 <= estimado / real <= 1.5, (
+        f"estimou {estimado} para um texto que custou {real} tokens de verdade"
+    )
