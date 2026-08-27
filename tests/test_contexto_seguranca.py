@@ -75,11 +75,17 @@ async def test_contexto_de_conversa_alheia_nao_e_montado(
     assert mensagens == []
 
 
-async def test_endpoint_aceita_history_no_corpo_sem_usa_lo(as_user, db, user, conversation_factory):
+async def test_cliente_antigo_que_ainda_manda_history_nao_quebra(
+    as_user, db, user, conversation_factory
+):
     """
-    O campo continua no schema (clientes antigos ainda o enviam), mas é inerte.
-    Este teste existe para que remover o campo um dia seja uma decisão
-    consciente, e não uma quebra silenciosa de contrato.
+    O campo `history` foi REMOVIDO do schema em 2026-08-27, depois que o
+    frontend parou de enviá-lo. Clientes antigos que ainda o mandam continuam
+    funcionando porque o FastAPI descarta campo desconhecido — este teste trava
+    essa compatibilidade.
+
+    Se um dia o modelo passar a usar `extra="forbid"`, este teste falha e avisa
+    que aquela mudança quebra clientes em campo.
     """
     conv = await conversation_factory(user)
     await _gravar_troca(db, conv, user, "pergunta real", "resposta real")

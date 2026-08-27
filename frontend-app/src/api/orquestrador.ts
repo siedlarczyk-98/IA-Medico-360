@@ -70,7 +70,6 @@ export interface StreamParams {
   force?: boolean;
   effort?: 'rápido' | 'detalhado';
   mode?: string;
-  history?: { role: 'user' | 'assistant'; content: string }[];
   folder_id?: string;
   file_id?: string;
   file_ids?: string[];
@@ -87,7 +86,6 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.force                 ? { force: params.force }                               : {}),
       effort: params.effort ?? 'detalhado',
       ...(params.mode                  ? { mode: params.mode }                                 : {}),
-      history: params.history ?? [],
       ...(params.folder_id             ? { folder_id: params.folder_id }                       : {}),
       ...(params.file_ids?.length      ? { file_ids: params.file_ids }                         : {}),
     }),
@@ -118,7 +116,6 @@ export async function* streamQuery(
       ...(params.force               ? { force: params.force }                             : {}),
       effort: params.effort ?? 'detalhado',
       ...(params.mode                ? { mode: params.mode }                               : {}),
-      history: params.history ?? [],
       ...(params.folder_id           ? { folder_id: params.folder_id }                     : {}),
       ...(params.file_ids?.length    ? { file_ids: params.file_ids }                       : {}),
     }),

@@ -30,7 +30,6 @@ from app.models.models import (
     InteractionResponse,
     PubmedValidation,
 )
-from app.schemas.agregador import ConversationMessage
 from app.services.ai_providers import get_provider_by_type
 from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
@@ -83,7 +82,6 @@ class OrquestradorStreamService:
         clarification_answers: str | None = None,
         effort: str = "detalhado",
         mode: str | None = None,
-        history: list[ConversationMessage] | None = None,
         folder_id: UUID | None = None,
         image_content: dict | list | None = None,
         attachment_ids: list | None = None,

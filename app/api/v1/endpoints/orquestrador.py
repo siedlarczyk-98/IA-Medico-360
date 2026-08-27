@@ -9,7 +9,6 @@ from app.api.deps import get_current_user
 from app.core.database import async_session_factory, get_db
 from app.core.limiter import limiter
 from app.models.models import User
-from app.schemas.agregador import ConversationMessage
 from app.services.file_extractor_service import resolve_files_context
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
@@ -44,10 +43,6 @@ class OrquestradorRequest(BaseModel):
     mode: str | None = Field(
         default=None,
         description="Modo explícito (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PHARMA_BULA, PHARMA_RECEITA, PHARMA_GENERICO, PRODUCTIVITY). Se informado, pula a triagem automática.",
-    )
-    history: list[ConversationMessage] = Field(
-        default_factory=list,
-        description="Histórico de mensagens anteriores da conversa (até 10 turnos usados).",
     )
     folder_id: UUID | None = Field(
         default=None,
@@ -111,7 +106,6 @@ async def orquestrador_query(
         force=body.force,
         clarification_answers=body.clarification_answers,
         mode=body.mode,
-        history=body.history or [],
         folder_id=body.folder_id,
         image_content=images,
         # Ids, e não os objetos: o serviço de streaming abre a própria sessão,
@@ -160,7 +154,6 @@ async def orquestrador_stream(
             clarification_answers=body.clarification_answers,
             effort=body.effort,
             mode=body.mode,
-            history=body.history or [],
             folder_id=body.folder_id,
             image_content=images,
             attachment_ids=[e.id for e in extractions],

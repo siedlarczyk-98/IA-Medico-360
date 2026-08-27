@@ -107,15 +107,6 @@ function MainApp() {
   // abortado no meio. Guardamos o id e não o índice: índice envelhece assim que
   // qualquer outra mensagem entra na lista.
   const streamMsgIdRef = useRef<string | null>(null);
-  // Ref sempre atual das mensagens — evita recriar `sendMessage` a cada token.
-  // A regra `react-hooks/refs` reclama de escrita em ref durante o render, e em
-  // geral tem razao. Aqui a alternativa (atribuir num useEffect) faz a ref
-  // ATRASAR um render, e os handlers de streaming leem `messagesRef.current`
-  // esperando o valor corrente — o "conserto" introduziria bug de mensagem
-  // perdida. Mantido de propósito.
-  const messagesRef = useRef<Message[]>(messages);
-  // eslint-disable-next-line react-hooks/refs
-  messagesRef.current = messages;
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
   // state uma vez por frame (requestAnimationFrame), evitando re-render por token.
   const rafRef = useRef<number | null>(null);
@@ -142,7 +133,7 @@ function MainApp() {
     [messages]
   );
 
-  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[]; file_ids?: string[] }) => {
+  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; file_ids?: string[] }) => {
     abortRef.current?.abort();
     cancelFlush();
 
@@ -183,11 +174,10 @@ function MainApp() {
       });
     };
 
-    const history = (params.priorMessages ?? []).map(m => ({ role: m.role, content: m.content }));
     const folder_id = pendingFolderIdRef.current;
 
     try {
-      for await (const event of streamQuery({ ...params, history, folder_id, file_ids: params.file_ids }, ctrl.signal)) {
+      for await (const event of streamQuery({ ...params, folder_id, file_ids: params.file_ids }, ctrl.signal)) {
         if (event.type === 'clarification') {
           const formatted = event.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
           setMessages(prev => [...prev, {
@@ -284,9 +274,8 @@ function MainApp() {
 
 
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachments?: Attachment[]) => {
-    const priorMessages = messagesRef.current;
     runOrquestrador({
-      prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages,
+      prompt: text, conversation_id: activeConvId, effort, mode: selectedMode,
       file_ids: attachments?.map(a => a.fileId),
     });
     setMessages(prev => [...prev, {

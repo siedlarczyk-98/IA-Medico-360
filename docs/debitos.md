@@ -87,23 +87,19 @@ subindo sem ganho). Depende de dados de uso que ainda não existem.
 
 ---
 
-## 5. O campo `history` da API é inerte, mas o frontend ainda o envia
+## 5. ~~O campo `history` da API é inerte~~ — RESOLVIDO em 2026-08-27
 
-**O que é.** Desde a Fase 4, `/orquestrador/query` e `/stream` leem o histórico
-do banco e **ignoram** o campo `history` do corpo da requisição. O frontend
-continua enviando.
+O frontend parou de enviar e o campo saiu do schema do orquestrador, junto com
+o parâmetro `history` dos dois serviços e a `messagesRef` que existia só para
+alimentá-lo.
 
-**Por que ficou.** Remover um campo de contrato é mudança que merece ser
-deliberada. Há teste (`tests/test_contexto_seguranca.py`) garantindo que a
-requisição com `history` continua sendo aceita, justamente para que a remoção
-seja consciente e não uma quebra silenciosa.
+Clientes antigos que ainda mandem `history` continuam funcionando — o FastAPI
+descarta campo desconhecido —, e há teste travando essa compatibilidade em
+`tests/test_contexto_seguranca.py`.
 
-**Custo de deixar:** payload maior à toa em toda mensagem, e um campo que induz
-quem lê o código a achar que o cliente controla o contexto — que era exatamente
-o problema corrigido.
-
-**Onde mexer:** `frontend-app/src/api/orquestrador.ts` (parar de enviar),
-depois `app/api/v1/endpoints/orquestrador.py` (remover do schema).
+**O agregador não foi tocado:** ele ainda lê `history` do corpo, e o frontend
+segue enviando por lá. Se o agregador voltar à interface um dia, essa dívida
+existe lá também.
 
 ---
 
