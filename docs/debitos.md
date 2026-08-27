@@ -10,29 +10,45 @@ produto, não de código.
 
 ---
 
-## 1. Retenção de dados de saúde em `file_extractions` — LGPD
+## 1. Retenção em `file_extractions` — a política existe; o cron não roda
 
-**O que é.** A tabela guarda o texto extraído de todo arquivo enviado e, no caso
-de imagens, o **base64 da imagem inteira**. Não há expiração, não há rotina de
-limpeza, e nada apaga esses registros exceto a remoção do usuário (`ondelete
-CASCADE` em `user_id`).
+**CORREÇÃO (2026-08-27).** A versão anterior deste item dizia que "não há
+expiração, não há rotina de limpeza". **Isso era falso** — escrito sem ler
+`app/services/data_subject_service.py`. A política existe e está certa:
 
-**Por que importa mais agora.** A Fase 5 vinculou anexos a mensagens
-(`interaction_id`) e passou a aceitar até cinco arquivos por mensagem. O
-problema já existia — a Fase 5 não o criou —, mas o volume cresce e os arquivos
-passam a ser permanentemente referenciados pelo histórico, o que torna apagá-los
-uma decisão com efeito visível ao médico.
+| Dado | Prazo | Constante |
+|---|---|---|
+| Imagem crua (base64) | 30 dias | `RETENCAO_IMAGEM_DIAS` |
+| Texto extraído | 180 dias | `RETENCAO_ARQUIVO_DIAS` |
+| Cache semântico | 30 dias | `RETENCAO_CACHE_DIAS` |
 
-**O que falta decidir (não é decisão técnica):**
-- Prazo de retenção de exame anexado. É prontuário? Segue os 20 anos do CFM ou
-  é material transitório de apoio?
-- O que acontece com o anexo quando o médico apaga a conversa. Hoje a conversa
-  tem *soft delete* (`status`) e o arquivo fica.
-- Se o base64 da imagem precisa ficar no Postgres depois de a descrição ter sido
-  extraída. É o item mais pesado da tabela.
+O expurgo está implementado em `expurgar_dados_vencidos()` e tem gatilho em
+`scripts/expurgar_dados_vencidos.py`, idempotente e seguro para repetir.
 
-**Onde mexer:** `app/models/models.py` (`FileExtraction`),
-`app/services/file_extractor_service.py`, e uma rotina de expurgo que não existe.
+**O problema real é operacional: o cron não está rodando.** Medição em produção
+em 2026-08-27:
+
+- 32 registros com mais de 30 dias
+- **14 deles ainda com o base64 presente** — deveria ser zero
+- 8 já expurgados, o que mostra que o job rodou em algum momento e parou
+
+`docs/runbook.md` afirma que "o expurgo roda por cron". O agendamento do Railway
+vive no painel, não no repositório, então não há como um teste ou o CI perceber
+que ele parou. É uma política de LGPD que existe no papel e no código, mas não
+na prática.
+
+**O que falta:**
+1. Confirmar/recriar o agendamento no Railway.
+2. Rodar o expurgo uma vez para limpar o passivo dos 14.
+3. Alguma forma de perceber que parou de novo — hoje o silêncio é
+   indistinguível do sucesso.
+
+**Decisões de escopo já tomadas pelo dono (2026-08-27):** descartar o base64
+após 30 dias (já é a política vigente) e apagar os anexos junto com a conversa.
+A segunda **ainda não tem onde ser aplicada**: não existe exclusão de conversa
+no produto. `Conversation.status` é lido como filtro em três lugares e nunca
+definido como `False` por código nenhum. Quando a exclusão for implementada,
+ela precisa apagar os anexos vinculados.
 
 ---
 
@@ -146,21 +162,32 @@ falha se divergirem. O risco de um modo responder com prompt vazio está coberto
 
 ---
 
-## 7. Teste intermitente: `test_revogacao_preserva_o_aceite_anterior`
+## 7. Teste intermitente de consentimento — causa NÃO identificada
 
-**O que é.** Falha em ~1 de cada 3 execuções da suíte completa, e passa isolado.
+**Estado.** A ordenação foi endurecida em 2026-08-27, mas **a causa da
+intermitência continua desconhecida**.
 
-**Causa.** `consent_service.historico()` ordena só por `created_at DESC`, sem
-critério de desempate. No harness, as duas escritas caem na mesma transação e
-recebem o mesmo timestamp de `now()`, então a ordem entre elas é indefinida.
+**Correção do que estava escrito aqui.** A versão anterior afirmava que a causa
+era empate de `created_at` porque "as duas escritas caem na mesma transação e
+recebem o mesmo timestamp de `now()`". Isso era hipótese apresentada como
+diagnóstico, e o código a desmente: `created_at`, `accepted_at` e `revoked_at`
+são todos `utcnow()` do Python, com microssegundos — duas chamadas separadas
+não empatam.
 
-**Por que não foi corrigido.** É código de consentimento/LGPD, e mudar a
-ordenação de um histórico com valor probatório é decisão de quem responde pela
-conformidade, não de quem passava por perto.
+**Tentativa de reprodução:** 5 execuções da suíte completa e 6 do arquivo
+isolado, todas verdes. Não reproduziu.
 
-**Correção provável:** desempate por `id` ou por uma coluna de sequência.
+**O que foi feito mesmo assim.** `historico()` passou a desempatar por
+`revoked_at DESC NULLS LAST`. Justifica-se por mérito próprio, independente da
+intermitência: `created_at` sozinho não define ordem total, e num histórico com
+valor probatório "aceitou e depois revogou" e "revogou e depois aceitou" são
+fatos opostos. Há teste que força o empate e falha sem o desempate.
 
-**Onde mexer:** `app/services/consent_service.py:80`.
+**Não foi desempate por `id`:** é `uuid4()`, aleatório — daria ordem estável
+porém sem relação com o que aconteceu.
+
+**O que continua aberto:** se a intermitência reincidir, ela tem outra causa, e
+esta mudança não a terá resolvido. Registrar aqui a execução que falhar.
 
 ---
 

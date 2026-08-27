@@ -155,3 +155,35 @@ def test_versao_dos_documentos_bate_com_o_frontend():
     achado = re.search(r"VERSAO_DOCUMENTOS\s*=\s*'([^']+)'", arquivo.read_text(encoding="utf-8"))
     assert achado, "VERSAO_DOCUMENTOS nao encontrada em documentos.ts"
     assert achado.group(1) == consent_service.VERSAO_DOCUMENTOS
+
+
+async def test_ordem_do_historico_e_estavel_com_timestamps_identicos(db, user):
+    """
+    `created_at` sozinho não define ordem total. Este teste força o empate que
+    na prática é raro — dois registros no mesmo instante — e exige que a
+    revogação venha antes do aceite.
+
+    Num histórico com valor probatório, "aceitou e depois revogou" e "revogou e
+    depois aceitou" são fatos opostos; ordem arbitrária entre eles é inaceitável.
+    """
+    from datetime import UTC, datetime
+
+    from app.models.models import ConsentLog
+
+    instante = datetime.now(UTC)
+    tipo = f"{consent_service.USO_DADOS_ANONIMIZADOS}@teste"
+
+    db.add(ConsentLog(
+        user_id=user.id, consent_type=tipo, accepted=True,
+        accepted_at=instante, revoked_at=None, created_at=instante,
+    ))
+    db.add(ConsentLog(
+        user_id=user.id, consent_type=tipo, accepted=False,
+        accepted_at=None, revoked_at=instante, created_at=instante,
+    ))
+    await db.flush()
+
+    for _ in range(5):
+        registros = await consent_service.historico(db, user.id)
+        assert registros[0].accepted is False, "revogação deve vir primeiro"
+        assert registros[1].accepted is True

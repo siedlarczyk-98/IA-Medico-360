@@ -76,8 +76,28 @@ async def registrar(
 
 
 async def historico(db: AsyncSession, user_id) -> list[ConsentLog]:
+    """
+    Manifestações do titular, da mais recente para a mais antiga.
+
+    O desempate por `revoked_at` existe porque `created_at` sozinho não define
+    ordem total: dois registros gravados no mesmo instante ficariam em ordem
+    arbitrária, e num histórico com valor probatório "aceitou e depois revogou"
+    e "revogou e depois aceitou" são fatos opostos.
+
+    `revoked_at` é preenchido só na revogação (ver `registrar`), então NULLS
+    LAST coloca a revogação antes do aceite no mesmo instante — que é a única
+    sequência possível: não se revoga o que ainda não foi aceito.
+
+    Desempatar por `id` NÃO serviria: é `uuid4()`, aleatório, e daria uma ordem
+    estável porém sem relação com o que aconteceu.
+    """
     resultado = await db.execute(
-        select(ConsentLog).where(ConsentLog.user_id == user_id).order_by(ConsentLog.created_at.desc())
+        select(ConsentLog)
+        .where(ConsentLog.user_id == user_id)
+        .order_by(
+            ConsentLog.created_at.desc(),
+            ConsentLog.revoked_at.desc().nullslast(),
+        )
     )
     return list(resultado.scalars().all())
 
