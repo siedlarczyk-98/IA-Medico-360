@@ -204,15 +204,35 @@ conversa.
 
 ---
 
-## 9. Vulnerabilidades pré-existentes no `npm audit` do frontend
+## 9. ~~Vulnerabilidades no `npm audit`~~ — RESOLVIDO, mas por acidente
 
-**O que é.** Seis vulnerabilidades altas em `react-router`, `postcss`, `nanoid`,
-`brace-expansion`, `fast-uri` e `serve` — todas transitivas e anteriores ao
-trabalho atual.
+`npm audit` agora reporta **zero vulnerabilidades**. As seis (em `react-router`,
+`postcss`, `nanoid`, `brace-expansion`, `fast-uri` e `serve`) sumiram como
+efeito colateral da regeneração do `package-lock.json` feita para destravar o
+deploy — não como decisão deliberada.
 
-**Por que não foram corrigidas junto.** `npm audit fix` arrasta bump de
-`react-router`, que é dependência de roteamento de todo o app. Merece PR próprio
-com regressão visual, não carona numa mudança de contexto de IA.
+**O que isso significa na prática.** A resolução limpa trouxe **80 pacotes** para
+versões mais novas, todas dentro dos ranges `^` já declarados no
+`package.json` — é o que qualquer `npm install` limpo faria. As mais relevantes:
+
+| Pacote | Antes | Depois |
+|---|---|---|
+| `react-router` / `react-router-dom` | 7.18.1 | 7.18.2 |
+| `react` | 19.2.7 | 19.2.8 |
+| `vite` | 8.1.2 | 8.2.2 |
+| `postcss` | 8.5.16 | 8.5.26 |
+
+**Correção do que estava escrito aqui.** A versão anterior dizia que corrigir
+"arrasta bump de `react-router`, que é dependência de roteamento de todo o app"
+e que merecia PR próprio com regressão visual. O alarme era exagerado: as
+correções estavam disponíveis como **patch**, não major. O que eu tratava como
+mudança arriscada era uma atualização de manutenção.
+
+**O que continua verdadeiro.** 80 pacotes mudaram de versão e foram para
+produção sem teste de regressão visual — os 58 testes, o typecheck e o build
+passam, no Windows e no Linux, mas nenhum deles olha pixel. Vale uma passada de
+olho na interface em produção, com atenção a navegação entre rotas (login,
+convite, onboarding, embed), que é onde o `react-router` atua.
 
 ---
 
