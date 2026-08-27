@@ -51,6 +51,7 @@ const STREAMING_LABELS: Record<string, string> = {
   PHARMA_RECEITA:     'Verificando receituário…',
   PHARMA_GENERICO:    'Buscando genéricos…',
   PRODUCTIVITY:       'Preparando resposta…',
+  EXAM_REVIEW:        'Analisando os exames…',
 };
 
 interface Props {
@@ -76,7 +77,7 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
       <div style={{ width: 720, maxWidth: '100%', paddingBottom: 16 }}>
         {messages.map((msg, i) => (
           msg.role === 'user'
-            ? <UserMessage key={i} content={msg.content} attachmentName={msg.attachmentName} />
+            ? <UserMessage key={i} content={msg.content} attachments={msg.attachments} />
             : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} />
         ))}
         {streaming && <ThinkingIndicator mode={streamingMode} />}
@@ -86,18 +87,39 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
   );
 }
 
-const UserMessage = memo(function UserMessage({ content, attachmentName }: { content: string; attachmentName?: string }) {
+const ATTACHMENT_ICON: Record<string, string> = {
+  pdf: '📄',
+  docx: '📝',
+  xlsx: '📊',
+  image: '🖼',
+};
+
+const UserMessage = memo(function UserMessage({ content, attachments }: {
+  content: string;
+  attachments?: Array<{ id?: string; file_name: string; file_type: string }>;
+}) {
   return (
     <div data-testid="user-message" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
       <div style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-        {attachmentName && (
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            padding: '3px 9px', borderRadius: 8,
-            background: 'var(--fill2)', border: '1px solid var(--line2)',
-            fontSize: 11, color: 'var(--pen2)',
-          }}>
-            📎 <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachmentName}</span>
+        {attachments && attachments.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, justifyContent: 'flex-end' }}>
+            {attachments.map((att, idx) => (
+              <div
+                key={att.id ?? `${att.file_name}-${idx}`}
+                data-testid="mensagem-anexo"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '3px 9px', borderRadius: 8,
+                  background: 'var(--fill2)', border: '1px solid var(--line2)',
+                  fontSize: 11, color: 'var(--pen2)',
+                }}
+              >
+                {ATTACHMENT_ICON[att.file_type] ?? '📎'}
+                <span style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {att.file_name}
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {content && (
@@ -125,7 +147,7 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
       <div style={{ flex: 1, minWidth: 0, paddingTop: 4 }}>
         {mode && (
           <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {['raciocinio','farmaco','busca','produtividade'].includes(mode)
+            {['raciocinio','farmaco','busca','produtividade','exames'].includes(mode)
               ? <ModeChip mode={mode} confidence={confidence} />
               : <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,

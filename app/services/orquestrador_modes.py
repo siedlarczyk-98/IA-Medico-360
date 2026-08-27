@@ -25,6 +25,9 @@ class OrquestradorMode(StrEnum):
     PHARMA_RECEITA = "PHARMA_RECEITA"
     PHARMA_GENERICO = "PHARMA_GENERICO"
     PRODUCTIVITY = "PRODUCTIVITY"
+    # Discussão de exames anexados (laudo em PDF, imagem, laboratorial em
+    # documento). Exige modelo com visão — ver MODES_REQUIRING_VISION.
+    EXAM_REVIEW = "EXAM_REVIEW"
     # Saudação / mensagem sem conteúdo clínico. Atendido por atalho local,
     # sem gastar chamada de modelo.
     OFF_TOPIC = "OFF_TOPIC"
@@ -48,6 +51,7 @@ MODE_MODEL_MAP: dict[str, str | None] = {
     OrquestradorMode.QUICK_SEARCH: "sonar-pro",
     OrquestradorMode.CLINICAL_REASONING: "claude-sonnet-4-6",
     OrquestradorMode.PRODUCTIVITY: "gpt-5.4-nano",
+    OrquestradorMode.EXAM_REVIEW: "claude-sonnet-4-6",
     OrquestradorMode.PHARMA_CHECK: None,
     OrquestradorMode.PHARMA_BULA: None,
     OrquestradorMode.PHARMA_RECEITA: None,
@@ -60,7 +64,14 @@ MODE_TEMPERATURE_MAP: dict[str, float] = {
     OrquestradorMode.QUICK_SEARCH: 0.0,
     OrquestradorMode.CLINICAL_REASONING: 0.0,
     OrquestradorMode.PRODUCTIVITY: 0.7,
+    # Leitura de exame é descrição de achados, não geração criativa.
+    OrquestradorMode.EXAM_REVIEW: 0.0,
 }
+
+# Modos que só funcionam com um modelo capaz de ver a imagem. Rotear um deles
+# para Perplexity, por exemplo, entregaria ao médico uma discussão de exame
+# baseada só na descrição textual gerada por outro modelo — sem que ele saiba.
+MODES_REQUIRING_VISION: frozenset[str] = frozenset({OrquestradorMode.EXAM_REVIEW})
 
 # Efeito real do toggle Rápido/Detalhado: limita o tamanho da resposta,
 # o que reduz tanto o tempo de geração quanto o custo em tokens de saída.
@@ -74,7 +85,34 @@ FALLBACK_MODELS: dict[str, list[str]] = {
     OrquestradorMode.QUICK_SEARCH: ["gemini-2.5-flash"],
     OrquestradorMode.CLINICAL_REASONING: ["gpt-4o", "gemini-2.5-flash"],
     OrquestradorMode.PRODUCTIVITY: ["gemini-2.5-flash"],
+    # Todos com visão — cair num modelo cego aqui devolveria uma leitura de
+    # exame feita sem o exame.
+    OrquestradorMode.EXAM_REVIEW: ["gpt-4o", "gemini-2.5-flash"],
 }
+
+def upgrade_mode_for_attachments(mode: str | None, tem_anexos: bool) -> str | None:
+    """
+    Promove CLINICAL_REASONING para EXAM_REVIEW quando há exame anexado.
+
+    Por que não deixar a triagem escolher EXAM_REVIEW: ela só vê o TEXTO da
+    pergunta e não sabe se veio anexo. "O que você acha disso?" com uma
+    tomografia junto e a mesma frase sem anexo pedem modos diferentes, e a
+    triagem não tem como distinguir.
+
+    Por que só a partir de CLINICAL_REASONING: anexar um documento e pedir
+    "resuma isto" é PRODUCTIVITY, e continua sendo. A promoção só acontece
+    quando a pergunta já era de raciocínio clínico — aí o anexo é o exame que
+    se quer discutir.
+
+    Um modo explícito vindo da interface nunca é promovido: se o médico
+    escolheu, ele mandou.
+    """
+    if not tem_anexos:
+        return mode
+    if mode == OrquestradorMode.CLINICAL_REASONING:
+        return OrquestradorMode.EXAM_REVIEW.value
+    return mode
+
 
 # Resposta do atalho de saudação. Constante porque `/query` e `/stream`
 # precisam devolver exatamente a mesma coisa.

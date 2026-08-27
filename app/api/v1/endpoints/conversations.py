@@ -8,8 +8,13 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.models.models import Conversation, Interaction, User
-from app.schemas.conversations import ConversationDetail, ConversationMessage, ConversationSummary
+from app.models.models import Conversation, FileExtraction, Interaction, User
+from app.schemas.conversations import (
+    AttachmentOut,
+    ConversationDetail,
+    ConversationMessage,
+    ConversationSummary,
+)
 from app.services.response_metadata import read_response_metadata
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -66,9 +71,32 @@ async def get_conversation(
     )
     interactions = interactions_result.scalars().all()
 
+    # Anexos de todas as interações da página numa consulta só — buscar por
+    # interação daria uma query por mensagem numa conversa longa.
+    anexos_por_interacao: dict = {}
+    if interactions:
+        anexos_result = await db.execute(
+            select(FileExtraction).where(
+                FileExtraction.interaction_id.in_([i.id for i in interactions]),
+                FileExtraction.user_id == current_user.id,
+            )
+        )
+        for extraction in anexos_result.scalars().all():
+            anexos_por_interacao.setdefault(extraction.interaction_id, []).append(
+                AttachmentOut(
+                    id=extraction.id,
+                    file_name=extraction.file_name,
+                    file_type=extraction.file_type,
+                )
+            )
+
     messages: list[ConversationMessage] = []
     for interaction in interactions:
-        messages.append(ConversationMessage(role="user", content=interaction.prompt_text))
+        messages.append(ConversationMessage(
+            role="user",
+            content=interaction.prompt_text,
+            attachments=anexos_por_interacao.get(interaction.id, []),
+        ))
 
         if conv.feature == "AGREGADOR":
             for resp in sorted(interaction.responses, key=lambda r: r.created_at):

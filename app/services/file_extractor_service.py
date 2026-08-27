@@ -91,6 +91,77 @@ async def resolve_file_context(
     return enriched, None
 
 
+# Teto de anexos por mensagem. Cada imagem custa uma chamada de visão na
+# extração e pesa base64 dentro do prompt; sem teto, uma mensagem com vinte
+# arquivos estoura o contexto e a conta.
+MAX_ANEXOS_POR_MENSAGEM = 5
+
+
+async def resolve_files_context(
+    prompt: str,
+    file_ids: list[UUID],
+    user_id: UUID,
+    db: AsyncSession,
+    *,
+    support_vision: bool = True,
+) -> tuple[str, list[dict], list[FileExtraction]]:
+    """
+    Resolve VÁRIOS anexos de uma mensagem.
+
+    Devolve (prompt enriquecido, imagens para envio como visão, extrações).
+
+    Cada arquivo tem a posse checada individualmente — misturar um `file_id`
+    alheio no meio de arquivos próprios não passa.
+
+    A ordem importa: os textos entram antes da pergunta, na ordem em que o
+    médico anexou, para que "compare o primeiro com o segundo" tenha sentido.
+    """
+    if not file_ids:
+        return prompt, [], []
+
+    if len(file_ids) > MAX_ANEXOS_POR_MENSAGEM:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Máximo de {MAX_ANEXOS_POR_MENSAGEM} arquivos por mensagem.",
+        )
+
+    extractions: list[FileExtraction] = []
+    for file_id in file_ids:
+        extraction = await db.get(FileExtraction, file_id)
+        if not extraction or extraction.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+        extractions.append(extraction)
+
+    imagens: list[dict] = []
+    blocos_texto: list[str] = []
+
+    for extraction in extractions:
+        e_imagem = extraction.file_type == "image" and extraction.image_base64
+        if support_vision and e_imagem:
+            imagens.append({
+                "base64": extraction.image_base64,
+                "media_type": extraction.image_media_type,
+                "fallback_text": extraction.extracted_text,
+                "file_name": extraction.file_name,
+            })
+            # O nome entra no texto mesmo quando a imagem vai como visão: sem
+            # isso o modelo não consegue dizer "na primeira tomografia..." de
+            # forma que o médico saiba a qual arquivo ele se refere.
+            blocos_texto.append(f"[Imagem anexada: {extraction.file_name}]")
+        elif e_imagem:
+            # Provider sem visão: sobra a descrição gerada na extração, e o
+            # modelo precisa saber que está lendo descrição, não a imagem.
+            blocos_texto.append(
+                f"[Descrição da imagem {extraction.file_name} — a imagem em si não foi enviada a este modelo]\n"
+                f"{extraction.extracted_text}"
+            )
+        else:
+            blocos_texto.append(f"[Arquivo: {extraction.file_name}]\n{extraction.extracted_text}")
+
+    enriched = "\n\n".join([*blocos_texto, "---", prompt]).strip()
+    return enriched, imagens, extractions
+
+
 # ── Validação de assinatura (magic bytes) ────────────────────
 
 def signature_matches(content: bytes, file_kind: str, content_type: str) -> bool:

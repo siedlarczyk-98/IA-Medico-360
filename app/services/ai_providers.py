@@ -54,6 +54,22 @@ class StreamToken:
     search_cost_usd: float = 0.0
 
 
+def normalize_images(image_content: dict | list | None) -> list[dict]:
+    """
+    Aceita uma imagem só ou uma lista delas.
+
+    O parâmetro nasceu singular (`image_content: dict`) e o agregador ainda
+    passa assim. A sessão de exames precisa de várias — um raio-x em duas
+    incidências, ou o laudo mais a imagem. Normalizar aqui evita duplicar cada
+    assinatura de provider em versões singular e plural.
+    """
+    if not image_content:
+        return []
+    if isinstance(image_content, dict):
+        return [image_content]
+    return list(image_content)
+
+
 class BaseProvider(ABC):
     """Interface base para todos os providers de IA."""
 
@@ -74,11 +90,17 @@ class AnthropicProvider(BaseProvider):
         return [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
 
     @staticmethod
-    def _build_user_content(prompt: str, image_content: dict | None) -> list | str:
-        if not image_content:
+    def _build_user_content(prompt: str, image_content: dict | list | None) -> list | str:
+        imagens = normalize_images(image_content)
+        if not imagens:
             return prompt
+        # Imagens antes do texto: a Anthropic recomenda essa ordem quando a
+        # pergunta se refere ao que está nelas.
         return [
-            {"type": "image", "source": {"type": "base64", "media_type": image_content["media_type"], "data": image_content["base64"]}},
+            *(
+                {"type": "image", "source": {"type": "base64", "media_type": img["media_type"], "data": img["base64"]}}
+                for img in imagens
+            ),
             {"type": "text", "text": prompt},
         ]
 
@@ -220,24 +242,32 @@ class OpenAIProvider(BaseProvider):
         return not model_id.startswith(cls._NO_TEMPERATURE_PREFIXES)
 
     @staticmethod
-    def _build_user_content(prompt: str, image_content: dict | None) -> list | str:
-        if not image_content:
+    def _build_user_content(prompt: str, image_content: dict | list | None) -> list | str:
+        imagens = normalize_images(image_content)
+        if not imagens:
             return prompt
         return [
-            {"type": "image_url", "image_url": {"url": f"data:{image_content['media_type']};base64,{image_content['base64']}"}},
+            *(
+                {"type": "image_url", "image_url": {"url": f"data:{img['media_type']};base64,{img['base64']}"}}
+                for img in imagens
+            ),
             {"type": "text", "text": prompt},
         ]
 
     @staticmethod
-    def _build_responses_input(prompt: str, image_content: dict | None) -> list | str:
-        """Monta o campo `input` da Responses API, incluindo imagem quando houver."""
-        if not image_content:
+    def _build_responses_input(prompt: str, image_content: dict | list | None) -> list | str:
+        """Monta o campo `input` da Responses API, incluindo imagens quando houver."""
+        imagens = normalize_images(image_content)
+        if not imagens:
             return prompt
         return [{
             "role": "user",
             "content": [
                 {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": f"data:{image_content['media_type']};base64,{image_content['base64']}"},
+                *(
+                    {"type": "input_image", "image_url": f"data:{img['media_type']};base64,{img['base64']}"}
+                    for img in imagens
+                ),
             ],
         }]
 
@@ -449,10 +479,11 @@ class OpenAIProvider(BaseProvider):
 class GeminiProvider(BaseProvider):
 
     @staticmethod
-    def _build_parts(prompt: str, image_content: dict | None) -> list:
-        parts = []
-        if image_content:
-            parts.append({"inlineData": {"mimeType": image_content["media_type"], "data": image_content["base64"]}})
+    def _build_parts(prompt: str, image_content: dict | list | None) -> list:
+        parts = [
+            {"inlineData": {"mimeType": img["media_type"], "data": img["base64"]}}
+            for img in normalize_images(image_content)
+        ]
         parts.append({"text": prompt})
         return parts
 
@@ -598,11 +629,16 @@ PERPLEXITY_TRUSTED_DOMAINS = [
 class PerplexityProvider(BaseProvider):
 
     @staticmethod
-    def _apply_image_fallback(prompt: str, image_content: dict | None) -> str:
-        """Perplexity não suporta visão — injeta a descrição gerada pelo Haiku no prompt."""
-        if image_content and image_content.get("fallback_text"):
-            return f"[Descrição automática da imagem]\n{image_content['fallback_text']}\n\n---\n\n{prompt}"
-        return prompt
+    def _apply_image_fallback(prompt: str, image_content: dict | list | None) -> str:
+        """Perplexity não suporta visão — injeta as descrições geradas pelo Haiku."""
+        descricoes = [
+            f"[Descrição automática da imagem {img.get('file_name', '')}]\n{img['fallback_text']}".strip()
+            for img in normalize_images(image_content)
+            if img.get("fallback_text")
+        ]
+        if not descricoes:
+            return prompt
+        return "\n\n".join([*descricoes, "---", prompt])
 
     async def complete(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         prompt = self._apply_image_fallback(prompt, image_content)

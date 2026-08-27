@@ -16,10 +16,10 @@ import json
 import logging
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.prompts import SYSTEM_PROMPT_CLARIFICATION
-from app.models.models import Conversation, Interaction
+from app.models.models import Conversation, FileExtraction, Interaction
 from app.services.ai_providers import OpenAIProvider
 from app.services.context_budget import (
     DEFAULT_HISTORY_TOKEN_BUDGET,
@@ -138,6 +138,30 @@ async def resolve_clarification_prompt(
     await db.flush()
 
     return consolidated
+
+
+async def link_attachments(db, user_id: UUID, interaction_id: UUID, attachment_ids) -> None:
+    """
+    Carimba os anexos com a mensagem em que foram enviados.
+
+    Sem isto o anexo se perdia: o texto extraído ia embutido no prompt e, ao
+    reabrir a conversa, o médico não via mais quais exames tinha mandado.
+
+    O `user_id` entra no UPDATE mesmo já tendo sido checado na resolução dos
+    arquivos — uma segunda barreira custa nada aqui e impede que um caminho
+    futuro que esqueça a primeira consiga carimbar arquivo alheio.
+    """
+    if not attachment_ids:
+        return
+
+    await db.execute(
+        update(FileExtraction)
+        .where(
+            FileExtraction.id.in_(list(attachment_ids)),
+            FileExtraction.user_id == user_id,
+        )
+        .values(interaction_id=interaction_id)
+    )
 
 
 async def check_clarification(prompt: str) -> dict:

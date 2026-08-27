@@ -378,10 +378,17 @@ class FileExtraction(Base):
     __tablename__ = "file_extractions"
     __table_args__ = (
         Index("ix_file_extractions_user_id", "user_id"),
+        Index("ix_file_extractions_interaction_id", "interaction_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Mensagem em que o anexo foi enviado. Nulo enquanto o arquivo já foi
+    # extraído mas a mensagem ainda não saiu, e nas extrações anteriores à
+    # migration 001 — para as quais não há como inferir a mensagem.
+    interaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("interactions.id", ondelete="SET NULL"), nullable=True
+    )
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, nullable=False)

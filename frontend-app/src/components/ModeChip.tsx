@@ -25,6 +25,13 @@ const icons: Record<string, ReactElement> = {
       <path d="M5 6 H11 M5 8.5 H11 M5 11 H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   ),
+  exames: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <rect x="2.5" y="2" width="11" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="8" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5 11.5 H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 const labels: Record<string, string> = {
@@ -32,6 +39,7 @@ const labels: Record<string, string> = {
   farmaco:      'Checagem Farmacológica',
   busca:        'Busca Rápida',
   produtividade:'Produtividade',
+  exames:       'Exames',
 };
 
 interface Props {

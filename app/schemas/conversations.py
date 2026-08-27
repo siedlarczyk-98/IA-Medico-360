@@ -41,9 +41,23 @@ class PubmedValidationOut(BaseModel):
     newer_guidelines: list[NewerGuideline] = []
 
 
+class AttachmentOut(BaseModel):
+    """
+    Anexo de uma mensagem. Só metadados — o conteúdo extraído já está embutido
+    no texto da mensagem, e o base64 da imagem não deve trafegar de volta na
+    listagem da conversa.
+    """
+    id: UUID
+    file_name: str
+    file_type: str  # "pdf" | "docx" | "xlsx" | "image"
+
+
 class ConversationMessage(BaseModel):
     role: str        # "user" | "assistant"
     content: str
+    # Anexos enviados junto da mensagem. Vazio em mensagens anteriores à
+    # migration 001, que não têm vínculo — não há como inferir retroativamente.
+    attachments: list[AttachmentOut] = []
     mode: str | None = None   # model_id (AGREGADOR) or mode name (ORQUESTRADOR)
     # Referências da resposta. Vêm de InteractionResponse.extra_metadata e
     # chegam vazias em conversas anteriores à mudança que passou a gravá-las

@@ -41,10 +41,12 @@ from app.services.orquestrador_modes import (
     MODE_TEMPERATURE_MAP,
     PHARMA_CHECK_MIN_CONFIDENCE,
     PHARMA_MODES,
+    upgrade_mode_for_attachments,
 )
 from app.services.orquestrador_shared import (
     check_clarification,
     ensure_conversation,
+    link_attachments,
     load_context_messages,
     resolve_clarification_prompt,
 )
@@ -83,7 +85,8 @@ class OrquestradorStreamService:
         mode: str | None = None,
         history: list[ConversationMessage] | None = None,
         folder_id: UUID | None = None,
-        image_content: dict | None = None,
+        image_content: dict | list | None = None,
+        attachment_ids: list | None = None,
     ) -> AsyncIterator[str]:
         """
         Gerador SSE. Yields strings no formato 'event: ...\ndata: ...\n\n'.
@@ -162,6 +165,9 @@ class OrquestradorStreamService:
                 # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
                 # resolver o sub-modo correto (bula, receita, genérico, interação),
                 # mas ignora o gate de confiança baixa — o usuário já escolheu o modo.
+                # Anexo presente promove raciocinio clinico para leitura de exame.
+                mode = upgrade_mode_for_attachments(mode, bool(attachment_ids))
+
                 explicit_pharma = (mode == "PHARMA_CHECK")
                 if mode and not explicit_pharma:
                     confidence = 1.0
@@ -293,6 +299,7 @@ class OrquestradorStreamService:
                 )
                 db.add(interaction)
                 await db.flush()
+                await link_attachments(db, self.user_id, interaction.id, attachment_ids)
 
                 # 5. Streaming do modelo
                 model_id = MODE_MODEL_MAP.get(mode)

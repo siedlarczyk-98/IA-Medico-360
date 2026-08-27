@@ -10,7 +10,7 @@ from app.core.database import async_session_factory, get_db
 from app.core.limiter import limiter
 from app.models.models import User
 from app.schemas.agregador import ConversationMessage
-from app.services.file_extractor_service import resolve_file_context
+from app.services.file_extractor_service import resolve_files_context
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 from app.services.usage_service import check_limit
@@ -55,8 +55,25 @@ class OrquestradorRequest(BaseModel):
     )
     file_id: UUID | None = Field(
         default=None,
-        description="ID de uma extração de arquivo previamente enviada via /uploads/extract.",
+        description=(
+            "DEPRECADO — use `file_ids`. Mantido porque clientes antigos ainda "
+            "enviam este campo; é tratado como uma lista de um elemento."
+        ),
     )
+    file_ids: list[UUID] = Field(
+        default_factory=list,
+        description=(
+            "IDs de extrações enviadas via /uploads/extract. Até 5 por mensagem — "
+            "cada imagem custa uma chamada de visão e pesa base64 no prompt."
+        ),
+    )
+
+    def anexos(self) -> list[UUID]:
+        """Anexos da mensagem, unificando o campo novo e o legado sem duplicar."""
+        ids = list(self.file_ids)
+        if self.file_id and self.file_id not in ids:
+            ids.insert(0, self.file_id)
+        return ids
 
 
 @router.post("/query")
@@ -79,7 +96,7 @@ async def orquestrador_query(
     - PRODUCTIVITY → GPT-5.4 Nano (tarefas não clínicas)
     """
     await check_limit(db, user)
-    prompt, image_content = await resolve_file_context(body.prompt, body.file_id, user.id, db)
+    prompt, images, extractions = await resolve_files_context(body.prompt, body.anexos(), user.id, db)
 
     service = OrquestradorService(
         db=db,
@@ -96,7 +113,11 @@ async def orquestrador_query(
         mode=body.mode,
         history=body.history or [],
         folder_id=body.folder_id,
-        image_content=image_content,
+        image_content=images,
+        # Ids, e não os objetos: o serviço de streaming abre a própria sessão,
+        # e um objeto ORM preso a outra sessão não sobrevive à travessia.
+        # Manter os dois caminhos iguais evita que só um deles quebre.
+        attachment_ids=[e.id for e in extractions],
     )
 
 
@@ -122,7 +143,7 @@ async def orquestrador_stream(
     Não suporta PHARMA_CHECK — use /query para interações medicamentosas.
     """
     await check_limit(db, user)
-    prompt, image_content = await resolve_file_context(body.prompt, body.file_id, user.id, db)
+    prompt, images, extractions = await resolve_files_context(body.prompt, body.anexos(), user.id, db)
 
     service = OrquestradorStreamService(
         session_factory=async_session_factory,
@@ -141,7 +162,8 @@ async def orquestrador_stream(
             mode=body.mode,
             history=body.history or [],
             folder_id=body.folder_id,
-            image_content=image_content,
+            image_content=images,
+            attachment_ids=[e.id for e in extractions],
         ),
         media_type="text/event-stream",
         headers={

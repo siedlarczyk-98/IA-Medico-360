@@ -28,6 +28,7 @@ const BACKEND_TO_CHIP: Record<string, string> = {
   PHARMA_RECEITA:    'farmaco',
   PHARMA_GENERICO:   'farmaco',
   PRODUCTIVITY:      'produtividade',
+  EXAM_REVIEW:       'exames',
 };
 
 // Identidade da mensagem em streaming. Contador de módulo, e não crypto.randomUUID(),
@@ -138,7 +139,7 @@ function MainApp() {
     [messages]
   );
 
-  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[]; file_id?: string }) => {
+  const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; priorMessages?: Message[]; file_ids?: string[] }) => {
     abortRef.current?.abort();
     cancelFlush();
 
@@ -183,7 +184,7 @@ function MainApp() {
     const folder_id = pendingFolderIdRef.current;
 
     try {
-      for await (const event of streamQuery({ ...params, history, folder_id, file_id: params.file_id }, ctrl.signal)) {
+      for await (const event of streamQuery({ ...params, history, folder_id, file_ids: params.file_ids }, ctrl.signal)) {
         if (event.type === 'clarification') {
           const formatted = event.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
           setMessages(prev => [...prev, {
@@ -279,10 +280,17 @@ function MainApp() {
   }, [cancelFlush, scheduleFlush]);
 
 
-  const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachment?: Attachment) => {
+  const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachments?: Attachment[]) => {
     const priorMessages = messagesRef.current;
-    runOrquestrador({ prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages, file_id: attachment?.fileId });
-    setMessages(prev => [...prev, { role: 'user', content: text, attachmentName: attachment?.name }]);
+    runOrquestrador({
+      prompt: text, conversation_id: activeConvId, effort, mode: selectedMode, priorMessages,
+      file_ids: attachments?.map(a => a.fileId),
+    });
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: text,
+      attachments: attachments?.map(a => ({ id: a.fileId, file_name: a.name, file_type: a.fileType })),
+    }]);
     setScrollTrigger(n => n + 1);
   }, [activeConvId, selectedMode, runOrquestrador]);
 

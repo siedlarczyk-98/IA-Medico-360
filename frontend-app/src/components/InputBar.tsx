@@ -5,7 +5,7 @@ import { chipNeutral, iconButtonBase } from '../lib/styles';
 import { tratarEnterParaEnviar, DICA_ENVIO } from '../lib/enterParaEnviar';
 
 export type Effort = 'rápido' | 'detalhado';
-export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY';
+export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY' | 'EXAM_REVIEW';
 
 export interface Attachment {
   fileId: string;
@@ -18,7 +18,13 @@ const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }
   { key: 'CLINICAL_REASONING', label: 'Raciocínio Clínico',   shortLabel: 'Clínico' },
   { key: 'PHARMA_CHECK',       label: 'Farmacológico',        shortLabel: 'Farmácia' },
   { key: 'PRODUCTIVITY',       label: 'Produtividade',        shortLabel: 'Produt.' },
+  { key: 'EXAM_REVIEW',        label: 'Exames',               shortLabel: 'Exames' },
 ];
+
+// Teto por mensagem, espelhando MAX_ANEXOS_POR_MENSAGEM no backend. Repetido
+// aqui para avisar o médico ANTES do upload, em vez de deixá-lo anexar cinco
+// arquivos e receber 422 no envio.
+const MAX_ANEXOS = 5;
 
 const FILE_TYPE_ICON: Record<string, string> = {
   pdf: '📄',
@@ -35,14 +41,14 @@ const IMAGE_DLP_ACK_KEY = 'img_dlp_ack';    // consentimento (1x por sessão)
 const isImageFile = (file: File) => file.type.startsWith('image/');
 
 interface Props {
-  onSend: (text: string, effort: Effort, attachment?: Attachment) => void;
+  onSend: (text: string, effort: Effort, attachments?: Attachment[]) => void;
   disabled?: boolean;
   /** Bloqueia só o envio (ex: nenhum modelo selecionado no Agregador) — o texto continua editável. */
   sendBlocked?: boolean;
   placeholder?: string;
   mode?: OrchestratorMode;
   onModeChange?: (mode: OrchestratorMode) => void;
-  onAttachmentChange?: (attachment: Attachment | null) => void;
+  onAttachmentChange?: (attachments: Attachment[]) => void;
   webSearchEnabled?: boolean;
   onWebSearchToggle?: () => void;
 }
@@ -51,14 +57,16 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
   const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const [effort, setEffort] = useState<Effort>('detalhado');
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploadState, setUploadState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [uploadError, setUploadError] = useState('');
-  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  // Lote inteiro fica pendente enquanto o aceite de imagem não vem: basta uma
+  // imagem entre os arquivos para o consentimento ser necessário.
+  const [pendingImage, setPendingImage] = useState<File[] | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filled = value.trim().length > 0 || !!attachment;
+  const filled = value.trim().length > 0 || attachments.length > 0;
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setValue(e.target.value);
@@ -74,38 +82,52 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     e.target.value = '';
 
-    // B4: valida tamanho no cliente antes de enviar.
-    const limit = isImageFile(file) ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
-    if (file.size > limit) {
-      setAttachment(null);
+    if (attachments.length + files.length > MAX_ANEXOS) {
       setUploadState('error');
-      setUploadError(`Arquivo maior que ${Math.round(limit / (1024 * 1024))} MB.`);
+      setUploadError(`Máximo de ${MAX_ANEXOS} arquivos por mensagem.`);
+      return;
+    }
+
+    // B4: valida tamanho no cliente antes de enviar.
+    const grande = files.find(f => f.size > (isImageFile(f) ? MAX_IMAGE_BYTES : MAX_FILE_BYTES));
+    if (grande) {
+      const limit = isImageFile(grande) ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+      setUploadState('error');
+      setUploadError(`"${grande.name}" é maior que ${Math.round(limit / (1024 * 1024))} MB.`);
       return;
     }
 
     // S1: imagens não passam pelo filtro de PII (DLP) — pede consentimento 1x por sessão.
-    if (isImageFile(file) && sessionStorage.getItem(IMAGE_DLP_ACK_KEY) !== '1') {
-      setPendingImage(file);
+    // Basta uma imagem no lote para exigir o aceite; o lote inteiro fica pendente.
+    if (files.some(isImageFile) && sessionStorage.getItem(IMAGE_DLP_ACK_KEY) !== '1') {
+      setPendingImage(files);
       return;
     }
 
-    void doUpload(file);
+    void doUpload(files);
   }
 
-  async function doUpload(file: File) {
+  async function doUpload(files: File[]) {
     setUploadState('loading');
     setUploadError('');
-    setAttachment(null);
 
     try {
-      const result: ExtractResult = await extractFile(file);
-      const att: Attachment = { fileId: result.file_id, name: result.file_name, fileType: result.file_type };
-      setAttachment(att);
-      onAttachmentChange?.(att);
+      // Em série, não em paralelo: cada imagem dispara uma chamada de visão no
+      // backend, e mandar cinco de uma vez castiga o rate limit de /uploads.
+      const novos: Attachment[] = [];
+      for (const file of files) {
+        const result: ExtractResult = await extractFile(file);
+        novos.push({ fileId: result.file_id, name: result.file_name, fileType: result.file_type });
+      }
+      setAttachments(prev => {
+        const proximos = [...prev, ...novos];
+        onAttachmentChange?.(proximos);
+        return proximos;
+      });
       setUploadState('idle');
     } catch (err) {
       setUploadState('error');
@@ -115,28 +137,36 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
 
   function confirmImageConsent() {
     sessionStorage.setItem(IMAGE_DLP_ACK_KEY, '1');
-    const file = pendingImage;
+    const files = pendingImage;
     setPendingImage(null);
-    if (file) void doUpload(file);
+    if (files) void doUpload(files);
   }
 
   function cancelImageConsent() {
     setPendingImage(null);
   }
 
-  function removeAttachment() {
-    setAttachment(null);
-    onAttachmentChange?.(null);
+  function removeAttachment(fileId: string) {
+    setAttachments(prev => {
+      const proximos = prev.filter(a => a.fileId !== fileId);
+      onAttachmentChange?.(proximos);
+      return proximos;
+    });
+    setUploadState('idle');
+    setUploadError('');
+  }
+
+  function clearError() {
     setUploadState('idle');
     setUploadError('');
   }
 
   function submit() {
     if (!filled || disabled || sendBlocked) return;
-    onSend(value.trim(), effort, attachment ?? undefined);
+    onSend(value.trim(), effort, attachments.length > 0 ? attachments : undefined);
     setValue('');
-    setAttachment(null);
-    onAttachmentChange?.(null);
+    setAttachments([]);
+    onAttachmentChange?.([]);
     setUploadState('idle');
     setUploadError('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -225,13 +255,30 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
           </div>
         )}
 
-        {/* Chip de arquivo anexado */}
-        {(attachment || uploadState !== 'idle') && (
-          <div style={{ marginBottom: 8 }}>
+        {/* Chips dos arquivos anexados */}
+        {(attachments.length > 0 || uploadState !== 'idle') && (
+          <div style={{ marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {attachments.map(att => (
+              <div key={att.fileId} style={chipNeutral} data-testid="anexo-chip">
+                <span>{FILE_TYPE_ICON[att.fileType] ?? '📎'}</span>
+                <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {att.name}
+                </span>
+                <button
+                  onClick={() => removeAttachment(att.fileId)}
+                  title={`Remover ${att.name}`}
+                  aria-label={`Remover ${att.name}`}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--pen3)', padding: 0, fontSize: 14, lineHeight: 1,
+                  }}
+                >×</button>
+              </div>
+            ))}
             {uploadState === 'loading' && (
               <div style={chipNeutral}>
                 <span style={{ animation: 'pulse 1s infinite' }}>⏳</span>
-                Processando arquivo…
+                Processando…
               </div>
             )}
             {uploadState === 'error' && (
@@ -243,26 +290,9 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
               }}>
                 ⚠️ {uploadError}
                 <button
-                  onClick={removeAttachment}
+                  onClick={clearError}
                   aria-label="Descartar erro"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 0, fontSize: 13, lineHeight: 1 }}
-                >×</button>
-              </div>
-            )}
-            {attachment && uploadState === 'idle' && (
-              <div style={chipNeutral}>
-                <span>{FILE_TYPE_ICON[attachment.fileType] ?? '📎'}</span>
-                <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {attachment.name}
-                </span>
-                <button
-                  onClick={removeAttachment}
-                  title="Remover arquivo"
-                  aria-label="Remover arquivo"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--pen3)', padding: 0, fontSize: 14, lineHeight: 1,
-                  }}
                 >×</button>
               </div>
             )}
@@ -290,20 +320,25 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             accept={ACCEPTED_FILE_TYPES}
             onChange={handleFileChange}
             style={{ display: 'none' }}
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || uploadState === 'loading'}
-            title="Anexar arquivo (PDF, Word, Excel, imagem)"
-            aria-label="Anexar arquivo"
+            disabled={disabled || uploadState === 'loading' || attachments.length >= MAX_ANEXOS}
+            title={
+              attachments.length >= MAX_ANEXOS
+                ? `Máximo de ${MAX_ANEXOS} arquivos por mensagem`
+                : 'Anexar arquivos (PDF, Word, Excel, imagem)'
+            }
+            aria-label="Anexar arquivos"
             style={{
               ...iconButtonBase,
               width: 30,
-              background: attachment ? 'var(--fill2)' : 'transparent',
-              color: attachment ? 'var(--petrol)' : 'var(--pen3)',
+              background: attachments.length > 0 ? 'var(--fill2)' : 'transparent',
+              color: attachments.length > 0 ? 'var(--petrol)' : 'var(--pen3)',
             }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

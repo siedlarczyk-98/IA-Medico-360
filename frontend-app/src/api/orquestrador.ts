@@ -30,7 +30,11 @@ export interface Message {
   confidence?: number;
   citations?: string[];
   pubmed_validation?: PubmedValidation;
-  attachmentName?: string;
+  /**
+   * Anexos da mensagem. Só metadados — o texto extraído já está no `content`,
+   * e o base64 da imagem não volta do backend na listagem da conversa.
+   */
+  attachments?: Array<{ id?: string; file_name: string; file_type: string }>;
 }
 
 // Eventos tipados que o stream pode emitir
@@ -69,6 +73,7 @@ export interface StreamParams {
   history?: { role: 'user' | 'assistant'; content: string }[];
   folder_id?: string;
   file_id?: string;
+  file_ids?: string[];
 }
 
 export async function queryOrquestrador(params: StreamParams): Promise<{ response: string; mode: string; conversation_id: string }> {
@@ -84,7 +89,7 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
       ...(params.mode                  ? { mode: params.mode }                                 : {}),
       history: params.history ?? [],
       ...(params.folder_id             ? { folder_id: params.folder_id }                       : {}),
-      ...(params.file_id               ? { file_id: params.file_id }                           : {}),
+      ...(params.file_ids?.length      ? { file_ids: params.file_ids }                         : {}),
     }),
   });
   if (!res.ok) {
@@ -115,7 +120,7 @@ export async function* streamQuery(
       ...(params.mode                ? { mode: params.mode }                               : {}),
       history: params.history ?? [],
       ...(params.folder_id           ? { folder_id: params.folder_id }                     : {}),
-      ...(params.file_id             ? { file_id: params.file_id }                         : {}),
+      ...(params.file_ids?.length    ? { file_ids: params.file_ids }                       : {}),
     }),
     signal,
   });

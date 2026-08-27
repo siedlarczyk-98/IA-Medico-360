@@ -7,9 +7,18 @@ const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: s
   { icon: 'raciocinio',   key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
   { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Interações, bulas, receituário e genéricos — dados oficiais vindos da ANVISA em tempo real.' },
   { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
+  { icon: 'exames',       key: 'EXAM_REVIEW',        title: 'Exames',                  desc: 'Anexe laudo, imagem ou resultado laboratorial e discuta os achados — até 5 arquivos por mensagem.' },
 ];
 
 const icons: Record<string, ReactElement> = {
+  exames: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <rect x="2.5" y="2" width="11" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="8" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5 11.5 H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+
   raciocinio: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
       <path d="M8 1.5 C5 1.5 3.5 3.5 3.5 5.5 C3.5 7 2 7.5 2 9 C2 10.5 3.5 11 3.5 12.5 L3.5 14 L12.5 14 L12.5 12.5 C12.5 11 14 10.5 14 9 C14 7.5 12.5 7 12.5 5.5 C12.5 3.5 11 1.5 8 1.5 Z"
