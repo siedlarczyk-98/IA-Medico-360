@@ -192,6 +192,10 @@ async def agregador_stream(
         # eliminando o busy-loop com get_nowait() + sleep(0.01).
         shared_q: asyncio.Queue = asyncio.Queue()
         total = len(models_info)
+        # `asyncio` só guarda referência fraca para a task. Sem manter a
+        # referência aqui, o coletor pode recolher uma consulta em voo e o
+        # consumidor abaixo ficaria esperando uma sentinela que nunca chega.
+        tarefas: set[asyncio.Task] = set()
 
         for model_id, model_info in models_info.items():
             provider = get_provider_by_type(model_info.provider_type)
@@ -237,7 +241,9 @@ async def agregador_stream(
                 finally:
                     await shared_q.put(None)  # sentinela de conclusão deste modelo
 
-            asyncio.create_task(_run())
+            tarefa = asyncio.create_task(_run())
+            tarefas.add(tarefa)
+            tarefa.add_done_callback(tarefas.discard)
 
         done_count = 0
         while done_count < total:

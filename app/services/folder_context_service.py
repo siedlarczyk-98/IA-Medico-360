@@ -15,6 +15,7 @@ de outro se o filtro estiver frouxo. Todo caminho de leitura filtra por
 `user_id` E `folder_id`, e há teste dedicado em `tests/test_folder_context.py`.
 """
 
+import asyncio
 import logging
 from uuid import UUID
 
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.core.database import async_session_factory
 from app.core.http_client import get_client
 from app.models.models import Conversation, Folder, Interaction, MessageEmbedding
 
@@ -161,6 +163,11 @@ async def indexar_pasta(db: AsyncSession, user_id: UUID, folder_id: UUID) -> int
     então nunca teria sido indexada), e conversas fora de pasta não custam
     embedding nenhum — só quem usa pasta como projeto paga por isso.
 
+    Preguiçosa, mas NÃO no caminho da resposta: quem chama é
+    `agendar_indexacao`, em background. Rodando inline, uma pasta ativa fazia o
+    médico esperar o embedding de todos os turnos acumulados antes do primeiro
+    token — e o custo crescia com o uso da pasta, que é o oposto do desejado.
+
     Falha silenciosa: sem índice a resposta sai sem contexto da pasta, que é
     pior que o ideal mas melhor que não responder.
     """
@@ -187,6 +194,71 @@ async def indexar_pasta(db: AsyncSession, user_id: UUID, folder_id: UUID) -> int
     except Exception as exc:
         logger.warning("[PastaContexto] Falha ao indexar pasta %s: %s", folder_id, exc)
         return 0
+
+
+# Referência forte às tarefas em voo. `asyncio` só guarda referência fraca para
+# a task, então sem este conjunto o coletor de lixo pode recolher a indexação no
+# meio do caminho — e a falha seria silenciosa, que é o pior modo possível aqui.
+# Serve também de trava: duas perguntas seguidas na mesma pasta não devem
+# disparar duas indexações concorrentes do mesmo conjunto pendente.
+_indexacoes_em_voo: dict[UUID, asyncio.Task] = {}
+
+
+async def _indexar_com_sessao_propria(user_id: UUID, folder_id: UUID) -> None:
+    """
+    Roda a indexação fora da requisição, com sessão própria.
+
+    A sessão da requisição NÃO pode ser reaproveitada: `AsyncSession` não é
+    segura para uso concorrente, e a requisição vai dar commit no meio — a
+    indexação entraria por carona numa transação que não controla.
+    """
+    async with async_session_factory() as db:
+        try:
+            quantos = await indexar_pasta(db, user_id, folder_id)
+            if quantos:
+                await db.commit()
+                logger.info(
+                    "[PastaContexto] Pasta %s indexada em background: %d turnos",
+                    folder_id, quantos,
+                )
+        except Exception:
+            await db.rollback()
+            raise
+
+
+def agendar_indexacao(user_id: UUID, folder_id: UUID) -> asyncio.Task | None:
+    """
+    Dispara a indexação da pasta em background e devolve na hora.
+
+    Devolve a task existente se já houver uma em voo para a mesma pasta, ou
+    None se não houver event loop (chamada fora de contexto async).
+    """
+    em_voo = _indexacoes_em_voo.get(folder_id)
+    if em_voo is not None and not em_voo.done():
+        return em_voo
+
+    try:
+        tarefa = asyncio.create_task(
+            _indexar_com_sessao_propria(user_id, folder_id),
+            name=f"indexar-pasta-{folder_id}",
+        )
+    except RuntimeError:  # pragma: no cover — sem loop rodando
+        return None
+
+    _indexacoes_em_voo[folder_id] = tarefa
+
+    def _encerrar(t: asyncio.Task) -> None:
+        _indexacoes_em_voo.pop(folder_id, None)
+        # Uma indexação que falha não pode derrubar nada nem virar
+        # "Task exception was never retrieved" solto no log.
+        if not t.cancelled() and t.exception() is not None:
+            logger.warning(
+                "[PastaContexto] Indexação em background da pasta %s falhou: %s",
+                folder_id, t.exception(),
+            )
+
+    tarefa.add_done_callback(_encerrar)
+    return tarefa
 
 
 async def recuperar_trechos(
@@ -334,11 +406,19 @@ async def contexto_da_pasta(
 
     Vazio é o caminho normal e não é erro — conversa fora de pasta, pasta com
     uma conversa só, ou nada suficientemente parecido com a pergunta.
+
+    A recuperação usa o índice COMO ELE ESTÁ e agenda a atualização para depois.
+    O efeito visível é que os turnos ainda não indexados não entram no contexto
+    desta pergunta — na prática, a primeira pergunta logo após mover uma
+    conversa para a pasta não enxerga aquela conversa, e da segunda em diante
+    sim. É uma troca deliberada: indexar antes de responder colocava um lote de
+    embeddings no caminho do primeiro token, e a espera crescia junto com o
+    tamanho da pasta, punindo justamente quem mais usa o recurso.
     """
     pasta = await _resolver_pasta(db, user_id, conversation_id, folder_id)
     if pasta is None:
         return ""
 
-    await indexar_pasta(db, user_id, pasta)
     trechos = await recuperar_trechos(db, user_id, pasta, conversation_id, pergunta)
+    agendar_indexacao(user_id, pasta)
     return formatar_bloco(trechos)

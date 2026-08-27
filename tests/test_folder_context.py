@@ -400,10 +400,23 @@ async def test_conversa_nova_na_pasta_recebe_contexto(db, user, folder_factory):
     assert "EVOLUCAO DO PACIENTE JORGE" in bloco
 
 
-async def test_conversa_nova_indexa_a_pasta_na_primeira_pergunta(db, user, folder_factory):
-    """Sem conversa ainda, a indexação precisa acontecer pela pasta."""
+async def test_conversa_nova_indexa_a_pasta_na_primeira_pergunta(
+    db, db_conn, user, folder_factory, monkeypatch
+):
+    """
+    Sem conversa ainda, a indexação precisa acontecer pela pasta.
+
+    Desde que ela saiu do caminho crítico, a indexação roda em background com
+    sessão própria — o teste espera a tarefa antes de conferir o resultado.
+    """
     from sqlalchemy import func
     from sqlalchemy import select as sa_select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    monkeypatch.setattr(
+        folder_context_service, "async_session_factory",
+        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+    )
 
     pasta = await folder_factory(user, "Pasta")
     conv = await _conversa_indexada(db, user, pasta, "Antiga", "conteudo antigo")
@@ -414,15 +427,140 @@ async def test_conversa_nova_indexa_a_pasta_na_primeira_pergunta(db, user, folde
             MessageEmbedding.conversation_id == conv.id
         )
     )
-    await db.flush()
+    await db.commit()
 
     await contexto_da_pasta(db, user.id, None, "pergunta", folder_id=pasta.id)
+    tarefa = folder_context_service._indexacoes_em_voo.get(pasta.id)
+    assert tarefa is not None, "a indexação deveria ter sido agendada"
+    await tarefa
 
     total = (await db.execute(
         sa_select(func.count()).select_from(MessageEmbedding)
         .where(MessageEmbedding.conversation_id == conv.id)
     )).scalar_one()
     assert total > 0
+
+
+# ── Indexação fora do caminho da resposta ────────────────────────────────────
+# Rodando inline, o embedding de todos os turnos pendentes da pasta ficava entre
+# a pergunta e o primeiro token — e a espera crescia conforme a pasta enchia.
+
+async def test_contexto_da_pasta_nao_espera_o_embedding(
+    db, db_conn, user, folder_factory, monkeypatch
+):
+    """
+    Com a indexação travada, `contexto_da_pasta` ainda precisa retornar. Se ela
+    voltasse a ser aguardada, este teste passaria a estourar por timeout.
+    """
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    monkeypatch.setattr(
+        folder_context_service, "async_session_factory",
+        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+    )
+
+    async def _embed_travado(_client, textos):
+        # A recuperação usa o mesmo helper; só a indexação (lote > 1) trava.
+        if len(textos) > 1:
+            await asyncio.sleep(3600)
+        return [vetor() for _ in textos]
+
+    pasta = await folder_factory(user, "Pasta")
+    conv_a = await _conversa_indexada(db, user, pasta, "Irma A", "conteudo A")
+    await _conversa_indexada(db, user, pasta, "Irma B", "conteudo B")
+    await db.execute(
+        MessageEmbedding.__table__.delete().where(
+            MessageEmbedding.conversation_id == conv_a.id
+        )
+    )
+    await db.commit()
+
+    monkeypatch.setattr(folder_context_service, "_embed_batch", _embed_travado)
+
+    async with asyncio.timeout(5):
+        await contexto_da_pasta(db, user.id, None, "pergunta", folder_id=pasta.id)
+
+    tarefa = folder_context_service._indexacoes_em_voo.get(pasta.id)
+    if tarefa is not None:
+        tarefa.cancel()
+
+
+async def test_indexacao_em_background_usa_sessao_propria(
+    db, db_conn, user, folder_factory, monkeypatch
+):
+    """
+    A sessão da requisição não pode ser reaproveitada: `AsyncSession` não é
+    segura para uso concorrente e a requisição faz commit no meio.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    sessoes_abertas = []
+    fabrica = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+
+    def _fabrica_espia():
+        sessao = fabrica()
+        sessoes_abertas.append(sessao)
+        return sessao
+
+    monkeypatch.setattr(folder_context_service, "async_session_factory", _fabrica_espia)
+
+    pasta = await folder_factory(user, "Pasta")
+    conv = await _conversa_indexada(db, user, pasta, "Antiga", "conteudo antigo")
+    await db.execute(
+        MessageEmbedding.__table__.delete().where(
+            MessageEmbedding.conversation_id == conv.id
+        )
+    )
+    await db.commit()
+
+    await contexto_da_pasta(db, user.id, None, "pergunta", folder_id=pasta.id)
+    await folder_context_service._indexacoes_em_voo[pasta.id]
+
+    assert sessoes_abertas, "a indexação deveria ter aberto a própria sessão"
+    assert all(s is not db for s in sessoes_abertas)
+
+
+async def test_duas_perguntas_seguidas_nao_indexam_a_pasta_duas_vezes(
+    db, db_conn, user, folder_factory, monkeypatch
+):
+    """Sem a trava, duas perguntas em sequência disparariam duas indexações
+    concorrentes do MESMO conjunto pendente — trabalho e custo em dobro."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    monkeypatch.setattr(
+        folder_context_service, "async_session_factory",
+        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+    )
+
+    lotes = []
+
+    async def _embed_lento(_client, textos):
+        lotes.append(len(textos))
+        await asyncio.sleep(0.05)
+        return [vetor() for _ in textos]
+
+    pasta = await folder_factory(user, "Pasta")
+    conv = await _conversa_indexada(db, user, pasta, "Antiga", "conteudo antigo")
+    await db.execute(
+        MessageEmbedding.__table__.delete().where(
+            MessageEmbedding.conversation_id == conv.id
+        )
+    )
+    await db.commit()
+
+    monkeypatch.setattr(folder_context_service, "_embed_batch", _embed_lento)
+
+    primeira = folder_context_service.agendar_indexacao(user.id, pasta.id)
+    segunda = folder_context_service.agendar_indexacao(user.id, pasta.id)
+    assert segunda is primeira, "a segunda chamada deveria reaproveitar a tarefa em voo"
+    await primeira
+
+    # Um único lote: o da indexação que estava em voo.
+    assert len(lotes) == 1
 
 
 async def test_pasta_alheia_no_corpo_da_requisicao_nao_vaza(
