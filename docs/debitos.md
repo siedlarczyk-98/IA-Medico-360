@@ -37,11 +37,22 @@ vive no painel, não no repositório, então não há como um teste ou o CI perc
 que ele parou. É uma política de LGPD que existe no papel e no código, mas não
 na prática.
 
-**O que falta:**
-1. Confirmar/recriar o agendamento no Railway.
-2. Rodar o expurgo uma vez para limpar o passivo dos 14.
-3. Alguma forma de perceber que parou de novo — hoje o silêncio é
-   indistinguível do sucesso.
+**Estado:**
+1. ~~Rodar o expurgo para limpar o passivo~~ — feito: 14 imagens e 18 entradas
+   de cache. Passivo zerado.
+2. ~~Alguma forma de perceber que parou de novo~~ — feito:
+   `scripts/verificar_expurgo.py` mede o passivo e abre evento `warning` no
+   Sentry com a tag `alarme=expurgo_lgpd`. Deve rodar como segundo cron, algumas
+   horas depois do expurgo.
+3. **PENDENTE — só no painel do Railway:** confirmar/recriar o agendamento.
+
+**Hipótese sobre a causa, a conferir no painel.** O Railway executa o start
+command do serviço e **pula** a execução seguinte se a anterior ainda estiver
+rodando. Se o *Cron Schedule* tiver sido posto no serviço do backend, o que roda
+é o `CMD` do Dockerfile (`uvicorn`), que nunca encerra — e a partir da primeira
+execução tudo é pulado, em silêncio. Isso explicaria exatamente os 8 registros
+expurgados seguidos de 39 dias de nada. Cron do Railway precisa de serviço
+próprio, com comando que termine. Passo a passo em `docs/runbook.md`.
 
 **Decisões de escopo já tomadas pelo dono (2026-08-27):** descartar o base64
 após 30 dias (já é a política vigente) e apagar os anexos junto com a conversa.

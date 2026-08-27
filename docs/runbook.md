@@ -268,6 +268,36 @@ Nunca ligar `send_default_pii=True` nem remover o `before_send`: é o que separa
 
 O expurgo roda por cron: `python -m scripts.expurgar_dados_vencidos`.
 
+**O cron precisa de um SERVIÇO PRÓPRIO no Railway.** O Railway executa o start
+command do serviço e espera que ele termine; se o *Cron Schedule* for posto no
+serviço do backend, o que roda é o `CMD` do Dockerfile (`uvicorn`), que nunca
+encerra — e a partir daí toda execução seguinte é **pulada**, porque para o
+Railway "a anterior ainda está rodando". Sem erro, sem aviso.
+
+| Campo | Valor |
+|---|---|
+| Repositório | o mesmo |
+| Start Command | `python -m scripts.expurgar_dados_vencidos` |
+| Cron Schedule | `0 4 * * *` (UTC — 1h em Brasília) |
+| Variáveis | as mesmas do backend (precisa de `DATABASE_URL`) |
+
+**O Railway não notifica falha de cron.** Por isso existe um segundo serviço, de
+alarme, que confere o resultado e reporta ao Sentry:
+
+| Campo | Valor |
+|---|---|
+| Start Command | `python -m scripts.verificar_expurgo` |
+| Cron Schedule | `0 6 * * *` (duas horas depois do expurgo) |
+| Variáveis | as mesmas, incluindo `SENTRY_DSN` |
+
+O verificador sai com código 1 e abre um evento `warning` no Sentry com a tag
+`alarme=expurgo_lgpd` quando encontra passivo. Rodá-lo à mão a qualquer momento
+também responde "a política está sendo cumprida?" sem apagar nada.
+
+> Isto não é hipotético: em 2026-08-27 havia 14 imagens **39 dias** além do
+> prazo, e 8 já expurgadas — a assinatura de um job que rodou uma vez e nunca
+> mais. Ninguém percebeu porque nada avisa.
+
 | Dado | Prazo | Por quê |
 |---|---|---|
 | Imagem crua de arquivo (`image_base64`) | 30 dias | Mais sensível da base: foto de exame ou receita, fora do alcance do DLP |
