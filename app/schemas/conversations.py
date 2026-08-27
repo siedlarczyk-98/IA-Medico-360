@@ -72,6 +72,11 @@ class ConversationDetail(BaseModel):
     id: UUID
     title: str | None
     feature: str
+    # A pasta acompanha o detalhe para que a interface possa avisar o médico de
+    # que respostas nesta conversa podem trazer material de outras conversas da
+    # mesma pasta. Sem esse aviso, o cruzamento acontece sem ele saber.
+    folder_id: UUID | None = None
+    folder_name: str | None = None
     messages: list[ConversationMessage]
     created_at: datetime
     updated_at: datetime

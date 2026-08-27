@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.models.models import Conversation, FileExtraction, Interaction, User
+from app.models.models import Conversation, FileExtraction, Folder, Interaction, User
 from app.schemas.conversations import (
     AttachmentOut,
     ConversationDetail,
@@ -123,10 +123,21 @@ async def get_conversation(
                     ))
                     break
 
+    folder_name = None
+    if conv.folder_id:
+        folder_name = (await db.execute(
+            select(Folder.name).where(
+                Folder.id == conv.folder_id,
+                Folder.user_id == current_user.id,
+            )
+        )).scalar_one_or_none()
+
     return ConversationDetail(
         id=conv.id,
         title=conv.title,
         feature=conv.feature,
+        folder_id=conv.folder_id,
+        folder_name=folder_name,
         messages=messages,
         created_at=conv.created_at,
         updated_at=conv.updated_at,

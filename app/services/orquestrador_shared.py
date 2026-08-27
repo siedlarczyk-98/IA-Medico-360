@@ -23,10 +23,12 @@ from app.models.models import Conversation, FileExtraction, Interaction
 from app.services.ai_providers import OpenAIProvider
 from app.services.context_budget import (
     DEFAULT_HISTORY_TOKEN_BUDGET,
+    Turn,
     fit_turns_to_budget,
     turns_to_messages,
 )
 from app.services.conversation_history import load_history
+from app.services.folder_context_service import contexto_da_pasta
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,8 @@ async def load_context_messages(
     user_id: UUID,
     conversation_id: UUID | None,
     budget_tokens: int = DEFAULT_HISTORY_TOKEN_BUDGET,
+    *,
+    pergunta_atual: str | None = None,
 ) -> list[dict]:
     """
     Histórico da conversa como lista de turnos, pronta para o provider.
@@ -63,8 +67,24 @@ async def load_context_messages(
     O prompt usado para o cache semântico continua sendo o texto atual sem
     histórico — a separação é deliberada, senão cada conversa teria chave de
     cache própria e o cache nunca acertaria.
+
+    Quando a conversa está numa pasta e `pergunta_atual` é informada, um bloco
+    com trechos relevantes das OUTRAS conversas da pasta entra ANTES do
+    histórico próprio, como uma fala de contexto identificada.
     """
     turns = await load_history(db, user_id, conversation_id)
+
+    bloco_pasta = ""
+    if pergunta_atual:
+        bloco_pasta = await contexto_da_pasta(db, user_id, conversation_id, pergunta_atual)
+
+    if bloco_pasta:
+        # O bloco entra como turno de usuário e ANTES do histórico: é pano de
+        # fundo, não a última coisa dita. E ocupa o orçamento junto com o
+        # resto — se a conversa própria for longa, ela ganha o espaço, que é o
+        # comportamento certo (o caso atual vale mais que casos vizinhos).
+        turns = [Turn(role="user", content=bloco_pasta), *turns]
+
     return turns_to_messages(fit_turns_to_budget(turns, budget_tokens))
 
 

@@ -98,6 +98,9 @@ function MainApp() {
   // as checagens de visão do Agregador. O InputBar já entrega o anexo direto ao
   // `sendMessage`, que é quem precisa dele.
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
+  // Pasta da conversa ABERTA (diferente de `pendingFolderName`, que é a pasta
+  // onde uma conversa nova vai nascer). Alimenta o aviso de contexto cruzado.
+  const [activeFolderName, setActiveFolderName] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
 
   // Id da mensagem de assistente em streaming, para removê-la se o stream for
@@ -310,6 +313,7 @@ function MainApp() {
     setStreaming(false);
     setActiveConvId(undefined);
     setClarification(null);
+    setActiveFolderName(folderName);
     setSelectedMode('QUICK_SEARCH');
     pendingFolderIdRef.current = folderId;
     pendingFolderNameRef.current = folderName;
@@ -333,6 +337,7 @@ function MainApp() {
           : m
       ));
       setActiveConvId(detail.id);
+      setActiveFolderName(detail.folder_name ?? undefined);
     } catch {
       handleNew();
     }
@@ -350,6 +355,15 @@ function MainApp() {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar title={topbarTitle} onMenuToggle={toggleSidebar} />
+        {activeFolderName && messages.length > 0 && (
+          <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+            Pode usar outras conversas da pasta <strong style={{ color: 'var(--ink)' }}>{activeFolderName}</strong> como contexto
+          </div>
+        )}
+
         {pendingFolderName && messages.length === 0 && (
           <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">

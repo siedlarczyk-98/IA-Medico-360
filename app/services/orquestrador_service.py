@@ -114,7 +114,7 @@ class OrquestradorService:
             # 2b. Histórico lido do BANCO, não do que o cliente mandou. O
             # parâmetro `history` da requisição é ignorado de propósito —
             # ver `conversation_history.load_history`.
-            history_messages = await load_context_messages(self.db, self.user_id, conversation_id)
+            history_messages = await load_context_messages(self.db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt)
 
             # 3. Triagem
             # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage

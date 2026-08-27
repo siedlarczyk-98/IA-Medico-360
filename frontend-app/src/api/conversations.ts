@@ -24,6 +24,12 @@ export interface ConversationDetail {
   id: string;
   title: string | null;
   feature: 'ORQUESTRADOR' | 'AGREGADOR';
+  /**
+   * Pasta da conversa. Presente para que a interface avise o médico de que
+   * respostas aqui podem trazer material de outras conversas da mesma pasta.
+   */
+  folder_id: string | null;
+  folder_name: string | null;
   messages: Message[];
   created_at: string;
   updated_at: string;

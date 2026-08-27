@@ -374,6 +374,40 @@ class OtpCode(Base):
 
 # ── File Extractions ──────────────────────────────────────────
 
+class MessageEmbedding(Base):
+    """
+    Trecho de conversa indexado para busca semântica dentro de uma pasta.
+
+    Uma interação vira até dois registros — a pergunta e a resposta —, porque a
+    pergunta do médico e a conclusão do assistente respondem a buscas
+    diferentes.
+    """
+
+    __tablename__ = "message_embeddings"
+    __table_args__ = (
+        Index("ix_message_embeddings_user_conversation", "user_id", "conversation_id"),
+        Index("ix_message_embeddings_interaction", "interaction_id", "role"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    interaction_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interactions.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalizado a partir da conversa: o filtro por dono é a garantia de
+    # isolamento da busca, e não deve depender de um JOIN que alguém possa
+    # esquecer de escrever.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list] = mapped_column(Vector(1536), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class FileExtraction(Base):
     __tablename__ = "file_extractions"
     __table_args__ = (

@@ -160,7 +160,7 @@ class OrquestradorStreamService:
                 # O parâmetro `history` da requisição é ignorado de propósito —
                 # ver `conversation_history.load_history`. O cache continua
                 # usando `sanitized_prompt`, sem histórico.
-                history_messages = await load_context_messages(db, self.user_id, conversation_id)
+                history_messages = await load_context_messages(db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt)
 
                 # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
                 # resolver o sub-modo correto (bula, receita, genérico, interação),

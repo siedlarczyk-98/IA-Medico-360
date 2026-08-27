@@ -165,7 +165,62 @@ com regressão visual, não carona numa mudança de contexto de IA.
 
 ---
 
-## 10. Sem cobertura end-to-end do fluxo de exames
+## 10. Limiar de similaridade da busca em pasta não foi medido
+
+**O que é.** `folder_context_service.SIMILARITY_THRESHOLD = 0.72` e
+`MAX_TRECHOS = 4` são números escolhidos, não medidos. Deliberadamente mais
+frouxo que o 0.88 do cache semântico, porque a pergunta é outra — o cache
+precisa de quase-identidade, a recuperação precisa de relevância.
+
+**Como erra.** Frouxo demais, o médico recebe trechos irrelevantes de outros
+casos misturados à resposta. Apertado demais, o recurso simplesmente nunca
+dispara e ninguém percebe que ele existe.
+
+**Por que não dá para calibrar agora.** Precisa de pastas reais com várias
+conversas. Não existe esse dado ainda.
+
+---
+
+## 11. Sem índice ivfflat em `message_embeddings`
+
+**O que é.** `semantic_cache` tem índice ivfflat; `message_embeddings` não.
+
+**Por quê.** ivfflat é aproximado e precisa de volume para ser treinado bem.
+Aqui a busca é sempre dentro de UMA pasta de UM usuário — o conjunto filtrado é
+pequeno e a varredura exata é mais correta.
+
+**Quando revisitar.** Se aparecer pasta com centenas de conversas e a latência
+da primeira resposta subir de forma perceptível.
+
+---
+
+## 12. Indexação preguiçosa cobra a conta na primeira pergunta
+
+**O que é.** `indexar_pasta` roda no caminho quente: a primeira pergunta feita
+numa pasta que já tinha conversas paga a indexação de até 60 trechos (uma
+chamada de embedding em lote) antes de a resposta começar.
+
+**Por que assim.** Indexar na escrita de cada mensagem cobraria embedding de
+toda conversa, inclusive as que nunca entram em pasta. E não resolveria conversa
+MOVIDA para dentro de uma pasta depois de pronta, que nunca teria sido indexada.
+
+**Alternativa se incomodar:** disparar a indexação em background ao mover
+conversa para pasta, mantendo a preguiçosa como rede.
+
+---
+
+## 13. Embeddings não são reindexados quando a mensagem muda
+
+**O que é.** `message_embeddings.content` é uma cópia do texto no momento da
+indexação. Não há caminho que edite mensagem hoje, então não há divergência —
+mas se um dia houver, o índice ficará apontando para texto antigo.
+
+**Mitigação atual:** nenhuma necessária. Registrado para que quem for
+implementar edição de mensagem saiba que precisa invalidar o índice.
+
+---
+
+## 14. Sem cobertura end-to-end do fluxo de exames
 
 **O que é.** Os testes de exame cobrem as peças (resolução de anexos, posse,
 vínculo, roteamento de modo) mas nenhum exercita o caminho completo com o app
