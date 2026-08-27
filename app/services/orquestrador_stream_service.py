@@ -160,7 +160,7 @@ class OrquestradorStreamService:
                 # O parâmetro `history` da requisição é ignorado de propósito —
                 # ver `conversation_history.load_history`. O cache continua
                 # usando `sanitized_prompt`, sem histórico.
-                history_messages = await load_context_messages(db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt)
+                history_messages = await load_context_messages(db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
 
                 # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
                 # resolver o sub-modo correto (bula, receita, genérico, interação),
@@ -198,7 +198,7 @@ class OrquestradorStreamService:
 
                 # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
                 if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
-                    clarification = await check_clarification(sanitized_prompt)
+                    clarification = await check_clarification(sanitized_prompt, contexto=history_messages)
                     if not clarification.get("sufficient", True):
                         questions = clarification.get("questions", [])
                         conv_id = await ensure_conversation(db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)

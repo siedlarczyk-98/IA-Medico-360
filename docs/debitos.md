@@ -165,19 +165,32 @@ com regressão visual, não carona numa mudança de contexto de IA.
 
 ---
 
-## 10. Limiar de similaridade da busca em pasta não foi medido
+## 10. Calibração da busca em pasta — parcialmente medida
 
-**O que é.** `folder_context_service.SIMILARITY_THRESHOLD = 0.72` e
-`MAX_TRECHOS = 4` são números escolhidos, não medidos. Deliberadamente mais
-frouxo que o 0.88 do cache semântico, porque a pergunta é outra — o cache
-precisa de quase-identidade, a recuperação precisa de relevância.
+**Estado.** O limiar original (0.72) estava errado e foi corrigido na
+homologação de 2026-08-27. Hoje é um **piso contra lixo** de 0.25, não um
+critério de relevância: quem filtra relevância é a PASTA, e a similaridade só
+ranqueia o que cabe no orçamento.
 
-**Como erra.** Frouxo demais, o médico recebe trechos irrelevantes de outros
-casos misturados à resposta. Apertado demais, o recurso simplesmente nunca
-dispara e ninguém percebe que ele existe.
+**O erro que motivou a correção, registrado para não se repetir.** O 0.72 foi
+ancorado no 0.88 do cache semântico, com o raciocínio "mais frouxo, então
+serve". Os dois números medem regimes incomparáveis: o cache compara dois
+prompts CURTOS quase idênticos; a busca em pasta compara uma pergunta curta com
+um documento clínico longo. Medição real: a pergunta *"existe alguma
+contraindicação para o paciente Jorge?"* pontuou **0.516** contra a evolução que
+diz *"Jorge, 58 anos, HAS em acompanhamento"* — o documento mais pertinente
+possível. Com limiar 0.72, a busca voltava vazia para toda pergunta, sempre.
+Cosseno absoluto não é comparável entre usos diferentes.
 
-**Por que não dá para calibrar agora.** Precisa de pastas reais com várias
-conversas. Não existe esse dado ainda.
+**O que ainda não foi medido:** `MAX_TRECHOS = 4` e o valor do piso em pastas
+grandes e heterogêneas. Com piso baixo, uma pasta com assuntos misturados pode
+injetar trecho pouco pertinente — o teto de 4 e o rótulo de "material de apoio"
+limitam o estrago, mas o ajuste fino depende de uso real.
+
+**Observabilidade:** `recuperar_trechos` agora loga as similaridades de cada
+busca. Sem isso, "não veio contexto" e "veio contexto ruim" eram
+indistinguíveis de fora — foi essa cegueira que deixou o limiar errado passar
+por 20 testes verdes.
 
 ---
 

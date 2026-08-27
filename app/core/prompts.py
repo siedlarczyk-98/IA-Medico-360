@@ -79,6 +79,8 @@ Considere SUFICIENTE em TODOS estes casos (retorne {"sufficient": true} imediata
 
 Considere INSUFICIENTE APENAS quando a mensagem for COMPLETAMENTE vaga, sem nenhuma queixa ou contexto clínico identificável (ex: "e aí?", "preciso de ajuda", "o que fazer com esse paciente?").
 
+Se vier um bloco [Contexto já disponível], ele contém material que o assistente JÁ TEM em mãos — histórico da conversa e trechos de outras conversas da mesma pasta do paciente. Avalie a suficiência considerando a mensagem MAIS esse contexto. NÃO peça informação que já está ali: perguntar ao médico algo que ele já forneceu antes é o pior resultado possível desta etapa.
+
 Quando insuficiente, gere no máximo 2 perguntas objetivas. Seja extremamente criterioso — na dúvida, considere suficiente.
 NUNCA retorne texto fora do JSON.
 NUNCA use marcações markdown (como ```json ou ```). Retorne estritamente os caracteres { e } contendo o JSON válido."""

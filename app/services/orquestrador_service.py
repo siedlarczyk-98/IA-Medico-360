@@ -114,7 +114,7 @@ class OrquestradorService:
             # 2b. Histórico lido do BANCO, não do que o cliente mandou. O
             # parâmetro `history` da requisição é ignorado de propósito —
             # ver `conversation_history.load_history`.
-            history_messages = await load_context_messages(self.db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt)
+            history_messages = await load_context_messages(self.db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
 
             # 3. Triagem
             # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage
@@ -148,7 +148,7 @@ class OrquestradorService:
 
             # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
             if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
-                clarification = await check_clarification(sanitized_prompt)
+                clarification = await check_clarification(sanitized_prompt, contexto=history_messages)
                 if not clarification.get("sufficient", True):
                     questions = clarification.get("questions", [])
                     conv_id = await ensure_conversation(self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)

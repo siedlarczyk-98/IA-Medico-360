@@ -52,6 +52,7 @@ async def load_context_messages(
     budget_tokens: int = DEFAULT_HISTORY_TOKEN_BUDGET,
     *,
     pergunta_atual: str | None = None,
+    folder_id: UUID | None = None,
 ) -> list[dict]:
     """
     Histórico da conversa como lista de turnos, pronta para o provider.
@@ -76,7 +77,9 @@ async def load_context_messages(
 
     bloco_pasta = ""
     if pergunta_atual:
-        bloco_pasta = await contexto_da_pasta(db, user_id, conversation_id, pergunta_atual)
+        bloco_pasta = await contexto_da_pasta(
+            db, user_id, conversation_id, pergunta_atual, folder_id=folder_id
+        )
 
     if bloco_pasta:
         # O bloco entra como turno de usuário e ANTES do histórico: é pano de
@@ -184,9 +187,53 @@ async def link_attachments(db, user_id: UUID, interaction_id: UUID, attachment_i
     )
 
 
-async def check_clarification(prompt: str) -> dict:
+# Teto do contexto mostrado ao verificador de clarificação. Ele só precisa
+# saber SE a informação existe, não lê-la inteira — e roda num modelo pequeno.
+MAX_CHARS_CONTEXTO_CLARIFICACAO = 4000
+
+
+def _prompt_com_contexto(prompt: str, contexto: list[dict] | None) -> str:
+    """
+    Anexa o contexto disponível à mensagem avaliada.
+
+    Sem isto o verificador julgava a pergunta pelo texto cru e pedia ao médico
+    justamente aquilo que o histórico e a pasta já continham — o caso real que
+    motivou esta mudança foi "discuta o caso do paciente com os arquivos desta
+    pasta" respondido com "qual é a queixa principal do paciente?".
+    """
+    if not contexto:
+        return prompt
+
+    partes = []
+    restante = MAX_CHARS_CONTEXTO_CLARIFICACAO
+    # De trás para frente: o contexto mais recente é o mais relevante para
+    # decidir se a pergunta atual se sustenta.
+    for msg in reversed(contexto):
+        trecho = (msg.get("content") or "")[:restante]
+        if not trecho:
+            break
+        partes.append(trecho)
+        restante -= len(trecho)
+        if restante <= 0:
+            break
+
+    if not partes:
+        return prompt
+
+    return (
+        "[Contexto já disponível]\n"
+        + "\n---\n".join(reversed(partes))
+        + f"\n\n[Mensagem a avaliar]\n{prompt}"
+    )
+
+
+async def check_clarification(prompt: str, contexto: list[dict] | None = None) -> dict:
     """
     Verifica se o caso clínico tem contexto suficiente para valer uma resposta.
+
+    `contexto` são os turnos que o modelo que responde vai receber — histórico
+    da conversa e trechos da pasta. O verificador precisa julgar com a MESMA
+    informação, senão bloqueia perguntas que já têm resposta no material.
 
     Falha silenciosa por decisão: se o classificador cair, assumir "suficiente"
     entrega uma resposta talvez rasa; assumir "insuficiente" bloquearia o médico
@@ -195,7 +242,7 @@ async def check_clarification(prompt: str) -> dict:
     try:
         response = await _clarification_provider.complete(
             model_id=_CLARIFICATION_MODEL,
-            prompt=prompt,
+            prompt=_prompt_com_contexto(prompt, contexto),
             system_prompt=SYSTEM_PROMPT_CLARIFICATION,
             temperature=0.0,
             timeout=8,

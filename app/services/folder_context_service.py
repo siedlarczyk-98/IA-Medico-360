@@ -25,7 +25,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.http_client import get_client
-from app.models.models import Conversation, Interaction, MessageEmbedding
+from app.models.models import Conversation, Folder, Interaction, MessageEmbedding
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -35,14 +35,27 @@ settings = get_settings()
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMS = 1536
 
-# Similaridade mínima para um trecho entrar no contexto.
+# Piso de similaridade — porta contra lixo, NÃO critério de relevância.
 #
-# Deliberadamente MAIS FROUXO que o 0.88 do cache semântico, porque a pergunta é
-# outra: o cache precisa de quase-identidade (servir a resposta errada é grave),
-# a recuperação precisa de relevância (um trecho meio relacionado ainda ajuda, e
-# vem rotulado como vindo de outra conversa). Número escolhido, não medido —
-# ver docs/debitos.md.
-SIMILARITY_THRESHOLD = 0.72
+# A relevância aqui é dada pela PASTA, não pelo vetor: uma pasta é o projeto de
+# um paciente ou de um tema, e quase tudo dentro dela é potencialmente
+# pertinente. A similaridade serve para RANQUEAR o que entra no orçamento
+# limitado, não para decidir se algo é do assunto.
+#
+# O piso é baixo de propósito. A primeira versão usava 0.72, ancorado no 0.88 do
+# cache semântico — comparação errada, e medida em produção: a pergunta
+# "existe alguma contraindicação para o paciente Jorge?" contra a evolução que
+# diz "Jorge, 58 anos, HAS em acompanhamento" pontuou 0.516, e nada passava.
+#
+# Os dois números medem regimes diferentes: o cache compara dois prompts CURTOS
+# quase idênticos (0.88 é apropriado ali); aqui compara uma pergunta curta com
+# um documento clínico longo, onde 0.5 já é forte. Cosseno absoluto não é
+# comparável entre esses dois usos.
+SIMILARITY_FLOOR = 0.25
+
+# Nome antigo mantido para não quebrar import de fora — ver o comentário acima
+# sobre por que a semântica mudou de "limiar" para "piso".
+SIMILARITY_THRESHOLD = SIMILARITY_FLOOR
 
 # Teto de trechos injetados. Cada trecho consome orçamento de contexto que
 # poderia ser da própria conversa.
@@ -226,11 +239,22 @@ async def recuperar_trechos(
                 "limite": limite,
             },
         )
-        return [
+        selecionados = [
             {"content": linha.content, "role": linha.role, "conversa": linha.conversa, "sim": linha.sim}
             for linha in resultado.fetchall()
-            if linha.sim >= SIMILARITY_THRESHOLD
+            if linha.sim >= SIMILARITY_FLOOR
         ]
+        # Observabilidade: sem isto, "não veio contexto" e "veio contexto ruim"
+        # são indistinguíveis de fora, e foi essa cegueira que fez o limiar
+        # errado passar despercebido até a homologação.
+        if selecionados:
+            logger.info(
+                "[PastaContexto] pasta=%s trechos=%d similaridades=%s",
+                folder_id, len(selecionados), [round(t["sim"], 3) for t in selecionados],
+            )
+        else:
+            logger.info("[PastaContexto] pasta=%s nenhum trecho acima do piso", folder_id)
+        return selecionados
 
     except Exception as exc:
         logger.warning("[PastaContexto] Falha ao recuperar da pasta %s: %s", folder_id, exc)
@@ -259,11 +283,51 @@ def formatar_bloco(trechos: list[dict]) -> str:
     return "\n".join(linhas)
 
 
+async def _resolver_pasta(
+    db: AsyncSession,
+    user_id: UUID,
+    conversation_id: UUID | None,
+    folder_id: UUID | None,
+) -> UUID | None:
+    """
+    Descobre em que pasta a mensagem está sendo escrita.
+
+    Dois caminhos, e ignorar o segundo era o bug: numa conversa JÁ EXISTENTE a
+    pasta vem da conversa, mas numa conversa NOVA dentro de uma pasta a
+    conversa ainda não existe — a primeira mensagem chega com
+    `conversation_id=None` e a pasta vem separada, no corpo da requisição.
+
+    Esse segundo caso é justamente o mais comum do recurso: o médico abre uma
+    conversa dentro da pasta do paciente e pergunta sobre o material que já
+    está ali. Antes, ele era exatamente o caso que saía sem contexto nenhum.
+    """
+    if conversation_id:
+        conv = (await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        return conv.folder_id if conv else None
+
+    if not folder_id:
+        return None
+
+    # A pasta veio do cliente: confirmar a posse antes de usá-la. As consultas
+    # seguintes já filtram por `user_id`, então isto é defesa em profundidade —
+    # mas uma pasta alheia não deve nem chegar a ser indexada.
+    dono = (await db.execute(
+        select(Folder.id).where(Folder.id == folder_id, Folder.user_id == user_id)
+    )).scalar_one_or_none()
+    return dono
+
+
 async def contexto_da_pasta(
     db: AsyncSession,
     user_id: UUID,
     conversation_id: UUID | None,
     pergunta: str,
+    folder_id: UUID | None = None,
 ) -> str:
     """
     Ponto de entrada: devolve o bloco de contexto da pasta, ou string vazia.
@@ -271,19 +335,10 @@ async def contexto_da_pasta(
     Vazio é o caminho normal e não é erro — conversa fora de pasta, pasta com
     uma conversa só, ou nada suficientemente parecido com a pergunta.
     """
-    if not conversation_id:
+    pasta = await _resolver_pasta(db, user_id, conversation_id, folder_id)
+    if pasta is None:
         return ""
 
-    conv = (await db.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.user_id == user_id,
-        )
-    )).scalar_one_or_none()
-
-    if conv is None or conv.folder_id is None:
-        return ""
-
-    await indexar_pasta(db, user_id, conv.folder_id)
-    trechos = await recuperar_trechos(db, user_id, conv.folder_id, conversation_id, pergunta)
+    await indexar_pasta(db, user_id, pasta)
+    trechos = await recuperar_trechos(db, user_id, pasta, conversation_id, pergunta)
     return formatar_bloco(trechos)

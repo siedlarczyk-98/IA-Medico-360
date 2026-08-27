@@ -30,7 +30,7 @@ from app.models.models import Interaction, InteractionResponse, MessageEmbedding
 from app.services import folder_context_service
 from app.services.folder_context_service import (
     EMBEDDING_DIMS,
-    SIMILARITY_THRESHOLD,
+    SIMILARITY_FLOOR,
     contexto_da_pasta,
     formatar_bloco,
     recuperar_trechos,
@@ -223,15 +223,32 @@ async def test_respeita_o_teto_de_trechos(db, user, folder_factory):
     assert len(trechos) <= 3
 
 
-async def test_limiar_e_mais_frouxo_que_o_do_cache():
+async def test_piso_e_muito_mais_baixo_que_o_limiar_do_cache():
     """
-    O cache precisa de quase-identidade (servir a resposta errada é grave); a
-    recuperação precisa de relevância. Usar o mesmo número nos dois seria
-    confundir dois problemas diferentes.
+    Os dois números medem regimes diferentes e não devem convergir.
+
+    O cache compara dois prompts CURTOS quase idênticos — 0.88 é apropriado
+    ali. Aqui compara uma pergunta curta com um documento clínico longo, onde
+    similaridade de 0.5 já é forte. Medido em produção: a pergunta sobre
+    contraindicações do paciente pontuou 0.516 contra a evolução DELE MESMO, e
+    o limiar original de 0.72 descartava tudo.
     """
     from app.services.semantic_cache_service import SIMILARITY_THRESHOLD as CACHE_THRESHOLD
 
-    assert SIMILARITY_THRESHOLD < CACHE_THRESHOLD
+    assert SIMILARITY_FLOOR < 0.5, (
+        "piso acima de 0.5 descarta material claramente pertinente — "
+        "ver a medição que motivou este teste"
+    )
+    assert SIMILARITY_FLOOR < CACHE_THRESHOLD
+
+
+def test_similaridade_realista_entre_pergunta_e_documento_passa():
+    """
+    Trava o valor com um caso real: 0.516 foi a similaridade medida entre
+    "existe alguma contraindicação para o paciente Jorge?" e a evolução que
+    diz "Jorge, 58 anos, HAS em acompanhamento". Isso TEM de entrar.
+    """
+    assert 0.516 >= SIMILARITY_FLOOR
 
 
 # ── Formatação do bloco ──────────────────────────────────────────────────────
@@ -363,3 +380,110 @@ async def test_sem_pergunta_atual_nao_ha_busca_na_pasta(db, user, folder_factory
     mensagens = await load_context_messages(db, user.id, atual.id)
 
     assert all("TRECHO DA IRMA" not in m["content"] for m in mensagens)
+
+
+# ── Conversa NOVA dentro de uma pasta ────────────────────────────────────────
+# Regressão do bug encontrado na homologação: ao abrir uma conversa nova dentro
+# de uma pasta, a primeira mensagem chega com `conversation_id=None` e a pasta
+# vem separada, no corpo da requisição. A versão original saía na primeira linha
+# e o caso mais comum do recurso — "discuta o caso com os arquivos desta pasta"
+# — nunca recebia contexto nenhum.
+
+async def test_conversa_nova_na_pasta_recebe_contexto(db, user, folder_factory):
+    pasta = await folder_factory(user, "Paciente Jorge")
+    await _conversa_indexada(db, user, pasta, "Evolução", "EVOLUCAO DO PACIENTE JORGE")
+
+    bloco = await contexto_da_pasta(
+        db, user.id, None, "discuta o caso deste paciente", folder_id=pasta.id
+    )
+
+    assert "EVOLUCAO DO PACIENTE JORGE" in bloco
+
+
+async def test_conversa_nova_indexa_a_pasta_na_primeira_pergunta(db, user, folder_factory):
+    """Sem conversa ainda, a indexação precisa acontecer pela pasta."""
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
+
+    pasta = await folder_factory(user, "Pasta")
+    conv = await _conversa_indexada(db, user, pasta, "Antiga", "conteudo antigo")
+
+    # Remove o índice para forçar a indexação preguiçosa a agir.
+    await db.execute(
+        MessageEmbedding.__table__.delete().where(
+            MessageEmbedding.conversation_id == conv.id
+        )
+    )
+    await db.flush()
+
+    await contexto_da_pasta(db, user.id, None, "pergunta", folder_id=pasta.id)
+
+    total = (await db.execute(
+        sa_select(func.count()).select_from(MessageEmbedding)
+        .where(MessageEmbedding.conversation_id == conv.id)
+    )).scalar_one()
+    assert total > 0
+
+
+async def test_pasta_alheia_no_corpo_da_requisicao_nao_vaza(
+    db, user, user_factory, folder_factory
+):
+    """
+    O `folder_id` vem do CLIENTE quando a conversa é nova. Forjar o id de uma
+    pasta alheia não pode trazer o conteúdo dela.
+    """
+    outro = await user_factory()
+    pasta_alheia = await folder_factory(outro, "Pasta do outro")
+    await _conversa_indexada(db, outro, pasta_alheia, "Caso alheio", "SEGREDO DO OUTRO")
+
+    bloco = await contexto_da_pasta(
+        db, user.id, None, "pergunta", folder_id=pasta_alheia.id
+    )
+
+    assert bloco == ""
+
+
+async def test_sem_conversa_e_sem_pasta_nao_ha_contexto(db, user):
+    assert await contexto_da_pasta(db, user.id, None, "pergunta", folder_id=None) == ""
+
+
+# ── Clarificação enxerga o contexto ──────────────────────────────────────────
+
+def test_verificador_de_clarificacao_recebe_o_contexto():
+    """
+    Regressão do segundo bug da homologação: a etapa de clarificação recebia só
+    o texto cru e pedia ao médico exatamente o que a pasta já continha.
+    """
+    from app.services.orquestrador_shared import _prompt_com_contexto
+
+    montado = _prompt_com_contexto(
+        "conseguimos discutir o caso do paciente?",
+        [{"role": "user", "content": "EVOLUCAO E ELETRO DO PACIENTE JORGE"}],
+    )
+
+    assert "EVOLUCAO E ELETRO DO PACIENTE JORGE" in montado
+    assert "[Contexto já disponível]" in montado
+    # A mensagem a avaliar precisa continuar identificável dentro do bloco.
+    assert "conseguimos discutir o caso do paciente?" in montado
+
+
+def test_sem_contexto_o_prompt_de_clarificacao_passa_intacto():
+    from app.services.orquestrador_shared import _prompt_com_contexto
+
+    assert _prompt_com_contexto("pergunta", None) == "pergunta"
+    assert _prompt_com_contexto("pergunta", []) == "pergunta"
+
+
+def test_contexto_da_clarificacao_e_limitado():
+    """O verificador roda num modelo pequeno — não pode receber a pasta inteira."""
+    from app.services.orquestrador_shared import (
+        MAX_CHARS_CONTEXTO_CLARIFICACAO,
+        _prompt_com_contexto,
+    )
+
+    montado = _prompt_com_contexto(
+        "pergunta",
+        [{"role": "user", "content": "x" * 50_000} for _ in range(5)],
+    )
+
+    assert len(montado) < MAX_CHARS_CONTEXTO_CLARIFICACAO + 500
