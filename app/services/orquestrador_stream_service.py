@@ -93,6 +93,8 @@ class OrquestradorStreamService:
           - start        → modo e confiança da triagem
           - cache_hit    → resposta completa cacheada (encerra stream)
           - token        → fragmento de texto do modelo
+          - text_done    → texto completo na tela; o cliente já pode liberar
+                           a digitação. O que falta depois disto é metadado.
           - done         → metadados finais (PubMed, custo, etc.)
           - error        → erro fatal
         """
@@ -351,7 +353,7 @@ class OrquestradorStreamService:
                     model_id = fallback_result.get("model_id", model_id)
                     yield _sse("token", {"text": full_text})
 
-                # 6. Pós-processamento
+                # 6. Persistência da resposta
                 elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
                 cost = Decimal("0")
@@ -373,7 +375,50 @@ class OrquestradorStreamService:
                 interaction.token_cost_usd = cost
                 interaction.completed_at = datetime.now(UTC)
 
-                # Pós-processamento independente roda em paralelo (specialty, meds, PubMed)
+                # A auditoria nasce aqui, com o que já se sabe. Deixá-la só no
+                # commit final abriria um buraco de LGPD: um abort durante o
+                # PubMed apagaria o registro de que a interação existiu.
+                audit_base = {
+                    "mode": mode,
+                    "triage_confidence": confidence,
+                    "model_used": model_id,
+                    "is_fallback": is_fallback,
+                    "prompt_length": len(prompt),
+                    "total_cost_usd": str(cost),
+                    "dlp_sanitized": dlp_result.was_sanitized,
+                    "dlp_replacements": dlp_result.replacement_count,
+                    "dlp_by_type": dlp_result.counts_by_type,
+                }
+                audit = add_interaction_audit(
+                    db,
+                    user_id=self.user_id,
+                    interaction_id=interaction.id,
+                    action="orquestrador_stream",
+                    metadata=audit_base,
+                )
+
+                await record_cost(db, self.user_id, cost)
+
+                # Commit de durabilidade, e ele precisa vir ANTES do `text_done`.
+                # A partir desse evento o cliente reabilita a digitação, e mandar
+                # outra pergunta aborta este SSE — cancelando a corrotina no meio
+                # do `gather` abaixo. Com um commit só no fim, o abort levava
+                # junto a resposta inteira: o médico via o texto na tela e não o
+                # encontrava mais ao reabrir a conversa. O custo entra aqui pelo
+                # mesmo motivo: consumo cobrado não pode depender do PubMed.
+                await db.commit()
+
+                # 7. Texto entregue. Tudo daqui para baixo é metadado e custa
+                # segundos de rede; o cliente não deve esperar por isso para
+                # deixar o médico escrever de novo.
+                yield _sse("text_done", {
+                    "conversation_id": str(conv_id),
+                    "mode": mode,
+                    "model_used": model_id,
+                    "is_fallback": is_fallback,
+                })
+
+                # 8. Pós-processamento independente roda em paralelo (specialty, meds, PubMed)
                 # — cortando segundos da latência até o evento `done`. O PubMed usa o
                 # próprio texto da resposta como fallback de tópico (topic=""), evitando
                 # depender da detecção de especialidade para iniciar.
@@ -422,32 +467,21 @@ class OrquestradorStreamService:
                     citations=perplexity_citations,
                 )
 
-                add_interaction_audit(
-                    db,
-                    user_id=self.user_id,
-                    interaction_id=interaction.id,
-                    action="orquestrador_stream",
-                    metadata={
-                        "mode": mode,
-                        "triage_confidence": confidence,
-                        "model_used": model_id,
-                        "is_fallback": is_fallback,
-                        "prompt_length": len(prompt),
-                        "total_cost_usd": str(cost),
-                        "dlp_sanitized": dlp_result.was_sanitized,
-                        "dlp_replacements": dlp_result.replacement_count,
-                        "dlp_by_type": dlp_result.counts_by_type,
-                        "specialty_detected": classification["specialty"],
-                        "topic_detected": classification["topic"],
-                        "medications": [m["medication_normalized"] for m in medications],
-                        "pubmed_confidence_score": pubmed.confidence_score,
-                        "pubmed_low_evidence_alert": pubmed.low_evidence_alert,
-                        "pubmed_outdated_alert": pubmed.outdated_alert,
-                        "pubmed_fallback": pubmed.fallback,
-                        "pubmed_cited_verified": sum(1 for c in pubmed.cited_guidelines_verified if c.verified),
-                        "pubmed_newer_found": len(pubmed.newer_guidelines_found),
-                    },
-                )
+                # Reatribuição, e não mutação in-place: a coluna é JSON comum,
+                # sem MutableDict, e um `audit.metadata_[...] = x` não marcaria
+                # o objeto como sujo — o enriquecimento sumiria no commit.
+                audit.metadata_ = {
+                    **audit_base,
+                    "specialty_detected": classification["specialty"],
+                    "topic_detected": classification["topic"],
+                    "medications": [m["medication_normalized"] for m in medications],
+                    "pubmed_confidence_score": pubmed.confidence_score,
+                    "pubmed_low_evidence_alert": pubmed.low_evidence_alert,
+                    "pubmed_outdated_alert": pubmed.outdated_alert,
+                    "pubmed_fallback": pubmed.fallback,
+                    "pubmed_cited_verified": sum(1 for c in pubmed.cited_guidelines_verified if c.verified),
+                    "pubmed_newer_found": len(pubmed.newer_guidelines_found),
+                }
 
                 # Store no cache
                 if (
@@ -493,12 +527,12 @@ class OrquestradorStreamService:
                         raw_prompt=sanitized_prompt,
                     )
 
-                await record_cost(db, self.user_id, cost)
-
-                # Commit explícito — sessão gerenciada aqui, não pelo get_db
+                # 9. Segundo commit: só os metadados (especialidade, medicamentos,
+                # PubMed, auditoria). Se ele não acontecer, a resposta já está
+                # salva pelo commit anterior.
                 await db.commit()
 
-                # 7. Evento final
+                # 10. Evento final
                 yield _sse("done", {
                     "interaction_id": str(interaction.id),
                     "conversation_id": str(conv_id),

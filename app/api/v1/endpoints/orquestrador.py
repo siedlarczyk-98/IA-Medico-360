@@ -131,6 +131,7 @@ async def orquestrador_stream(
     - start      → modo e confiança da triagem
     - cache_hit  → resposta completa cacheada (encerra stream)
     - token      → fragmento de texto do modelo
+    - text_done  → texto completo; o cliente já pode liberar a digitação
     - done       → metadados finais (PubMed, custo, specialty, etc.)
     - error      → erro fatal
 

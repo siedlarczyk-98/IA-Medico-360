@@ -86,6 +86,11 @@ function MainApp() {
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
+  // Separado de `streaming` de propósito: entre `text_done` e `done` o texto já
+  // está inteiro na tela e só faltam metadados (PubMed, especialidade). Esse
+  // intervalo não pode bloquear a digitação — a resposta parece pronta porque
+  // está pronta.
+  const [finalizing, setFinalizing] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | undefined>();
   const [clarification, setClarification] = useState<PendingClarification | null>(null);
   const [selectedMode, setSelectedMode] = useState<OrchestratorMode>('QUICK_SEARCH');
@@ -149,6 +154,7 @@ function MainApp() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);
+    setFinalizing(false);
     setClarification(null);
 
     const acc = { current: '' };
@@ -218,6 +224,17 @@ function MainApp() {
             scheduleFlush(flushAssistant);
           }
         }
+        if (event.type === 'text_done') {
+          // A conversa precisa ser fixada JUNTO com a liberação do input. Se o
+          // médico mandar a próxima pergunta antes do `done`, sem isto ela iria
+          // sem conversation_id e abriria uma conversa nova.
+          setActiveConvId(event.conversation_id);
+          pendingFolderIdRef.current = undefined;
+          setPendingFolderName(undefined);
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          setStreaming(false);
+          setFinalizing(true);
+        }
         if (event.type === 'done') {
           setActiveConvId(event.conversation_id);
           pendingFolderIdRef.current = undefined;
@@ -239,6 +256,7 @@ function MainApp() {
               return next;
             });
           }
+          setFinalizing(false);
         }
         if (event.type === 'error') {
           if (event.status === 'unsupported_mode') {
@@ -268,6 +286,7 @@ function MainApp() {
       // limpar sem checar apagaria a marcação do stream que acabou de começar.
       if (streamMsgIdRef.current === assistantId) streamMsgIdRef.current = null;
       setStreaming(false);
+      setFinalizing(false);
       setUsageTick(t => t + 1);
     }
   }, [cancelFlush, scheduleFlush]);
@@ -300,6 +319,7 @@ function MainApp() {
     abortRef.current?.abort();
     setMessages([]);
     setStreaming(false);
+    setFinalizing(false);
     setActiveConvId(undefined);
     setClarification(null);
     setActiveFolderName(folderName);
@@ -312,6 +332,7 @@ function MainApp() {
   const handleSelectConversation = useCallback(async (id: string) => {
     abortRef.current?.abort();
     setStreaming(false);
+    setFinalizing(false);
     setClarification(null);
     pendingFolderIdRef.current = undefined;
     setPendingFolderName(undefined);
@@ -370,7 +391,7 @@ function MainApp() {
             </>
           ) : (
             <>
-              <ChatView messages={messages} streaming={streaming} streamingMode={selectedMode} scrollToBottomTrigger={scrollTrigger} />
+              <ChatView messages={messages} streaming={streaming} streamingMode={selectedMode} finalizing={finalizing} scrollToBottomTrigger={scrollTrigger} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
                 : <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />

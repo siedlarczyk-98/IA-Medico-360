@@ -74,3 +74,46 @@ export function tokensEDone(
     },
   ];
 }
+
+/** Sequência realista: tokens → `text_done` → `done`. */
+export function tokensTextDoneEDone(
+  textos: string[],
+  done: Partial<Extract<StreamEvent, { type: 'done' }>> = {},
+): StreamEvent[] {
+  return [
+    ...textos.map(text => ({ type: 'token' as const, text })),
+    {
+      type: 'text_done' as const,
+      conversation_id: 'conv-1',
+      mode: 'PRODUCTIVITY',
+      model_used: 'gpt-5.4-nano',
+      is_fallback: false,
+    },
+    {
+      type: 'done' as const,
+      conversation_id: 'conv-1',
+      mode: 'PRODUCTIVITY',
+      model_used: 'gpt-5.4-nano',
+      ...done,
+    },
+  ];
+}
+
+/**
+ * Stream que PARA no `text_done` e só emite o `done` quando o teste liberar.
+ * Reproduz o intervalo real em que o backend está esperando o PubMed — que é
+ * exatamente onde a digitação não pode estar bloqueada.
+ */
+export function streamComEsperaAntesDoDone(eventos: StreamEvent[]) {
+  let liberar!: () => void;
+  const espera = new Promise<void>(resolve => { liberar = resolve; });
+
+  async function* gerador(): AsyncGenerator<StreamEvent> {
+    for (const evento of eventos) {
+      if (evento.type === 'done') await espera;
+      yield evento;
+    }
+  }
+
+  return { gerador, liberar };
+}

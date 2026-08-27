@@ -58,10 +58,12 @@ interface Props {
   messages: Message[];
   streaming?: boolean;
   streamingMode?: string;
+  /** Texto pronto, metadados a caminho. Não bloqueia a digitação. */
+  finalizing?: boolean;
   scrollToBottomTrigger?: number;
 }
 
-export function ChatView({ messages, streaming, streamingMode, scrollToBottomTrigger }: Props) {
+export function ChatView({ messages, streaming, streamingMode, finalizing, scrollToBottomTrigger }: Props) {
   const isMobile = useIsMobile();
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -81,6 +83,7 @@ export function ChatView({ messages, streaming, streamingMode, scrollToBottomTri
             : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} />
         ))}
         {streaming && <ThinkingIndicator mode={streamingMode} />}
+        {!streaming && finalizing && <ReferencesPending />}
         <div ref={bottomRef} />
       </div>
     </div>
@@ -270,6 +273,23 @@ function ThinkingIndicator({ mode }: { mode?: string }) {
           {label}
         </span>
       </div>
+    </div>
+  );
+}
+
+// Nota de rodapé, não indicador de carregamento: a resposta já está completa
+// acima e o médico pode seguir. Isto só avisa que as referências ainda chegam.
+function ReferencesPending() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '2px 0 8px 42px', fontSize: 12, color: 'var(--pen2)',
+    }}>
+      <div style={{
+        width: 5, height: 5, borderRadius: '50%', background: 'var(--pen2)',
+        animation: 'pulse 1.2s ease-in-out infinite',
+      }} />
+      <span>Verificando referências…</span>
     </div>
   );
 }

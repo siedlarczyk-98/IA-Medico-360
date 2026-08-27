@@ -5,13 +5,14 @@ O front-end depende da ORDEM e do NOME dos eventos. Uma mudança silenciosa aqui
 quebra a interface sem quebrar nenhum teste — até agora.
 
 Contrato exercitado:
-  start → token* → done       (fluxo normal)
+  start → token* → text_done → done   (fluxo normal)
   start → token → done        (atalho de saudação, sem gastar chamada de modelo)
   error                       (falha fatal, sem stack trace vazando)
 
 Os providers são fakes; nada toca a rede.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -305,3 +306,109 @@ async def test_fallback_sem_modelo_cadastrado_e_pulado(
 
     texto = "".join(d["text"] for e, d in eventos if e == "token")
     assert "não foi possível processar" in texto
+
+
+# ── text_done: o texto entregue antes dos metadados ──────────────────────
+# O `done` só sai depois de PubMed, classificação e extração de medicamentos —
+# segundos de rede. Até existir o `text_done`, o cliente mantinha a digitação
+# bloqueada nesse intervalo, com a resposta inteira já visível na tela.
+
+async def test_text_done_sai_entre_o_ultimo_token_e_o_done(
+    servico, model_pricing_factory, monkeypatch
+):
+    await model_pricing_factory(model_id="sonar-pro", provider_type="perplexity")
+    monkeypatch.setitem(ai_providers.PROVIDER_TYPE_REGISTRY, "perplexity", ProviderStreamFake())
+
+    eventos = await _coleta(servico, prompt="Posologia da amoxicilina?", mode="QUICK_SEARCH")
+
+    nomes = [e for e, _ in eventos]
+    assert "text_done" in nomes, f"evento ausente; vieram {nomes}"
+    i = nomes.index("text_done")
+    assert nomes[i - 1] == "token", "text_done deve vir logo depois do último token"
+    assert nomes[-1] == "done"
+    assert i < len(nomes) - 1, "text_done não pode ser o último evento"
+
+    # O cliente fixa a conversa neste evento: sem o id, a próxima pergunta
+    # enviada durante a espera pelos metadados abriria uma conversa nova.
+    assert eventos[i][1]["conversation_id"]
+
+
+async def test_text_done_precede_o_pos_processamento(
+    servico, db, model_pricing_factory, monkeypatch
+):
+    """
+    O evento tem que sair ANTES do PubMed, não junto. Se sair depois, ele não
+    resolve nada — é justamente o PubMed que custa a espera.
+    """
+    await model_pricing_factory(model_id="sonar-pro", provider_type="perplexity")
+    monkeypatch.setitem(
+        ai_providers.PROVIDER_TYPE_REGISTRY, "perplexity",
+        ProviderStreamFake(pedacos=("Amoxicilina ", "500mg.")),
+    )
+
+    pubmed_chamado: list[bool] = []
+
+    async def _pubmed_que_nunca_responde(*a, **k):
+        pubmed_chamado.append(True)
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(
+        "app.services.orquestrador_stream_service.validate_with_pubmed",
+        _pubmed_que_nunca_responde,
+    )
+
+    gerador = servico.stream(prompt="Posologia da amoxicilina?", mode="QUICK_SEARCH")
+    nomes = []
+    async for frame in gerador:
+        nome, _ = parse_sse([frame])[0]
+        nomes.append(nome)
+        if nome == "text_done":
+            break
+    # Abort do cliente: é o que o navegador faz quando o médico manda a
+    # próxima pergunta sem esperar as referências.
+    await gerador.aclose()
+
+    assert "text_done" in nomes
+    assert not pubmed_chamado, "o pós-processamento começou antes do text_done"
+
+
+async def test_abort_depois_do_text_done_nao_perde_a_resposta(
+    servico, db, model_pricing_factory, monkeypatch
+):
+    """
+    Liberar a digitação torna o abort no meio dos metadados comum. Com um commit
+    só no fim, esse abort desfazia a transação inteira: o médico via a resposta
+    na tela e não a encontrava mais ao reabrir a conversa.
+    """
+    await model_pricing_factory(model_id="sonar-pro", provider_type="perplexity")
+    monkeypatch.setitem(
+        ai_providers.PROVIDER_TYPE_REGISTRY, "perplexity",
+        ProviderStreamFake(pedacos=("Amoxicilina ", "500mg.")),
+    )
+
+    async def _pubmed_que_nunca_responde(*a, **k):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(
+        "app.services.orquestrador_stream_service.validate_with_pubmed",
+        _pubmed_que_nunca_responde,
+    )
+
+    gerador = servico.stream(prompt="Posologia da amoxicilina?", mode="QUICK_SEARCH")
+    async for frame in gerador:
+        nome, _ = parse_sse([frame])[0]
+        if nome == "text_done":
+            break
+    await gerador.aclose()
+
+    from sqlalchemy import select
+
+    from app.models.models import AuditLog, InteractionResponse
+
+    respostas = (await db.execute(select(InteractionResponse))).scalars().all()
+    assert respostas, "a resposta precisa sobreviver ao abort"
+    assert respostas[0].response_text == "Amoxicilina 500mg."
+
+    # A auditoria também: sem ela, uma interação atendida não deixaria rastro.
+    auditorias = (await db.execute(select(AuditLog))).scalars().all()
+    assert any(a.action == "orquestrador_stream" for a in auditorias)

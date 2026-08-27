@@ -15,7 +15,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { renderComProvedores, streamEmLote, tokensEDone } from './test/utils';
+import { renderComProvedores, streamComEsperaAntesDoDone, streamEmLote, tokensEDone, tokensTextDoneEDone } from './test/utils';
 import { streamQuery } from './api/orquestrador';
 
 vi.mock('./lib/auth', () => ({
@@ -144,6 +144,83 @@ describe('streaming do orquestrador', () => {
       expect(screen.getByTestId('assistant-message')).toBeInTheDocument();
     });
     expect(screen.getAllByTestId('user-message')).toHaveLength(1);
+  });
+
+  // ── text_done: digitação liberada antes dos metadados ──────────────────
+  // O `done` do backend só sai depois do PubMed. Enquanto o input dependia
+  // dele, a resposta ficava inteira na tela com o campo bloqueado — que é o
+  // momento em que o produto parecia travado.
+
+  it('libera a digitação no text_done, sem esperar o done', async () => {
+    const { gerador, liberar } = streamComEsperaAntesDoDone(
+      tokensTextDoneEDone(['Segue um', ' modelo de anamnese.']),
+    );
+    streamQueryMock.mockImplementation(() => gerador());
+
+    renderComProvedores(<App />);
+    await enviarPergunta();
+
+    // Texto completo na tela...
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-message')).toHaveTextContent(
+        'Segue um modelo de anamnese.',
+      );
+    });
+
+    // ...e o campo já aceita a próxima pergunta, com o `done` ainda pendente.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/digite sua pergunta/i)).not.toBeDisabled();
+    });
+
+    liberar();
+  });
+
+  it('avisa que as referências ainda estão vindo durante a espera', async () => {
+    const { gerador, liberar } = streamComEsperaAntesDoDone(
+      tokensTextDoneEDone(['resposta pronta']),
+    );
+    streamQueryMock.mockImplementation(() => gerador());
+
+    renderComProvedores(<App />);
+    await enviarPergunta();
+
+    await waitFor(() => {
+      expect(screen.getByText(/verificando referências/i)).toBeInTheDocument();
+    });
+
+    liberar();
+
+    // E some quando o `done` chega.
+    await waitFor(() => {
+      expect(screen.queryByText(/verificando referências/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('fixa a conversa no text_done, para a próxima pergunta não abrir outra', async () => {
+    // Sem o conversation_id no text_done, a pergunta enviada durante a espera
+    // iria sem conversa e o backend abriria uma nova.
+    streamQueryMock.mockImplementation(() =>
+      streamEmLote(tokensTextDoneEDone(['primeira resposta'])),
+    );
+
+    renderComProvedores(<App />);
+    await enviarPergunta('primeira pergunta');
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-message')).toHaveTextContent('primeira resposta');
+    });
+
+    streamQueryMock.mockImplementation(() =>
+      streamEmLote(tokensTextDoneEDone(['segunda resposta'])),
+    );
+    await enviarPergunta('segunda pergunta');
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('assistant-message')).toHaveLength(2);
+    });
+    expect(streamQueryMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversation_id: 'conv-1' }),
+      expect.anything(),
+    );
   });
 
   it('uma segunda pergunta não apaga a resposta da primeira', async () => {

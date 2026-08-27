@@ -51,6 +51,14 @@ export type StreamEvent =
       newer_guidelines_found?: Array<{ pmid: string; title?: string; article_title?: string; abstract_snippet?: string }>;
     }
   | { type: 'clarification'; conversation_id: string; questions: string[] }
+  // Texto completo na tela. Chega ANTES do `done`, que ainda espera PubMed e
+  // classificação. Serve para reabilitar a digitação sem esperar metadado.
+  | { type: 'text_done';
+      conversation_id: string;
+      mode: string;
+      model_used: string;
+      is_fallback: boolean;
+    }
   // O backend nomeia as listas do PubMed de forma diferente do que a UI
   // consome (`pubmed_validation`); a conversão fica no handler do `done`.
   | { type: 'done';
