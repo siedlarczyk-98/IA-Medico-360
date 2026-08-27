@@ -94,11 +94,11 @@ async def engine():
             # rápido que aplicar a cadeia inteira. A cadeia tem verificação própria
             # no CI (job `migrations`), separando os dois tipos de falha.
             #
-            # Diferença conhecida: os índices `semantic_cache_embedding_idx`
-            # (ivfflat) e `semantic_cache_mode_expires_idx` existem em produção mas
-            # não estão declarados nos models, então não são criados aqui. Nenhum
-            # teste depende deles — mas quem for testar performance do cache
-            # semântico precisa saber.
+            # Diferença conhecida: os índices `semantic_cache_embedding_hnsw_idx`
+            # (HNSW, ver migration 003) e `semantic_cache_mode_expires_idx` existem
+            # em produção mas não estão declarados nos models, então não são criados
+            # aqui. Nenhum teste depende deles — mas quem for testar performance do
+            # cache semântico precisa saber.
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         _schema_criado = True

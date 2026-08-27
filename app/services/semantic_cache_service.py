@@ -69,7 +69,14 @@ async def _normalize_prompt(
         timeout=10,
         json={
             "model": "gpt-5.4-nano",
-            "max_tokens": 200,
+            # `max_completion_tokens`, não `max_tokens`: a família gpt-5 recusa
+            # o parâmetro antigo com HTTP 400. Como o erro era engolido pelo
+            # `except` de `get_cached_response`, a normalização falhava em TODA
+            # requisição e o cache nunca chegava a ser escrito nem lido — a
+            # tabela `semantic_cache` ficou vazia em produção sem um único erro
+            # visível. `temperature: 0` é aceito por este modelo (a triagem já
+            # usava assim); só o nome do limite de tokens estava errado.
+            "max_completion_tokens": 200,
             "temperature": 0,
             "messages": [
                 {
@@ -208,6 +215,15 @@ async def get_cached_response(
         logger.debug("[Cache] MISS — sem match acima do threshold")
         return None, normalized, embedding
 
+    except httpx.HTTPStatusError as exc:
+        # Um 4xx aqui é defeito de contrato com a API, não indisponibilidade: ele
+        # se repete em toda requisição e desliga o cache inteiro em silêncio.
+        # Sem o corpo da resposta no log, foi o que aconteceu por semanas.
+        logger.warning(
+            "[Cache] API recusou o lookup (HTTP %s): %s — seguindo sem cache",
+            exc.response.status_code, exc.response.text[:300],
+        )
+        return None, "", []
     except Exception as exc:
         logger.warning("[Cache] Erro no lookup, seguindo sem cache: %s", exc)
         return None, "", []
