@@ -50,6 +50,42 @@ class FileValidationError(Exception):
     """Erro de validação de conteúdo do arquivo (assinatura, zip-bomb, etc.)."""
 
 
+# Marca gravada quando o PDF não tem camada de texto — tipicamente um laudo
+# digitalizado. Constante, e não literal solto, porque o endpoint precisa
+# reconhecer o caso para avisar o médico: antes ele anexava, recebia uma
+# resposta pobre e não tinha como saber por quê.
+PDF_SEM_TEXTO = "(PDF sem texto extraível — pode ser escaneado sem OCR)"
+
+AVISO_PDF_ESCANEADO = (
+    "Este PDF parece ser digitalizado: não foi possível ler texto dele. "
+    "Para que o exame seja analisado, envie a página como imagem (JPG ou PNG) — "
+    "esse caminho usa leitura visual."
+)
+
+AVISO_ARQUIVO_VAZIO = (
+    "Não foi possível extrair texto deste arquivo. Confira se ele não está "
+    "vazio ou protegido."
+)
+
+
+def aviso_de_extracao(texto: str, file_type: str) -> str | None:
+    """
+    Aviso a mostrar ao médico quando a extração não rendeu conteúdo útil.
+
+    Devolve None no caminho normal. Existe porque falhar em silêncio aqui é
+    especialmente ruim: o arquivo é aceito, a mensagem é enviada, e o modelo
+    responde sobre um exame que nunca chegou até ele.
+    """
+    if file_type == "image":
+        return None  # imagem não passa por extração de texto
+
+    if texto == PDF_SEM_TEXTO:
+        return AVISO_PDF_ESCANEADO
+    if not texto or not texto.strip():
+        return AVISO_ARQUIVO_VAZIO
+    return None
+
+
 # ── Resolução de contexto de arquivo ─────────────────────────
 
 async def resolve_file_context(
@@ -213,7 +249,7 @@ def extract_pdf(content: bytes) -> str:
                 acc_len += len(stripped)
                 if acc_len > MAX_EXTRACTED_CHARS:
                     break
-    joined = "\n\n".join(parts) if parts else "(PDF sem texto extraível — pode ser escaneado sem OCR)"
+    joined = "\n\n".join(parts) if parts else PDF_SEM_TEXTO
     return _truncate(joined)
 
 

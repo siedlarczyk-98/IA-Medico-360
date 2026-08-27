@@ -36,24 +36,26 @@ uma decisão com efeito visível ao médico.
 
 ---
 
-## 2. PDF escaneado sem OCR
+## 2. PDF escaneado sem OCR — MITIGADO em 2026-08-27
 
 **O que é.** `extract_pdf` usa `pdfplumber`, que só lê texto embutido. Um laudo
-escaneado — imagem dentro de um PDF — devolve
-`"(PDF sem texto extraível — pode ser escaneado sem OCR)"`.
+escaneado — imagem dentro de um PDF — não rende texto nenhum.
 
-**Por que não foi resolvido.** OCR de qualidade clínica é um projeto próprio, com
-custo e dependência nova (Tesseract ou API paga). E há uma saída melhor no curto
-prazo: laudo antigo escaneado costuma ser mais bem atendido pelo caminho de
-**imagem**, que já passa por visão.
+**O que mudou.** O upload agora devolve `warning` quando a extração não rende
+conteúdo, e a interface mostra o aviso **visível** (não só em tooltip) antes do
+envio, dizendo o que fazer: mandar a página como imagem, que passa por leitura
+visual. O anexo continua sendo aceito — o médico pode ter motivo para enviar
+assim mesmo, e bloquear seria decidir por ele.
 
-**Mitigação atual:** nenhuma na interface. O médico anexa o PDF, recebe uma
-resposta pobre e não entende por quê.
+Antes, o arquivo era aceito em silêncio: o médico enviava, recebia uma resposta
+pobre sobre um exame que nunca chegou ao modelo, e não tinha como saber por quê.
 
-**Próximo passo barato:** detectar o retorno vazio e avisar na tela —
-"este PDF parece ser digitalizado; envie como imagem para melhor leitura".
+**O que continua faltando: OCR de verdade.** É projeto próprio, com custo e
+dependência nova (Tesseract ou API paga). Só vale a pena se o aviso mostrar que
+PDF digitalizado é comum no uso real — o caminho de imagem pode bastar.
 
-**Onde mexer:** `app/services/file_extractor_service.py:extract_pdf`.
+**Onde está:** `aviso_de_extracao()` em `app/services/file_extractor_service.py`,
+consumido por `POST /uploads/extract`.
 
 ---
 
@@ -96,14 +98,20 @@ menos de contexto do que caberia.
 
 ---
 
-## 4. Orçamento de contexto de 6000 tokens não foi calibrado
+## 4. ~~Orçamento de contexto não calibrado~~ — REMOVIDO: não é dívida
 
-**O que é.** `DEFAULT_HISTORY_TOKEN_BUDGET = 6000` é um número escolhido, não
-medido. É quanto do prompt aceitamos gastar relembrando a conversa.
+Saiu da lista em 2026-08-27. `DEFAULT_HISTORY_TOKEN_BUDGET = 6000` não é um
+número a ser descoberto por medição — é decisão de produto sobre quanto se
+aceita pagar, por mensagem, para o modelo lembrar da conversa.
 
-**O que falta:** verificar em conversas reais se 6000 corta cedo demais (o médico
-percebe que "ele esqueceu o que eu disse") ou tarde demais (custo por mensagem
-subindo sem ganho). Depende de dados de uso que ainda não existem.
+A medição do item #3 fechou a única pergunta técnica que existia aqui: 6000
+está muito abaixo da janela dos modelos, então o valor não protege contra
+limite nenhum. Subir custa dinheiro e arrisca afogar a pergunta atual; descer
+faz o médico sentir que o assistente esqueceu o que ele disse. Nenhum dos dois
+é bug.
+
+O compromisso está documentado junto da constante em
+`app/services/context_budget.py`, que é onde quem for mexer vai olhar.
 
 ---
 

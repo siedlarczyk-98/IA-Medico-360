@@ -16,6 +16,7 @@ from app.services.file_extractor_service import (
     MAX_FILE_BYTES,
     MAX_IMAGE_BYTES,
     FileValidationError,
+    aviso_de_extracao,
     extract_docx,
     extract_excel,
     extract_image,
@@ -34,6 +35,11 @@ class ExtractResponse(BaseModel):
     file_id: UUID
     file_name: str
     file_type: str
+    # Aviso quando a extração não rendeu conteúdo útil — PDF digitalizado, por
+    # exemplo. O upload NÃO falha: o médico pode ter motivo para anexar mesmo
+    # assim, e bloquear seria decidir por ele. Mas ele precisa saber, senão
+    # recebe uma resposta pobre sobre um exame que nunca chegou ao modelo.
+    warning: str | None = None
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -146,4 +152,5 @@ async def extract_file(
         file_id=extraction.id,
         file_name=extraction.file_name,
         file_type=extraction.file_type,
+        warning=aviso_de_extracao(text, file_kind),
     )

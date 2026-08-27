@@ -6,6 +6,13 @@ export interface ExtractResult {
   file_id: string;
   file_name: string;
   file_type: string;
+  /**
+   * Aviso quando a extração não rendeu conteúdo útil — PDF digitalizado, por
+   * exemplo. O upload não falha; o anexo é aceito e o médico decide. Mas sem
+   * mostrar isto ele recebe uma resposta pobre sobre um exame que nunca chegou
+   * ao modelo, e não tem como saber por quê.
+   */
+  warning?: string | null;
 }
 
 export const ACCEPTED_FILE_TYPES = [

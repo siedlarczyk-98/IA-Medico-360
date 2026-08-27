@@ -289,3 +289,85 @@ async def test_mensagem_antiga_sem_anexo_vem_com_lista_vazia(as_user, db, user, 
     resp = await as_user.get(f"/api/v1/conversations/{conv.id}")
 
     assert [m for m in resp.json()["messages"] if m["role"] == "user"][0]["attachments"] == []
+
+
+# ── Aviso de extração sem texto ──────────────────────────────────────────────
+# Débito #2. Antes, um PDF digitalizado era aceito em silêncio: o médico enviava,
+# recebia resposta pobre e não tinha como saber que o exame nunca chegou ao
+# modelo.
+
+def test_pdf_sem_texto_gera_aviso():
+    from app.services.file_extractor_service import PDF_SEM_TEXTO, aviso_de_extracao
+
+    aviso = aviso_de_extracao(PDF_SEM_TEXTO, "pdf")
+
+    assert aviso is not None
+    # O aviso precisa dizer O QUE FAZER, não só que deu errado.
+    assert "imagem" in aviso.lower()
+
+
+def test_arquivo_vazio_gera_aviso():
+    from app.services.file_extractor_service import aviso_de_extracao
+
+    assert aviso_de_extracao("", "docx") is not None
+    assert aviso_de_extracao("   \n  ", "xlsx") is not None
+
+
+def test_extracao_bem_sucedida_nao_gera_aviso():
+    """Avisar sempre treinaria o médico a ignorar o aviso."""
+    from app.services.file_extractor_service import aviso_de_extracao
+
+    assert aviso_de_extracao("Laudo: opacidade em lobo superior direito.", "pdf") is None
+
+
+def test_imagem_nunca_gera_aviso_de_texto():
+    """Imagem não passa por extração de texto — vai como visão."""
+    from app.services.file_extractor_service import aviso_de_extracao
+
+    assert aviso_de_extracao("", "image") is None
+
+
+async def test_upload_de_pdf_escaneado_devolve_aviso(as_user, monkeypatch):
+    """Ponta a ponta: o aviso chega ao cliente na resposta do upload."""
+    from app.services import file_extractor_service as fes
+
+    monkeypatch.setattr(fes, "extract_pdf", lambda _c: fes.PDF_SEM_TEXTO)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.uploads.extract_pdf", lambda _c: fes.PDF_SEM_TEXTO
+    )
+    monkeypatch.setattr(fes, "signature_matches", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.uploads.signature_matches", lambda *_a, **_k: True
+    )
+
+    resp = await as_user.post(
+        "/api/v1/uploads/extract",
+        files={"file": ("laudo_escaneado.pdf", b"%PDF-1.4 conteudo", "application/pdf")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    corpo = resp.json()
+    # O upload NAO falha: o medico decide se envia mesmo assim.
+    assert corpo["file_id"]
+    assert corpo["warning"] is not None
+    assert "imagem" in corpo["warning"].lower()
+
+
+async def test_upload_normal_nao_traz_aviso(as_user, monkeypatch):
+    from app.services import file_extractor_service as fes
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.uploads.extract_pdf", lambda _c: "Laudo com texto de verdade."
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.uploads.signature_matches", lambda *_a, **_k: True
+    )
+    _ = fes
+
+    resp = await as_user.post(
+        "/api/v1/uploads/extract",
+        files={"file": ("laudo.pdf", b"%PDF-1.4 conteudo", "application/pdf")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["warning"] is None

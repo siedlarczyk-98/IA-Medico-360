@@ -48,9 +48,16 @@ CHARS_PER_TOKEN = 3.2
 # papel e os delimitadores que o provedor acrescenta.
 TOKEN_OVERHEAD_POR_MENSAGEM = 4
 
-# Orçamento padrão do histórico, em tokens. Não é o limite do modelo — é quanto
-# do prompt aceitamos gastar relembrando a conversa, deixando espaço para o
-# prompt de sistema, a pergunta atual e a resposta.
+# Orçamento do histórico, em tokens.
+#
+# NÃO é limite técnico: a janela do Sonnet é 200k, e 6000 cabe trinta vezes lá
+# dentro. É uma decisão de PRODUTO — quanto se aceita pagar, por mensagem, para
+# o modelo lembrar da conversa.
+#
+# Subir aumenta custo e o risco de afogar a pergunta atual em contexto antigo;
+# descer faz o médico perceber que "ele esqueceu o que eu disse". Não existe
+# valor certo a ser descoberto por medição: existe o valor que o dono do
+# produto escolhe. 6000 é um ponto de partida, não uma conclusão.
 DEFAULT_HISTORY_TOKEN_BUDGET = 6000
 
 

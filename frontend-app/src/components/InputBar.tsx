@@ -11,6 +11,8 @@ export interface Attachment {
   fileId: string;
   name: string;
   fileType: string;  // 'image' | 'pdf' | 'docx' | 'xlsx'
+  /** Aviso do backend quando a extração não rendeu texto (PDF digitalizado). */
+  warning?: string | null;
 }
 
 const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }[] = [
@@ -121,7 +123,12 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
       const novos: Attachment[] = [];
       for (const file of files) {
         const result: ExtractResult = await extractFile(file);
-        novos.push({ fileId: result.file_id, name: result.file_name, fileType: result.file_type });
+        novos.push({
+          fileId: result.file_id,
+          name: result.file_name,
+          fileType: result.file_type,
+          warning: result.warning,
+        });
       }
       setAttachments(prev => {
         const proximos = [...prev, ...novos];
@@ -255,12 +262,35 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
           </div>
         )}
 
+        {/* Avisos de extração — visíveis, não só em tooltip: o médico precisa
+            ver ANTES de enviar que o arquivo não rendeu texto. */}
+        {attachments.filter(a => a.warning).map(att => (
+          <div
+            key={`aviso-${att.fileId}`}
+            data-testid="anexo-aviso"
+            style={{
+              marginBottom: 8, padding: '7px 10px', borderRadius: 8,
+              background: '#fffbeb', border: '1px solid #fcd34d',
+              fontSize: 11.5, lineHeight: 1.45, color: '#92400e',
+            }}
+          >
+            <strong>{att.name}</strong> — {att.warning}
+          </div>
+        ))}
+
         {/* Chips dos arquivos anexados */}
         {(attachments.length > 0 || uploadState !== 'idle') && (
           <div style={{ marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {attachments.map(att => (
-              <div key={att.fileId} style={chipNeutral} data-testid="anexo-chip">
-                <span>{FILE_TYPE_ICON[att.fileType] ?? '📎'}</span>
+              <div
+                key={att.fileId}
+                data-testid="anexo-chip"
+                title={att.warning ?? undefined}
+                style={att.warning
+                  ? { ...chipNeutral, background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }
+                  : chipNeutral}
+              >
+                <span>{att.warning ? '⚠️' : (FILE_TYPE_ICON[att.fileType] ?? '📎')}</span>
                 <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {att.name}
                 </span>
