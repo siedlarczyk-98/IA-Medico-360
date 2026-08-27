@@ -31,6 +31,7 @@ from app.core.error_tracking import setup_sentry
 from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.telemetry import setup_phoenix
 from app.middleware import ner
+from app.services import expurgo_agendado
 
 settings = get_settings()
 
@@ -59,8 +60,13 @@ async def lifespan(app: FastAPI):
     # Popula o registry de formulas no boot: um formula_key ausente falha
     # aqui, e nao na primeira execucao clinica em producao.
     load_all_formulas()
+    # Expurgo de retenção (LGPD art. 16) roda dentro do processo, e não por cron
+    # externo: o agendamento no painel do Railway parou sem avisar e ficou 39
+    # dias sem ninguém saber. Ver app/services/expurgo_agendado.py.
+    tarefa_expurgo = expurgo_agendado.iniciar()
     yield
     # Shutdown
+    await expurgo_agendado.parar(tarefa_expurgo)
     await http_client.shutdown()
     logger.info("Médico 360 encerrando")
 

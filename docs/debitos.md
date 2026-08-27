@@ -10,56 +10,42 @@ produto, não de código.
 
 ---
 
-## 1. Retenção em `file_extractions` — a política existe; o cron não roda
+## 1. ~~Retenção em `file_extractions`~~ — RESOLVIDO em 2026-08-27
 
-**CORREÇÃO (2026-08-27).** A versão anterior deste item dizia que "não há
-expiração, não há rotina de limpeza". **Isso era falso** — escrito sem ler
-`app/services/data_subject_service.py`. A política existe e está certa:
+**A política sempre existiu e estava correta** — imagem 30 dias, texto extraído
+180, cache 30, em `data_subject_service`. A versão anterior deste item dizia que
+"não há expiração, não há rotina de limpeza", o que era **falso**, escrito sem
+ler o serviço.
 
-| Dado | Prazo | Constante |
-|---|---|---|
-| Imagem crua (base64) | 30 dias | `RETENCAO_IMAGEM_DIAS` |
-| Texto extraído | 180 dias | `RETENCAO_ARQUIVO_DIAS` |
-| Cache semântico | 30 dias | `RETENCAO_CACHE_DIAS` |
+**O problema era o agendamento**, que vivia no painel do Railway. Ele parou e
+ficou 39 dias sem ninguém saber: 14 imagens além do prazo, 8 já expurgadas — a
+assinatura de um job que rodou uma vez e nunca mais. Causa provável: com o
+*Cron Schedule* no serviço do backend, o Railway executa o `uvicorn`, que nunca
+encerra, e pula toda execução seguinte porque "a anterior ainda está rodando".
 
-O expurgo está implementado em `expurgar_dados_vencidos()` e tem gatilho em
-`scripts/expurgar_dados_vencidos.py`, idempotente e seguro para repetir.
+**O que foi feito:**
+1. Passivo limpo — 14 imagens e 18 entradas de cache.
+2. O expurgo passou a rodar **dentro do backend**, a cada 24h
+   (`app/services/expurgo_agendado.py`). Não há mais cron a configurar.
+3. Alarme no Sentry (`alarme=expurgo_lgpd`) quando o atraso passa de 2 dias.
+4. `scripts/verificar_expurgo.py` responde "está em dia?" à mão, sem apagar nada.
 
-**O problema real é operacional: o cron não está rodando.** Medição em produção
-em 2026-08-27:
+**Por que dentro do processo e não outro cron.** Trocar um cron por outro
+consertaria a instância, não o problema: agendamento em painel é invisível a
+testes, ao CI e a code review. Como código, ele aparece no diff, tem teste, e só
+some se o backend sumir junto — caso em que a falta de expurgo é o menor dos
+problemas.
 
-- 32 registros com mais de 30 dias
-- **14 deles ainda com o base64 presente** — deveria ser zero
-- 8 já expurgados, o que mostra que o job rodou em algum momento e parou
+**Custo aceito:** com várias réplicas, todas rodam o expurgo. É inofensivo — a
+operação é idempotente e barata, e eleição de líder seria complexidade sem ganho
+nesta escala.
 
-`docs/runbook.md` afirma que "o expurgo roda por cron". O agendamento do Railway
-vive no painel, não no repositório, então não há como um teste ou o CI perceber
-que ele parou. É uma política de LGPD que existe no papel e no código, mas não
-na prática.
+**Pendente para você:** se ainda houver um *Cron Schedule* apontando para o
+expurgo em algum serviço do Railway, ele pode ser removido.
 
-**Estado:**
-1. ~~Rodar o expurgo para limpar o passivo~~ — feito: 14 imagens e 18 entradas
-   de cache. Passivo zerado.
-2. ~~Alguma forma de perceber que parou de novo~~ — feito:
-   `scripts/verificar_expurgo.py` mede o passivo e abre evento `warning` no
-   Sentry com a tag `alarme=expurgo_lgpd`. Deve rodar como segundo cron, algumas
-   horas depois do expurgo.
-3. **PENDENTE — só no painel do Railway:** confirmar/recriar o agendamento.
-
-**Hipótese sobre a causa, a conferir no painel.** O Railway executa o start
-command do serviço e **pula** a execução seguinte se a anterior ainda estiver
-rodando. Se o *Cron Schedule* tiver sido posto no serviço do backend, o que roda
-é o `CMD` do Dockerfile (`uvicorn`), que nunca encerra — e a partir da primeira
-execução tudo é pulado, em silêncio. Isso explicaria exatamente os 8 registros
-expurgados seguidos de 39 dias de nada. Cron do Railway precisa de serviço
-próprio, com comando que termine. Passo a passo em `docs/runbook.md`.
-
-**Decisões de escopo já tomadas pelo dono (2026-08-27):** descartar o base64
-após 30 dias (já é a política vigente) e apagar os anexos junto com a conversa.
-A segunda **ainda não tem onde ser aplicada**: não existe exclusão de conversa
-no produto. `Conversation.status` é lido como filtro em três lugares e nunca
-definido como `False` por código nenhum. Quando a exclusão for implementada,
-ela precisa apagar os anexos vinculados.
+**A decisão de apagar anexos junto com a conversa continua sem onde ser
+aplicada:** não existe exclusão de conversa no produto. `Conversation.status` é
+lido como filtro em três lugares e nunca definido como `False`.
 
 ---
 

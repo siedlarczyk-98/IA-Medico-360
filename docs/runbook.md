@@ -266,37 +266,37 @@ Nunca ligar `send_default_pii=True` nem remover o `before_send`: é o que separa
 
 ## Retenção de dados
 
-O expurgo roda por cron: `python -m scripts.expurgar_dados_vencidos`.
+**O expurgo roda sozinho, dentro do backend.** Uma tarefa em background dispara
+90 segundos após o boot e depois a cada 24 horas — ver
+`app/services/expurgo_agendado.py`. **Não há cron a configurar em painel nenhum.**
 
-**O cron precisa de um SERVIÇO PRÓPRIO no Railway.** O Railway executa o start
-command do serviço e espera que ele termine; se o *Cron Schedule* for posto no
-serviço do backend, o que roda é o `CMD` do Dockerfile (`uvicorn`), que nunca
-encerra — e a partir daí toda execução seguinte é **pulada**, porque para o
-Railway "a anterior ainda está rodando". Sem erro, sem aviso.
+Se ele encontrar mais de 2 dias de atraso ao rodar, abre um evento `warning` no
+Sentry com a tag `alarme=expurgo_lgpd` — o que significa que o backend ficou
+fora do ar por dias ou que a tarefa vinha falhando.
 
-| Campo | Valor |
-|---|---|
-| Repositório | o mesmo |
-| Start Command | `python -m scripts.expurgar_dados_vencidos` |
-| Cron Schedule | `0 4 * * *` (UTC — 1h em Brasília) |
-| Variáveis | as mesmas do backend (precisa de `DATABASE_URL`) |
+Para conferir à mão, sem apagar nada:
 
-**O Railway não notifica falha de cron.** Por isso existe um segundo serviço, de
-alarme, que confere o resultado e reporta ao Sentry:
+```
+python -m scripts.verificar_expurgo      # responde "está em dia?", sai 1 se não
+python -m scripts.expurgar_dados_vencidos # limpa agora
+```
 
-| Campo | Valor |
-|---|---|
-| Start Command | `python -m scripts.verificar_expurgo` |
-| Cron Schedule | `0 6 * * *` (duas horas depois do expurgo) |
-| Variáveis | as mesmas, incluindo `SENTRY_DSN` |
-
-O verificador sai com código 1 e abre um evento `warning` no Sentry com a tag
-`alarme=expurgo_lgpd` quando encontra passivo. Rodá-lo à mão a qualquer momento
-também responde "a política está sendo cumprida?" sem apagar nada.
-
-> Isto não é hipotético: em 2026-08-27 havia 14 imagens **39 dias** além do
-> prazo, e 8 já expurgadas — a assinatura de um job que rodou uma vez e nunca
-> mais. Ninguém percebeu porque nada avisa.
+> **Por que não é cron.** Até 2026-08-27 o expurgo era agendado no painel do
+> Railway. O agendamento parou e ninguém soube por **39 dias**: havia 14 imagens
+> além do prazo e 8 já expurgadas — a assinatura de um job que rodou uma vez e
+> nunca mais. O código estava correto, os testes verdes, e nada avisava.
+>
+> A causa provável: o Railway executa o start command do serviço e **pula** a
+> execução seguinte se a anterior ainda estiver rodando. Com o *Cron Schedule*
+> no serviço do backend, o que roda é o `uvicorn`, que nunca encerra — então
+> tudo depois da primeira execução foi pulado, em silêncio.
+>
+> Trocar por outro cron consertaria a instância, não o problema: agendamento em
+> painel é invisível a testes, ao CI e a code review. Dentro do processo, ele
+> aparece no diff, tem teste, e só some se o backend sumir junto.
+>
+> **Se ainda houver um Cron Schedule configurado em algum serviço do Railway
+> apontando para o expurgo, ele pode ser removido.**
 
 | Dado | Prazo | Por quê |
 |---|---|---|

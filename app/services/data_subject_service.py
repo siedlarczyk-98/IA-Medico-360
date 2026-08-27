@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -118,6 +118,51 @@ async def exportar_dados(db: AsyncSession, user: User) -> dict:
 
 
 # ── Retenção ─────────────────────────────────────────────────────────────
+
+async def medir_passivo(db: AsyncSession) -> dict[str, int]:
+    """
+    Quanto já passou do prazo e continua no banco. Não apaga nada.
+
+    Serve para responder "a política está sendo cumprida?" — pergunta que ficou
+    sem resposta por 39 dias em 2026-08-27, quando o agendamento do expurgo
+    parou sem avisar ninguém.
+
+    `dias_de_atraso` é medido pelo registro vencido mais antigo: um alarme que
+    diz só "existe passivo" não distingue um dia de esquecimento de um trimestre.
+    """
+    imagens = (await db.execute(
+        select(func.count())
+        .select_from(FileExtraction)
+        .where(
+            FileExtraction.image_base64.is_not(None),
+            FileExtraction.created_at < _limite(RETENCAO_IMAGEM_DIAS),
+        )
+    )).scalar_one()
+
+    arquivos = (await db.execute(
+        select(func.count())
+        .select_from(FileExtraction)
+        .where(FileExtraction.created_at < _limite(RETENCAO_ARQUIVO_DIAS))
+    )).scalar_one()
+
+    mais_antigo = (await db.execute(
+        select(func.min(FileExtraction.created_at)).where(
+            FileExtraction.image_base64.is_not(None),
+            FileExtraction.created_at < _limite(RETENCAO_IMAGEM_DIAS),
+        )
+    )).scalar_one()
+
+    atraso = 0
+    if mais_antigo:
+        atraso = max((datetime.now(UTC) - mais_antigo).days - RETENCAO_IMAGEM_DIAS, 0)
+
+    return {
+        "imagens_vencidas": imagens,
+        "arquivos_vencidos": arquivos,
+        "dias_de_atraso": atraso,
+        "total": imagens + arquivos,
+    }
+
 
 async def expurgar_dados_vencidos(db: AsyncSession) -> dict[str, int]:
     """
