@@ -1,49 +1,107 @@
 # Arquitetura Técnica — Médico 360
 
-> Documento gerado por levantamento estático do código em 2026-08-20. Referências `arquivo:linha` apontam para a raiz do repositório.
+> Levantamento estático do código em **2026-08-28** (commit `bbcc9a2`). Referências `arquivo:linha` apontam para a raiz do repositório.
+> Substitui a versão de 2026-08-20 — o que mudou desde então está no §1.
 
-## 0. Correção de premissa
+## 0. Como ler este documento
 
-Não existem "3 instâncias" no sentido de 3 serviços/deploys independentes de backend. A arquitetura real é:
+Se você tem uma tarde para entender o sistema, leia nesta ordem:
 
-- **1 backend único** (`app/`) — FastAPI monolítico que serve dois domínios de negócio (Agregador de IA + Orquestrador Multi-Agente, e Calculadoras Científicas) sob o mesmo processo, mesmo banco, mesmo router raiz.
-- **2 frontends React separados**, cada um um deploy próprio no Railway:
-  - `frontend-app/` — UI do Agregador/Orquestrador (chat com IA, histórico, pastas).
-  - `calculadoras-app/` — UI das calculadoras clínicas.
-- Não há módulo "news" no repositório.
+1. **§2 — topologia.** Quantos serviços existem de verdade e quem fala com quem.
+2. **§5 — pipeline do Orquestrador.** É o produto. Todo o resto do backend orbita este fluxo.
+3. **§6 — contexto e memória.** Histórico, orçamento de tokens e pastas-como-projeto. É a parte mais recente e a mais fácil de quebrar sem perceber.
+4. **§11 — banco.** O ER completo e as constraints que a aplicação assume.
+5. **§17 — pontos de atenção.** Onde estão as armadilhas conhecidas.
 
-Os dois frontends não conversam entre si nem chamam um ao outro — ambos falam apenas com o backend único, e compartilham sessão via cookie SSO (`medico360_session`, domínio comum) mais um fluxo dedicado (`/auth/embed/token`) para embeds externos (portal Curseduca).
+O resto é referência: tabelas de rotas, variáveis de ambiente, CI, scripts.
+
+Documentos irmãos, que este aqui não duplica:
+
+| Arquivo | O que traz |
+|---|---|
+| `docs/regras-de-negocio-v2.2.md` | Regras de negócio numeradas (RN-*) |
+| `docs/Calculadoras_Cientificas_Regras_de_Arquitetura_v1.0.md` | Contrato de arquitetura do módulo de calculadoras |
+| `docs/debitos.md` | 14 débitos técnicos, com status e justificativa de cada um |
+| `docs/runbook.md` | Operação: incidentes, rotação de segredos, backup/restore (com números medidos), retenção |
+| `docs/teste-e2e.md` | Como rodar o E2E das calculadoras |
+| `README.md` | Setup local |
 
 ---
 
-## 1. Visão geral e comunicação entre as partes
+## 1. O que mudou desde o levantamento anterior (20 → 28 de agosto)
+
+Para quem já conhecia o sistema, as mudanças estruturais da última semana:
+
+- **O Agregador saiu da interface.** O produto passou a ser o Orquestrador. A remoção é só de superfície: rotas `/agregador/*`, serviço, testes e conversas antigas continuam intactos (`frontend-app/src/lib/appModes.ts:15-27`).
+- **Histórico deixou de vir do cliente.** O campo `history` da API foi removido; o servidor lê o histórico do banco (`app/services/conversation_history.py`). Era um problema de segurança *e* de correção.
+- **Orçamento de contexto por tokens** substituiu o corte por caracteres (`app/services/context_budget.py`).
+- **Pastas viraram projetos**: conversas da mesma pasta servem de contexto umas às outras, por busca semântica (`app/services/folder_context_service.py`, tabela `message_embeddings`).
+- **Dois modos novos** no Orquestrador: `EXAM_REVIEW` (discussão de exame anexado, exige modelo com visão) e `OFF_TOPIC` (saudação, respondida por atalho local sem gastar chamada de modelo).
+- **Anexos múltiplos** (até 5 por mensagem) e vínculo anexo↔mensagem (`file_extractions.interaction_id`).
+- **O cache semântico estava desligado em silêncio** desde sempre — um defeito no normalizador fazia toda escrita ser pulada. Corrigido, e o índice trocado de ivfflat para HNSW (migration `003`).
+- **Expurgo de retenção LGPD passou para dentro do backend** (`app/services/expurgo_agendado.py`) — o cron do painel do Railway tinha parado sem avisar por 39 dias.
+- **Módulo de landing pages**: schema `landing_pages` no banco, rotas `/landing-pages/*`, e três apps React novos (`lp-financas`, `lp-contabilidade`, `lp-parceiros`).
+- **Endpoint PREVENT** (`/api/v1/prevent/calculate`) — escore AHA sem estado, consumido pelo wizard de risco CV.
+- **`frontend-app` ganhou suíte de testes** (Vitest + Testing Library), rodando no CI.
+- **Vigilância das garantias silenciosas** (`vigilancia_agendada.py`): o backend passou a se perguntar a cada 6h se o cache está gravando, se o custo escalou e se o expurgo roda — as duas falhas silenciosas acima foram descobertas por acaso, e essa era a lacuna. Ver §9.2.
+
+---
+
+## 2. Topologia real
+
+Não existem "3 instâncias" no sentido de serviços de backend independentes. A arquitetura é:
+
+- **1 backend único** (`app/`) — FastAPI monolítico que serve todos os domínios (Orquestrador/Agregador, Calculadoras, Landing Pages) no mesmo processo, mesmo banco, mesmo router raiz.
+- **5 frontends React**, cada um com deploy próprio no Railway:
+
+| App | Papel | Porta dev | Rotas de backend que consome |
+|---|---|---|---|
+| `frontend-app/` | Chat do Orquestrador, histórico, pastas, anexos | 5173 | `/auth`, `/orquestrador`, `/agregador`, `/conversations`, `/folders`, `/uploads`, `/users/usage` |
+| `calculadoras-app/` | Calculadoras clínicas | 5174 | `/auth`, `/calculators`, `/prevent`, `/landing-pages/calculators` |
+| `lp-financas/` | LP de captação — finanças | 5175 | `/landing-pages/finance` |
+| `lp-contabilidade/` | LP de captação — contabilidade | 5176 | `/landing-pages/accounting` |
+| `lp-parceiros/` | LP de captação — parceiros | 5177 | `/landing-pages/partners` |
+
+Os frontends não conversam entre si. `frontend-app` e `calculadoras-app` compartilham sessão via cookie SSO (`medico360_session`, domínio comum em `COOKIE_DOMAIN`) mais um fluxo dedicado (`/auth/embed/token`) para embeds externos (portal Curseduca). As LPs são públicas — não autenticam, exceto `/landing-pages/calculators/submit`, que é chamada de dentro do módulo logado.
+
+Não há módulo "news" no repositório.
 
 ```mermaid
 flowchart LR
-    subgraph Frontends["Frontends (Railway / Nixpacks / serve dist)"]
-        FA["frontend-app\nReact 19 + Vite\nAgregador / Orquestrador"]
-        CA["calculadoras-app\nReact 19 + Vite\nCalculadoras"]
+    subgraph Apps["Apps autenticados (Railway / Nixpacks / serve dist)"]
+        FA["frontend-app<br/>React 19 + Vite<br/>Orquestrador"]
+        CA["calculadoras-app<br/>React 19 + Vite<br/>Calculadoras"]
     end
 
-    subgraph Backend["Backend único (Docker / uvicorn)"]
-        API["FastAPI app.main:app\n/api/v1/*"]
+    subgraph LPs["Landing pages publicas"]
+        LF["lp-financas"]
+        LC["lp-contabilidade"]
+        LPP["lp-parceiros"]
+    end
+
+    subgraph Backend["Backend unico (Docker / uvicorn)"]
+        API["FastAPI app.main:app<br/>/api/v1/*"]
     end
 
     subgraph Dados["Dados"]
-        PG[("PostgreSQL + pgvector\nschema public + schema calculators")]
-        RD[("Redis\ncache / rate limit")]
+        PG[("PostgreSQL + pgvector<br/>schemas: public, calculators, landing_pages")]
+        RD[("Redis<br/>cache exato / rate limit / throttle por e-mail")]
     end
 
-    subgraph Externos["Serviços externos"]
-        LLM["Anthropic / OpenAI / Google / Perplexity"]
+    subgraph Externos["Servicos externos"]
+        LLM["Anthropic - OpenAI - Google - Perplexity"]
         PHARMA["PharmaDB"]
         PUBMED["PubMed"]
-        CURSE["Curseduca (SSO/membros)"]
-        SG["SendGrid (e-mail/OTP)"]
+        CURSE["Curseduca (SSO / membros)"]
+        SG["SendGrid (e-mail / OTP)"]
+        OBS["Sentry - Arize Phoenix"]
     end
 
-    FA -- "HTTPS /api/v1/{auth,agregador,orquestrador,conversations,folders,uploads,usage}\ncookie medico360_session ou Bearer JWT" --> API
-    CA -- "HTTPS /api/v1/{auth,calculators}\ncookie medico360_session ou Bearer JWT" --> API
+    FA -- "cookie medico360_session ou Bearer JWT" --> API
+    CA -- "cookie medico360_session ou Bearer JWT" --> API
+    LF -- "POST /landing-pages/finance/submit (sem auth)" --> API
+    LC -- "POST /landing-pages/accounting/submit (sem auth)" --> API
+    LPP -- "POST /landing-pages/partners/submit (sem auth)" --> API
     API --> PG
     API --> RD
     API --> LLM
@@ -51,200 +109,475 @@ flowchart LR
     API --> PUBMED
     API --> CURSE
     API --> SG
+    API --> OBS
 ```
 
 Pontos-chave:
-- Não há chamada HTTP interna entre "instâncias" — é sempre frontend → backend único.
-- SSO entre os dois frontends é feito via cookie compartilhado (`COOKIE_DOMAIN`), não via chamada de API entre eles.
-- Banco físico único; o schema `calculators` é apenas separação lógica dentro do mesmo Postgres, com FKs cruzando para tabelas do schema público (`users`, `company`, `interactions`).
+
+- Nunca há chamada HTTP entre serviços internos — é sempre frontend → backend único.
+- Banco físico único. Os schemas `calculators` e `landing_pages` são separação **lógica**, com FKs cruzando para o schema público (`users`, `company`, `interactions`).
+- O CORS é montado no boot a partir de `frontend_url + calculadoras_url + embed_allowed_origins + landing_pages_origins` (`app/main.py:87-94`); fora de produção, cada origem também entra na variante `localhost`/`127.0.0.1`, que o browser trata como distintas.
 
 ---
 
-## 2. Backend — `app/`
+## 3. Backend — stack e estrutura
 
-### 2.1 Stack
-- Python 3.12, FastAPI, SQLAlchemy 2.0 (modo async, driver `asyncpg`), Alembic para migrations.
-- `slowapi` para rate limiting, `httpx` para chamadas externas, `spaCy` (`pt_core_news_sm`) para NER usado no filtro de DLP.
-- Observabilidade: Sentry (`error_tracking.py`) e OpenTelemetry/Arize Phoenix (`telemetry.py`).
-- Empacotado em imagem Docker única (`Dockerfile`), servido por `uvicorn`.
+### 3.1 Stack
 
-### 2.2 Estrutura de pastas
+- Python 3.12, FastAPI 0.141, SQLAlchemy 2.0 async (`asyncpg`), Alembic 1.14.
+- `slowapi` (rate limiting sobre Redis), `httpx` (cliente compartilhado com pool), `sse-starlette`, `spaCy` `pt_core_news_sm` (NER do DLP), `pgvector`, `sendgrid`.
+- Parsers de upload: `pdfplumber`, `python-docx`, `openpyxl`.
+- Observabilidade: Sentry (`app/core/error_tracking.py`, com scrubbing de PII obrigatório) e OpenTelemetry/Arize Phoenix (`app/core/telemetry.py`).
+- Imagem Docker única na raiz, servida por `uvicorn`.
+
+### 3.2 Estrutura de pastas
 
 ```
 app/
-├── main.py            bootstrap FastAPI, CORS, GZip, middleware de Request-Id, monta api_v1_router
+├── main.py            bootstrap FastAPI: logging → Sentry → Phoenix → http_client →
+│                       warmup do NER → registry de fórmulas → tarefa de expurgo;
+│                       CORS, GZip, RequestId, handler global de exceção
 ├── api/
-│   ├── deps.py         get_current_user (JWT Bearer ou cookie), nome do cookie
+│   ├── deps.py         get_current_user (Bearer JWT ou cookie de sessão)
 │   └── v1/
 │       ├── router.py    agrega todos os sub-routers sob /api/v1
-│       └── endpoints/   auth, conversations, folders, agregador, orquestrador, uploads, usage, health
-├── calculators/         módulo self-contained das calculadoras científicas
-│   ├── engine/           motor de execução de fórmulas (coerção de campos, validação)
-│   ├── formulas/         implementações por especialidade (cardiologia, infectologia, nefrologia)
-│   ├── registry/         registro das calculadoras disponíveis
-│   ├── repositories/     acesso a dados do schema `calculators`
-│   ├── routers/          calculators_router.py — rotas HTTP
+│       └── endpoints/   auth, conversations, folders, agregador, orquestrador,
+│                        uploads, usage, health, landing_pages
+├── calculators/         módulo self-contained das calculadoras
+│   ├── engine/           motor de execução (coerção de campos, validação)
+│   ├── formulas/         fórmulas por especialidade, auto-carregadas no boot
+│   ├── registry/         mapa formula_key → função pura (@register_formula)
+│   ├── repositories/     acesso ao schema `calculators`
+│   ├── routers/          calculators_router.py, prevent_router.py
 │   ├── schemas/          Pydantic de entrada/saída
-│   ├── services/         orquestra execução e extração de campos via LLM
-│   └── cache.py          cache do catálogo de calculadoras
-├── core/                config (Settings), database (engine/session async), limiter, circuit breaker,
-│                         cliente http, logging, error tracking (Sentry), telemetria, prompts de sistema
-├── middleware/          dlp.py (sanitização de PII antes de enviar a LLM), ner.py (NER em pt/spaCy)
-├── models/              ORM: models.py (schema público), calculators.py (schema calculators)
+│   ├── services/         execução + extração de campos via LLM
+│   └── cache.py          cache in-process do catálogo (TTL 300s)
+├── core/                config (Settings), database, limiter, circuit_breaker,
+│                        http_client, logging_config, error_tracking, telemetry,
+│                        prompts, alarme (evento operacional no Sentry)
+├── middleware/          dlp.py (mascaramento de PII antes do LLM), ner.py (spaCy pt)
+├── models/              models.py (public), calculators.py, landing_pages.py
 ├── repositories/        auth_repository.py
-├── schemas/             Pydantic: agregador, auth, conversations, usage
-└── services/            agregador_service, orquestrador_service(+stream), ai_providers (Anthropic/OpenAI/
-                         Google/Perplexity), auth_service, cache_service (Redis), consent_service (LGPD),
-                         curseduca_service, data_subject_service (export LGPD), email_service (SendGrid),
-                         file_extractor_service, medication_extractor, pharmadb_service, pricing,
-                         pubmed_service, semantic_cache_service (pgvector), specialty_detector,
-                         triage_service, usage_service
+├── schemas/             agregador, auth, conversations, usage, landing_pages
+└── services/            ver 3.3
 ```
 
-### 2.3 Autenticação (transversal a todas as rotas)
+### 3.3 Serviços — o que cada um faz
 
-`get_current_user` (`app/api/deps.py:20-81`): extrai `Authorization: Bearer <jwt>` **ou** o cookie `medico360_session`, decodifica com `jwt_secret_key`/`jwt_algorithm`, valida `sub` como UUID e busca o `User` com `status=true`. O cookie é setado por `_set_session_cookie` (`auth.py:48-59`) com `httponly=True`, `secure=is_production`, `samesite=lax`, `domain=settings.cookie_domain`.
+| Módulo | Responsabilidade |
+|---|---|
+| `orquestrador_service.py` | Pipeline não-streaming de `/orquestrador/query` |
+| `orquestrador_stream_service.py` | Mesmo pipeline via SSE; abre sessão de banco própria |
+| `orquestrador_shared.py` | Peças comuns aos dois: título, posse da conversa, clarificação, montagem de contexto, vínculo de anexos |
+| `orquestrador_modes.py` | **Definição única** dos modos: enum, mapa modo→modelo, temperatura, cadeia de fallback, modos que exigem visão, teto de tokens por esforço |
+| `triage_service.py` | Classificação da pergunta em um modo; atalho local para saudações |
+| `agregador_service.py` | Consulta paralela a N modelos (produto legado, fora da UI) |
+| `ai_providers.py` | Providers Anthropic / OpenAI / Gemini / Perplexity + `DlpEnforcingProvider` |
+| `conversation_history.py` | Histórico lido do banco (nunca do cliente) |
+| `context_budget.py` | Corte do histórico por orçamento de tokens estimado |
+| `folder_context_service.py` | Contexto entre conversas da mesma pasta, por similaridade |
+| `semantic_cache_service.py` | Cache semântico pgvector + fast-path exato no Redis |
+| `cache_service.py` | Wrapper de Redis (get/set/throttle) |
+| `file_extractor_service.py` | Validação, extração de texto e resolução de anexos |
+| `medication_extractor.py` | Extrai fármacos mencionados na interação |
+| `pharmadb_service.py` | Integração PharmaDB (bula, interação, receita, genérico) |
+| `pubmed_service.py` | Validação de citações e busca de diretrizes mais recentes |
+| `response_metadata.py` | Serializa fontes/PubMed em `InteractionResponse.extra_metadata` |
+| `specialty_detector.py` | Detecta especialidade/tópico da interação |
+| `usage_service.py` | Limite semanal de custo por usuário |
+| `pricing.py` | Preços por modelo, cache TTL 1h |
+| `auth_service.py` / `curseduca_service.py` | Login OTP/convite/embed; validação de membro |
+| `consent_service.py` / `data_subject_service.py` | Consentimento LGPD e exportação do titular |
+| `expurgo_agendado.py` | Expurgo de retenção rodando dentro do processo |
+| `vigilancia_service.py` | Mede cache, custo e última rodada de expurgo; `avaliar` decide o que vira alarme |
+| `vigilancia_agendada.py` | Laço de 6h que roda as medições e alarma no Sentry |
+| `email_service.py` | SendGrid |
 
-Todas as rotas abaixo exigem essa autenticação, **exceto** as marcadas "não" na coluna Auth.
+### 3.4 Autenticação
 
-### 2.4 Rotas — `/auth` (`app/api/v1/endpoints/auth.py`)
+`get_current_user` (`app/api/deps.py:20-81`): aceita `Authorization: Bearer <jwt>` **ou** o cookie `medico360_session`; decodifica com `jwt_secret_key`/`jwt_algorithm`, valida `sub` como UUID e busca o `User` com `status=true`. O cookie é setado em `_set_session_cookie` (`auth.py:48`) com `httponly=True`, `secure=is_production`, `samesite=lax`, `domain=settings.cookie_domain`.
 
-| Método | Path | Arquivo:linha | Auth | Rate limit | Descrição |
+Todas as rotas exigem autenticação, exceto as marcadas "não" nas tabelas do §4.
+
+---
+
+## 4. Rotas
+
+### 4.1 `/auth` (`app/api/v1/endpoints/auth.py`)
+
+| Método | Path | Linha | Auth | Rate limit | Descrição |
 |---|---|---|---|---|---|
-| POST | /api/v1/auth/register | auth.py:62 | não | 5/min | Cadastro público (se `allow_public_registration`); envia convite por email |
-| POST | /api/v1/auth/invite/generate | auth.py:72 | sim (admin) | 30/min | Gera token de convite; grava `AuditLog action=invite.generate` |
-| POST | /api/v1/auth/invite/accept | auth.py:105 | não | 10/min | Aceita convite por token+email; seta cookie SSO |
-| POST | /api/v1/auth/embed/token | auth.py:125 | não | 5/min | SSO para embeds (Curseduca); valida `Origin` contra `embed_allowed_origins ∪ {calculadoras_url}`; valida membro ativo via Curseduca; cria usuário se necessário |
-| POST | /api/v1/auth/otp/request | auth.py:173 | não | 3/15min (+3/900s por e-mail) | Solicita OTP por e-mail |
-| POST | /api/v1/auth/otp/verify | auth.py:180 | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta cookie SSO |
-| POST | /api/v1/auth/onboarding | auth.py:189 | sim | 30/min | Completa onboarding + registra consentimento de termos na mesma transação |
-| GET | /api/v1/auth/me | auth.py:223 | sim | — | Dados do usuário logado + hash para Intercom |
-| PATCH | /api/v1/auth/me | auth.py:230 | sim | 30/min | Atualiza nome/email (valida unicidade) |
-| GET | /api/v1/auth/me/consentimentos | auth.py:252 | sim | — | Situação de consentimentos LGPD + versão vigente |
-| POST | /api/v1/auth/me/consentimentos/{tipo}/revogar | auth.py:269 | sim | 10/h | Revoga consentimento (exceto `termos_e_privacidade`) |
-| GET | /api/v1/auth/me/export | auth.py:302 | sim | 5/h | Portabilidade LGPD art. 18, V — exporta dados do titular |
-| DELETE | /api/v1/auth/me | auth.py:318 | sim | 10/min | Exclusão de conta em cascata (conversas, interações, alertas, preferências etc.) |
+| POST | /api/v1/auth/register | 62 | não | 5/min | Cadastro público (se `allow_public_registration`); envia convite por e-mail |
+| POST | /api/v1/auth/invite/generate | 72 | sim (admin) | 30/min | Gera token de convite; grava `AuditLog action=invite.generate` |
+| POST | /api/v1/auth/invite/accept | 105 | não | 10/min | Aceita convite por token+e-mail; seta cookie SSO |
+| POST | /api/v1/auth/embed/token | 125 | não | 5/min | SSO para embeds; valida `Origin` contra `embed_allowed_origins ∪ {calculadoras_url}` e o membro via Curseduca; cria usuário se necessário |
+| POST | /api/v1/auth/otp/request | 173 | não | 3/15min (+3/900s por e-mail) | Solicita OTP por e-mail |
+| POST | /api/v1/auth/otp/verify | 180 | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta cookie SSO |
+| POST | /api/v1/auth/onboarding | 189 | sim | 30/min | Onboarding + consentimento de termos na mesma transação |
+| GET | /api/v1/auth/me | 223 | sim | — | Usuário logado + hash HMAC para o Intercom |
+| PATCH | /api/v1/auth/me | 230 | sim | 30/min | Atualiza nome/e-mail (valida unicidade) |
+| GET | /api/v1/auth/me/consentimentos | 252 | sim | — | Situação dos consentimentos LGPD + versão vigente |
+| POST | /api/v1/auth/me/consentimentos/{tipo}/revogar | 269 | sim | 10/h | Revoga consentimento (exceto `termos_e_privacidade`) |
+| GET | /api/v1/auth/me/export | 302 | sim | 5/h | Portabilidade LGPD art. 18, V |
+| DELETE | /api/v1/auth/me | 318 | sim | 10/min | Exclusão de conta em cascata |
 
-### 2.5 Rotas — `/conversations`
+### 4.2 `/orquestrador` (`app/api/v1/endpoints/orquestrador.py`)
+
+| Método | Path | Linha | Rate limit | Descrição |
+|---|---|---|---|---|
+| POST | /api/v1/orquestrador/query | 74 | 30/min | Triagem + roteamento, resposta completa |
+| POST | /api/v1/orquestrador/stream | 118 | 30/min | Mesmo pipeline via SSE. Não atende `PHARMA_CHECK` — use `/query` |
+
+Body `OrquestradorRequest` (`orquestrador.py:21-72`):
+
+| Campo | Tipo | Nota |
+|---|---|---|
+| `prompt` | str (1–4000) | obrigatório |
+| `conversation_id` | UUID? | ausente = cria conversa nova |
+| `force` | bool | pula a etapa de clarificação |
+| `clarification_answers` | str? | respostas às perguntas de clarificação |
+| `effort` | `rápido` \| `detalhado` | teto de tokens de saída (700 / 4096) |
+| `mode` | str? | modo explícito; pula a triagem automática |
+| `folder_id` | UUID? | pasta da nova conversa |
+| `file_id` | UUID? | **deprecado** — tratado como lista de um |
+| `file_ids` | UUID[] | até 5 anexos por mensagem |
+
+O campo `history` **não existe mais**: o servidor lê o histórico do banco.
+
+Eventos SSE de `/stream`: `start` · `cache_hit` · `clarification` · `token` · `text_done` · `done` · `error`. `text_done` existe para o cliente liberar a digitação sem esperar o pós-processamento (PubMed, custo, specialty), que sai no `done`.
+
+### 4.3 `/agregador` (produto legado, fora da UI)
+
+| Método | Path | Linha | Rate limit | Descrição |
+|---|---|---|---|---|
+| GET | /api/v1/agregador/models | 45 | — | Modelos ativos, com disponibilidade derivada da chave configurada e `cost_tier` |
+| POST | /api/v1/agregador/query | 93 | 30/min | Consulta a N modelos em paralelo (`MAX_MODELS_PER_QUERY`) |
+| POST | /api/v1/agregador/stream | 123 | 30/min | SSE multi-modelo; eventos `delta`/`complete`/`error`/`pubmed`/`disclaimer`/`done` |
+| GET | /api/v1/agregador/history | 292 | — | Histórico pesquisável por query/modelo/data |
+
+### 4.4 `/conversations` e `/folders`
 
 | Método | Path | Arquivo:linha | Rate limit | Descrição |
 |---|---|---|---|---|
-| GET | /api/v1/conversations | conversations.py:17 | 60/min | Lista conversas ativas do usuário, paginado, ordenado por `updated_at desc` |
-| GET | /api/v1/conversations/{id} | conversations.py:36 | 60/min | Detalhe + mensagens paginadas; distingue `feature=AGREGADOR` (múltiplas respostas por interação) de `ORQUESTRADOR` (1 resposta) |
-
-### 2.6 Rotas — `/folders`
-
-| Método | Path | Arquivo:linha | Rate limit | Descrição |
-|---|---|---|---|---|
-| GET | /api/v1/folders | folders.py:34 | 60/min | Lista pastas do usuário |
-| POST | /api/v1/folders | folders.py:49 | 30/min | Cria pasta |
+| GET | /api/v1/conversations | conversations.py:23 | 60/min | Conversas ativas do usuário, paginadas, `updated_at desc` |
+| GET | /api/v1/conversations/{id} | conversations.py:42 | 60/min | Detalhe + mensagens; devolve anexos, citações e validação PubMed por mensagem |
+| GET | /api/v1/folders | folders.py:34 | 60/min | Lista pastas |
+| POST | /api/v1/folders | folders.py:49 | 30/min | Cria |
 | PUT | /api/v1/folders/{id} | folders.py:65 | 30/min | Renomeia |
-| DELETE | /api/v1/folders/{id} | folders.py:86 | 30/min | Apaga |
-| PATCH | /api/v1/folders/conversations/{id}/folder | folders.py:104 | 60/min | Move 1 conversa (ou remove, `folder_id=null`) |
-| PATCH | /api/v1/folders/conversations/bulk | folders.py:134 | 30/min | Move até 100 conversas de uma vez |
+| DELETE | /api/v1/folders/{id} | folders.py:86 | 30/min | Apaga (conversas ficam sem pasta, `SET NULL`) |
+| PATCH | /api/v1/folders/conversations/{id}/folder | folders.py:104 | 60/min | Move 1 conversa |
+| PATCH | /api/v1/folders/conversations/bulk | folders.py:134 | 30/min | Move até 100 conversas |
 
-### 2.7 Rotas — `/agregador`
+`ConversationDetail` (`app/schemas/conversations.py:69`) carrega `messages[]` com `role`, `content`, `attachments[]`, `mode`, `citations[]` e `pubmed_validation` — é o que permite a conversa reabrir com as fontes intactas.
+
+### 4.5 `/uploads`
+
+| Método | Path | Linha | Rate limit | Descrição |
+|---|---|---|---|---|
+| POST | /api/v1/uploads/extract | 45 | 20/min | Valida content-type **e** magic bytes; extrai texto em thread; imagem vira descrição via Claude Haiku (custo cobrado); trunca em `MAX_EXTRACTED_CHARS`; grava `FileExtraction`; devolve `file_id` e um `warning` opcional |
+
+Limites (`app/services/file_extractor_service.py:36-46`): 10 MB por arquivo (5 MB para imagem, limite do base64 da Anthropic), 50 000 caracteres extraídos, 100 páginas de PDF, 20 000 parágrafos/linhas de tabela DOCX, 50 000 linhas XLSX, 200 MB descompactados (proteção contra zip-bomb), 5 anexos por mensagem.
+
+O `warning` é deliberado: um PDF digitalizado sem OCR não faz o upload falhar — o médico pode ter motivo para anexar assim — mas ele precisa saber que o conteúdo não chegou ao modelo (`docs/debitos.md`, item 2).
+
+### 4.6 `/calculators` e `/prevent`
 
 | Método | Path | Arquivo:linha | Rate limit | Descrição |
 |---|---|---|---|---|
-| GET | /api/v1/agregador/models | agregador.py:45 | — | Lista modelos ativos com disponibilidade calculada por chave de API configurada e `cost_tier` |
-| POST | /api/v1/agregador/query | agregador.py:93 | 30/min | Consulta não-streaming, múltiplos modelos em paralelo, checa limite semanal de uso |
-| POST | /api/v1/agregador/stream | agregador.py:123 | 30/min | SSE streaming; DLP via `sanitize_prompt_async`; histórico de até 10 turnos; 1 task assíncrona por modelo; eventos `delta`/`complete`/`error`/`pubmed`/`disclaimer`/`done`; `effort` ajusta max_tokens (rápido=700, detalhado=4096) |
-| GET | /api/v1/agregador/history | agregador.py:286 | — | Histórico pesquisável por query/modelo/data, paginado |
+| GET | /api/v1/calculators | calculators_router.py:23 | 60/min | Lista, filtro opcional por especialidade |
+| GET | /api/v1/calculators/{slug} | calculators_router.py:34 | 60/min | Detalhe (campos, versão ativa) |
+| POST | /api/v1/calculators/{slug}/execute | calculators_router.py:45 | 60/min | Executa (`inputs`, `dry_run` opcional) |
+| POST | /api/v1/calculators/{slug}/extract | calculators_router.py:64 | 30/min | Extrai campos de texto livre via LLM |
+| PUT / DELETE | /api/v1/calculators/{slug}/favorite | calculators_router.py:88 / :99 | 60/min | (Des)favorita |
+| GET | /api/v1/calculators/{slug}/history | calculators_router.py:110 | 60/min | Histórico de execuções do usuário |
+| POST | /api/v1/prevent/calculate | prevent_router.py:12 | 60/min | Escore PREVENT (AHA, Khan et al. 2024), seis desfechos. **Sem estado**: não grava execução nem audit log |
 
-### 2.8 Rotas — `/orquestrador`
+O PREVENT é um caso à parte de propósito: campos fora da faixa de validade voltam `None` desfecho a desfecho, seguindo `AHAprevent::pred_risk_base` — a AHA invalida por desfecho, não em bloco. Onde a AHA diverge do MDCalc, o projeto segue a AHA; as faixas vivem em `_REGRAS` dentro de `app/calculators/formulas/cardiologia/prevent.py`.
 
-| Método | Path | Arquivo:linha | Rate limit | Descrição |
-|---|---|---|---|---|
-| POST | /api/v1/orquestrador/query | orquestrador.py:62 | 30/min | Triagem automática + roteamento não-streaming |
-| POST | /api/v1/orquestrador/stream | orquestrador.py:103 | 30/min | Mesmo roteamento via SSE (não suporta modo PHARMA_CHECK) |
+### 4.7 `/landing-pages`
 
-Roteamento por categoria de triagem: `QUICK_SEARCH` → Perplexity · `CLINICAL_REASONING` → Claude Sonnet · `PHARMA_CHECK`/`PHARMA_BULA`/`PHARMA_RECEITA`/`PHARMA_GENERICO` → PharmaDB · `PRODUCTIVITY` → GPT-5.4 Nano.
+| Método | Path | Linha | Auth | Rate limit | Descrição |
+|---|---|---|---|---|---|
+| GET | /api/v1/landing-pages/{slug}/check | 62 | não | 60/min | `already_submitted` por e-mail; `slug` validado contra a lista fixa `ALLOWED_SLUGS` |
+| POST | /api/v1/landing-pages/finance/submit | 75 | não | 20/min | 409 se já houver submissão com o mesmo e-mail |
+| POST | /api/v1/landing-pages/accounting/submit | 108 | não | 20/min | Idem + seleções de dor (1:N) |
+| POST | /api/v1/landing-pages/partners/submit | 148 | não | 20/min | Idem + categorias (1:N) |
+| POST | /api/v1/landing-pages/calculators/submit | 185 | **sim** | 20/min | Pedido de calculadora nova, feito de dentro do módulo logado — identidade vem da conta, não do body; 409 por `user_id` |
 
-Body `OrquestradorRequest` (`orquestrador.py:21-59`): `prompt` (1–4000 chars), `conversation_id`, `force`, `clarification_answers`, `effort` (rápido|detalhado), `mode` (opcional, pula triagem), `history`, `folder_id`, `file_id`.
+O bloqueio por e-mail só se aplica quando o e-mail veio na URL (embed do fornecedor): sem e-mail não há como identificar reenvio, e a submissão segue permitida.
 
-### 2.9 Rotas — `/uploads`
-
-| Método | Path | Arquivo:linha | Rate limit | Descrição |
-|---|---|---|---|---|
-| POST | /api/v1/uploads/extract | uploads.py:39 | 20/min | Valida content-type + magic bytes; extrai texto (parsers em thread); para imagens gera descrição via Claude Haiku e cobra custo; trunca em `MAX_EXTRACTED_CHARS`; salva `FileExtraction`; retorna `file_id` |
-
-### 2.10 Rotas — `/users/usage` e `/health`
+### 4.8 `/users/usage` e `/health`
 
 | Método | Path | Arquivo:linha | Auth | Descrição |
 |---|---|---|---|---|
-| GET | /api/v1/users/usage | usage.py:12 | sim | Uso/limite semanal do usuário |
-| GET | /api/v1/health | health.py:33 | não | Liveness pura, não toca dependências |
-| GET | /api/v1/health/ready | health.py:63 | não | Readiness: checa Postgres (`SELECT 1`) e Redis (`ping`) em paralelo, timeout 3s cada; 503 se algo falhar |
-
-### 2.11 Rotas — `/calculators` (`app/calculators/routers/calculators_router.py`)
-
-| Método | Path | Arquivo:linha | Rate limit | Descrição |
-|---|---|---|---|---|
-| GET | /api/v1/calculators | calculators_router.py:23 | 60/min | Lista calculadoras, filtro opcional por especialidade |
-| GET | /api/v1/calculators/{slug} | calculators_router.py:34 | 60/min | Detalhe (campos, versão ativa) |
-| POST | /api/v1/calculators/{slug}/execute | calculators_router.py:45 | 60/min | Executa cálculo (`inputs`, `dry_run` opcional) |
-| POST | /api/v1/calculators/{slug}/extract | calculators_router.py:64 | 30/min | Extrai campos via LLM a partir de texto livre |
-| PUT | /api/v1/calculators/{slug}/favorite | calculators_router.py:88 | 60/min | Favorita |
-| DELETE | /api/v1/calculators/{slug}/favorite | calculators_router.py:99 | 60/min | Desfavorita |
-| GET | /api/v1/calculators/{slug}/history | calculators_router.py:110 | 60/min | Histórico de execuções do usuário (`limit` 1–200, `offset`) |
+| GET | /api/v1/users/usage | usage.py:12 | sim | Uso/limite semanal |
+| GET | /api/v1/health | health.py:33 | não | Liveness pura — não toca dependência nenhuma |
+| GET | /api/v1/health/ready | health.py:63 | não | Readiness: Postgres (`SELECT 1`) e Redis (`ping`) em paralelo, timeout 3s cada; 503 se algo falhar |
 
 ---
 
-## 3. Frontend — `frontend-app/` (Agregador / Orquestrador)
+## 5. Pipeline do Orquestrador
 
-- React 19 + Vite, deploy Railway via Nixpacks (`npm run build` → `serve dist`).
-- Consome `/api/v1/{auth,agregador,orquestrador,conversations,folders,uploads,usage}`.
+É o coração do produto. `/query` e `/stream` seguem o mesmo caminho; o que é comum vive em `orquestrador_shared.py` (os dois serviços nasceram como cópias e já tinham divergido — um chegou a importar função privada do outro).
+
+```mermaid
+flowchart TD
+    A["prompt + anexos"] --> B["resolve_files_context<br/>ate 5 anexos: texto + imagens"]
+    B --> C{"clarification_answers?"}
+    C -- sim --> D["resolve_clarification_prompt<br/>recompoe prompt original + respostas"]
+    C -- nao --> E
+    D --> E["DLP: sanitize_prompt_async<br/>nomes, CPF/RG/SUS, contato, endereco"]
+    E --> F{"saudacao sem<br/>conteudo clinico?"}
+    F -- sim --> G["OFF_TOPIC: resposta local<br/>zero chamada de modelo"]
+    F -- nao --> H["Contexto: historico do banco<br/>+ trechos da pasta, dentro do orcamento"]
+    H --> I{"mode explicito?"}
+    I -- nao --> J["triage()"]
+    I -- sim --> K
+    J --> K["modo resolvido<br/>anexo promove CLINICAL_REASONING para EXAM_REVIEW"]
+    K --> L{"CLINICAL_REASONING,<br/>sem force?"}
+    L -- sim --> M["check_clarification<br/>evento clarification, encerra"]
+    L -- nao --> N["Cache semantico<br/>Redis exato, depois pgvector"]
+    N -- HIT --> O["cache_hit: resposta pronta"]
+    N -- MISS --> P{"modo"}
+    P -- "PHARMA_*" --> Q["PharmaDB"]
+    P -- "outros" --> R["Provider do modo<br/>+ cadeia de fallback"]
+    R --> S["tokens, depois text_done"]
+    S --> T["pos-processamento em background:<br/>PubMed, specialty, medicacoes, custo, audit"]
+    T --> U["done"]
+```
+
+### 5.1 Roteamento por modo (`app/services/orquestrador_modes.py`)
+
+| Modo | Modelo primário | Fallback | Temp. |
+|---|---|---|---|
+| `QUICK_SEARCH` | `sonar-pro` (Perplexity) | `gemini-2.5-flash` | 0.0 |
+| `CLINICAL_REASONING` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` | 0.0 |
+| `EXAM_REVIEW` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` (todos com visão) | 0.0 |
+| `PRODUCTIVITY` | `gpt-5.4-nano` | `gemini-2.5-flash` | 0.7 |
+| `PHARMA_CHECK` / `PHARMA_BULA` / `PHARMA_RECEITA` / `PHARMA_GENERICO` | PharmaDB (sem LLM) | — | — |
+| `OFF_TOPIC` | atalho local | — | — |
+
+Detalhes que não são óbvios:
+
+- **`EXAM_REVIEW` só pode cair em modelo com visão** (`MODES_REQUIRING_VISION`). Rotear para Perplexity entregaria ao médico uma leitura de exame feita sem o exame — baseada só na descrição textual gerada por outro modelo, sem ele saber.
+- **A promoção `CLINICAL_REASONING → EXAM_REVIEW` acontece por anexo, não por triagem** (`upgrade_mode_for_attachments`). A triagem só vê o texto; "o que você acha disso?" com uma tomografia junto e a mesma frase sem anexo pedem modos diferentes. Um modo escolhido explicitamente na interface **nunca** é promovido. Anexar um documento e pedir "resuma isto" continua sendo `PRODUCTIVITY`.
+- **`PHARMA_CHECK` exige confiança ≥ 0.90** (`PHARMA_CHECK_MIN_CONFIDENCE`). Um modo explícito ainda passa pela triagem, para resolver o sub-modo (bula / receita / genérico / interação), mas ignora o gate de confiança.
+- **`ModeEnum` em `app/models/models.py` NÃO é a fonte dos modos** — é resíduo do ERD original (BIZU, SHERLOCK, FARMACIA…), com valores que nunca corresponderam aos modos reais e que nenhum código do orquestrador lê. Mexer nele é mudança de schema, não de serviço.
+- O toggle Rápido/Detalhado só limita o tamanho da resposta (`EFFORT_MAX_TOKENS`: 700 / 4096) — o que reduz tempo de geração e custo de saída.
+
+### 5.2 DLP
+
+`app/middleware/dlp.py` + `ner.py` (RN-SEC-001). Mascara antes de qualquer envio externo: nomes com palavra-gatilho → `[PACIENTE]`/`[MÉDICO]` (regex), nomes sem gatilho → `[NOME]` (NER spaCy), CPF/RG/Cartão SUS → `[DOCUMENTO]`, telefone/e-mail → `[CONTATO]`, endereço → `[ENDEREÇO]`.
+
+Não há re-identificação: o placeholder vai ao modelo e volta no texto. Um falso positivo apaga o termo em definitivo — por isso o passo de NER é conservador, e os filtros anti-epônimo em `ner._is_person` existem por medição real. **Não simplifique sem ler a justificativa.** `DlpEnforcingProvider` (`ai_providers.py:721`) é a rede de segurança: envolve o provider e recusa o envio se o texto não passou pela sanitização.
+
+O modelo de NER é carregado no boot (`ner.warmup()`), fora do caminho da primeira requisição — custava ~1s ao primeiro usuário.
+
+---
+
+## 6. Contexto e memória
+
+### 6.1 Histórico vem do banco, não do cliente
+
+`app/services/conversation_history.py`. Antes o histórico chegava no corpo da requisição. Duas consequências: o servidor mandava ao modelo — e cobrava do usuário — um texto que nunca verificou (um cliente podia afirmar qualquer coisa como "dito anteriormente pelo assistente"); e o que o médico via na tela podia divergir do que o modelo recebia. Lê no máximo `MAX_INTERACTIONS_LIDAS = 40` interações.
+
+Os turnos viram papéis de verdade (`user`/`assistant`), não um bloco de texto achatado com rótulos dentro — o modelo distinguia quem falou o quê por um rótulo textual, que ele podia ignorar ou confundir com conteúdo.
+
+### 6.2 Orçamento por tokens
+
+`app/services/context_budget.py`. `DEFAULT_HISTORY_TOKEN_BUDGET = 6000`, `CHARS_PER_TOKEN = 3.2` (medido contra dados reais em 2026-08-27), `TOKEN_OVERHEAD_POR_MENSAGEM = 4`.
+
+A contagem é estimativa de propósito: `tiktoken` só vale para OpenAI e o projeto fala com quatro provedores. **Errar para menos é inofensivo aqui** — o orçamento está muito abaixo da janela de qualquer modelo em uso (200k no Sonnet); ele é controle de custo e de ruído, não proteção contra limite técnico. Isso inverte a intuição comum sobre contagem de tokens, e é por isso que a razão é calibrada pela mediana e não por um percentil pessimista.
+
+### 6.3 Pastas como projetos
+
+`app/services/folder_context_service.py` + tabela `message_embeddings`. Uma conversa dentro de uma pasta pode usar as **outras** conversas daquela pasta como contexto, recuperadas sob demanda por similaridade (`text-embedding-3-small`, 1536 dims, `SIMILARITY_FLOOR = 0.25`, até 4 trechos de 2000 caracteres).
+
+Por que não injetar a pasta inteira: uma pasta de acompanhamento acumula dezenas de conversas — estouraria a janela, subiria o custo sem teto e afogaria o caso atual em ruído de casos parecidos.
+
+**A garantia que mais importa é o isolamento.** A busca cruza conversas — exatamente o tipo de recurso que vaza dado de um paciente para a discussão de outro se o filtro estiver frouxo. Todo caminho de leitura filtra por `user_id` **e** `folder_id`; `user_id` é denormalizado em `message_embeddings` para que o filtro não dependa de um JOIN que alguém possa esquecer de escrever. Teste dedicado: `tests/test_folder_context.py`.
+
+O bloco da pasta entra **antes** do histórico próprio, como turno de usuário: é pano de fundo, não a última coisa dita. E disputa o mesmo orçamento — se a conversa própria for longa, ela ganha o espaço, que é o comportamento certo (o caso atual vale mais que casos vizinhos).
+
+A indexação é agendada fora do caminho da resposta (`agendar_indexacao`), até `MAX_INDEXAR_POR_VEZ = 60` trechos por vez.
+
+### 6.4 Cache semântico
+
+`app/services/semantic_cache_service.py`. Pipeline: guardrail + normalização por LLM (expande siglas: PAC → pneumonia adquirida na comunidade) → embedding → fast-path exato no Redis (TTL 30 dias) → busca cosine no pgvector (`SIMILARITY_THRESHOLD = 0.88`, TTL 30 dias).
+
+`QUICK_SEARCH` é sempre cacheável se o guardrail passar; `CLINICAL_REASONING` só sem dados de paciente específico.
+
+A chave de cache usa o **prompt atual sem histórico** — separação deliberada, senão cada conversa teria chave própria e o cache nunca acertaria.
+
+**Histórico de defeito, vale conhecer:** o cache ficou desligado em silêncio desde sempre. `_normalize_prompt` mandava `max_tokens`, que a família gpt-5 recusa com HTTP 400, e toda escrita era pulada sem erro visível. Corrigido em `f31dd2c`. Com a tabela ainda vazia, a migration `003` aproveitou para trocar o índice ivfflat por HNSW: ivfflat calcula os centroides no momento da criação, e o índice do baseline nasceu sobre uma tabela vazia — recall degradado até alguém lembrar de reindexar, e `lists = 100` dimensionado para ~10 000 linhas que a tabela nunca teve. HNSW constrói o grafo incrementalmente e some com a classe inteira de bug. Há um script de medição: `scripts/medir_cache_semantico.py`.
+
+---
+
+## 7. Calculadoras
+
+Módulo self-contained (`app/calculators/`), com contrato próprio em `docs/Calculadoras_Cientificas_Regras_de_Arquitetura_v1.0.md`.
+
+- **Definição em dados, execução em código.** `calculator_definitions` / `calculator_fields` / `calculator_versions` vivem no banco (populados por seeds); a `formula_key` da versão ativa aponta para uma função pura registrada via `@register_formula` no `registry`.
+- **Fail-fast no boot**: `load_all_formulas()` roda no lifespan e importa todos os módulos de fórmula. Uma `formula_key` órfã derruba o startup, não a primeira execução clínica em produção.
+- **Uma versão ativa por calculadora**, garantido por índice único parcial no banco (§11.3).
+- Fórmulas em Python hoje: CHA₂DS₂-VASc + HAS-BLED, Cockcroft-Gault, CURB-65, PREVENT.
+- O **Risco CV SBC 2025** é um caso especial: a fórmula em Python foi removida e o wizard passou a viver no frontend (`calculadoras-app/src/calculators/riscoCv/`), consumindo `/prevent/calculate` para a parte quantitativa. A definição continua no banco (seed `seed_risco_cv_sbc2025`) e o E2E cobre o fluxo.
+
+---
+
+## 8. Landing pages
+
+Schema `landing_pages` no mesmo banco. Modelagem: catálogo (`landing_pages`) → submissão comum (`submissions`) → resposta tipada por LP (`finance_answers`, `accounting_answers`, `partner_answers`) ou seleção 1:N (`benefit_selections`, `calculator_selections`, `accounting_pain_selections`, `partner_category_selections`).
+
+`submissions.user_id` → `public.users` (`SET NULL`) liga a submissão ao usuário logado quando ela vem de dentro do produto. `email_missing` marca explicitamente a submissão sem e-mail vindo da URL — distinguir "não informou" de "não veio no embed" importa para a análise. `notify_on_availability` guarda o "quero ser avisado quando disponível".
+
+Os três apps de LP são React 19 + Vite + Tailwind 4 + shadcn/ui, cada um com `railway.json` e `nixpacks.toml` próprios, servidos por `npx serve dist`.
+
+---
+
+## 9. LGPD, segurança e vigilância
+
+| Mecanismo | Onde | Nota |
+|---|---|---|
+| DLP antes do LLM | `app/middleware/dlp.py`, `ner.py`, `DlpEnforcingProvider` | RN-SEC-001; sem re-identificação |
+| Consentimento | `consent_service.py`, tabela `consent_logs` | Registrado com IP e user-agent; `termos_e_privacidade` não é revogável |
+| Portabilidade (art. 18, V) | `data_subject_service.py`, `GET /auth/me/export` | 5/h |
+| Exclusão de conta | `DELETE /auth/me` | Cascata sobre conversas, interações, alertas, preferências |
+| Expurgo de retenção (art. 16) | `expurgo_agendado.py` | Roda **dentro do backend**, a cada 24h, 90s após o boot; grava `audit_logs.action='expurgo.rodada'` |
+| Vigilância de garantias | `vigilancia_agendada.py` | Laço de 6h: alarma se o cache parou de gravar, se o custo triplicou ou se o expurgo não roda |
+| Scrubbing de PII no Sentry | `app/core/error_tracking.py` | Obrigatório e testado — sem ele o prompt clínico bruto sai em cada evento, inclusive nos frames do stack trace |
+| Fail-closed em produção | `config._validate_production_secrets` | Ver §12 |
+| Rate limiting | `slowapi` + throttle por e-mail no Redis | OTP tem os dois |
+| Autorização / IDOR | `tests/test_authorization.py`, `test_idor.py`, `test_calculadoras_isolamento.py` | A política das rotas está declarada em teste |
+
+Sobre o expurgo estar no processo em vez de num cron: o agendamento vivia no painel do Railway — fora do repositório, invisível a testes, CI e code review. Parou de rodar e ninguém soube por 39 dias; o código continuava correto e a suíte verde, só o dado vencido acumulava. Trocar um cron por outro resolveria a instância, não a classe. Como código, ele aparece no diff, tem teste, e não some sem o backend cair junto. Com várias réplicas todas rodam o expurgo, o que é inofensivo (operação idempotente e barata); há alarme no Sentry quando o expurgo atrasa mais de `ATRASO_TOLERADO_DIAS = 2`.
+
+### 9.1 Observabilidade
+
+Três camadas, com papéis distintos:
+
+| Camada | Ferramenta | Responde a |
+|---|---|---|
+| Erro | Sentry (`core/error_tracking.py`) | "o que estourou, e em qual requisição?" |
+| Trace de LLM | Arize Phoenix (`core/telemetry.py`) | "o que foi mandado ao modelo, com quantos tokens?" |
+| Log | JSON estruturado (`core/logging_config.py`) | "o que aconteceu antes disso?" |
+
+O que costura as três é o **`request_id`**: aceito do proxy se vier, gerado se não, propagado por `ContextVar` para qualquer `logger` da pilha, carimbado como tag no Sentry e devolvido no header `X-Request-ID`. Dado um erro, dá para reconstruir a requisição inteira atravessando as camadas.
+
+Os spans do Phoenix são escritos **à mão**, seguindo o schema OpenInference: o projeto chama os providers via `httpx` direto, sem SDK oficial, então os auto-instrumentors não enxergam nada.
+
+O log nunca carrega conteúdo de prompt, texto extraído de arquivo ou e-mail. Correlação se faz por id, não por dado de paciente.
+
+### 9.2 Vigilância — por que instrumentar não bastou
+
+As três camadas acima observam **requisições**. Nenhuma delas observa **garantias que param de valer sem ninguém errar**.
+
+Foi assim que o cache semântico ficou meses sem gravar uma linha. O detalhe que dói: `interactions.cache_hit` é gravado em toda interação desde sempre, e um `SELECT avg(cache_hit::int)` teria devolvido zero a qualquer momento. Não faltou instrumentação — faltou alguém perguntando.
+
+`vigilancia_agendada.py` é a pergunta, feita a cada 6h pelo próprio backend:
+
+| Alarme | Dispara quando | Por que o limiar é esse |
+|---|---|---|
+| `cache_semantico_sem_escrita` | ≥50 interações elegíveis em 7d **e** zero entradas vigentes | Abaixo de 50, "tabela vazia" não se distingue de "ninguém perguntou nada cacheável" |
+| `custo_escalando` | Custo de 7d ≥3x o dos 7d anteriores, base ≥US$ 5 | 3x é grosseiro de propósito: pega laço de retry e abuso, não crescimento de produto |
+| `expurgo_parado` / `expurgo_sem_rastro` | Sem rodada registrada em `audit_logs` há >2 dias, ou nunca | Complementa o alarme de dentro do expurgo: aquele dispara quando a rodada acontece e acha atraso; estes, quando ela não acontece |
+
+Três decisões de desenho que valem conhecer antes de mexer:
+
+- **Medir e decidir são coisas separadas.** `medir_*` só lê o banco; `avaliar` é função pura que recebe números e devolve alarmes. Isso permite testar todo limiar sem banco, e permite que `scripts/verificar_vigilancia.py` mostre as mesmas medições sem disparar nada — mesmo motivo pelo qual `verificar_expurgo.py` reusa `medir_passivo`.
+- **Um alarme por tag por dia** (`SILENCIO_POR_TAG_HORAS`). Uma condição que persiste renderia quatro eventos diários e ensinaria o time a arquivar sem ler — o mecanismo exato pelo qual um alarme deixa de proteger qualquer coisa. O registro é em memória e some no deploy, de propósito: depois de um deploy você quer saber de novo.
+- **Ordem de boot é uma dependência real.** `vigilancia_agendada.ATRASO_INICIAL_SEGUNDOS` (900s) precisa ser maior que o do expurgo (90s), senão todo boot de banco novo alarma `expurgo_sem_rastro`. Só um teste protege isso (`test_vigilancia_roda_depois_do_expurgo_no_boot`).
+
+**O limite honesto:** este laço não vigia a si mesmo. Se a tarefa morrer, nada avisa. É um degrau a menos de silêncio, não zero — e o degrau restante é o processo, que já é observado de fora por `/health/ready`, de um jeito que um cron externo nunca foi.
+
+---
+
+## 10. Frontends
+
+### 10.1 `frontend-app/` — Orquestrador
+
+React 19 + Vite 8 + React Router 7 + TanStack Query + `react-markdown`/`remark-gfm`/`rehype-sanitize`. Testes com Vitest + Testing Library + jsdom.
 
 ```
 src/
-├── App.tsx, main.tsx     bootstrap React/router
-├── api/                  clients HTTP: agregador, auth, conversations, folders, orquestrador, uploads, usage
-├── components/           ChatView, InputBar, ModelSelector, Sidebar, Topbar, ClarificationPrompt,
-│                         ModeChip/ModeIntro, ProfileModal, EmptyState, Logo
-│   └── sidebar/           ConvItem, DropZoneNoPasta, FolderRow, groupByDate — gestão de pastas/conversas
-├── hooks/                 useIsMobile.ts
-├── lib/                   auth.ts, useCurrentUser.ts, useUserUsage.ts, appModes.ts, documentos.ts,
-│                         intercom.ts/IntercomIdentity.tsx, modelDescriptions.ts, styles.ts
-├── pages/                 EmbedAuthPage, InvitePage, LoginPage, OnboardingPage, RegisterPage
-└── tokens.ts, index.css
+├── App.tsx, main.tsx     rotas: /cadastro /login /invite /onboarding /embed-auth /
+├── api/                  agregador, auth, conversations, folders, orquestrador, uploads, usage
+├── components/           ChatView, InputBar, ModelSelector, Sidebar, Topbar,
+│                         ClarificationPrompt, ModeChip/ModeIntro, ProfileModal, EmptyState
+│   └── sidebar/           ConvItem, DropZoneNoPasta, FolderRow, groupByDate
+├── hooks/                 useIsMobile
+├── lib/                   auth, useCurrentUser, useUserUsage, appModes, documentos,
+│                          enterParaEnviar, intercom/IntercomIdentity, modelDescriptions, styles
+├── pages/                 EmbedAuth, Invite, Login, Onboarding, Register
+└── test/                  setup, utils, harness.test.tsx
 ```
 
----
+Testes: `App.streaming`, `App.pasta`, `App.agregador-oculto`, `InputBar` (+ anexos, aviso), `Sidebar`, `harness`.
 
-## 4. Frontend — `calculadoras-app/`
+Comportamentos de UI com razão de ser documentada: Enter envia / Shift+Enter quebra linha (`lib/enterParaEnviar.ts`); a sidebar abre colapsada, expande no hover e fixa no clique; o Agregador foi retirado de `APP_MODES` mas o tipo `AppMode` mantém `'agregador'` porque conversas gravadas ainda carregam `feature: 'AGREGADOR'` e precisam ser reconhecidas para serem filtradas.
 
-- React 19 + Vite, mesmo padrão de deploy Railway.
-- Consome `/api/v1/{auth,calculators}` do mesmo backend.
+### 10.2 `calculadoras-app/`
+
+React 19 + Vite, mesmo padrão de deploy. E2E com Playwright.
 
 ```
 src/
-├── App.tsx, main.tsx
-├── api/                   auth.ts, calculators.ts
-├── calculators/           formSpecs por calculadora (CHA2DS2-VASc/HAS-BLED, Cockcroft-Gault, CURB-65,
-│                         Risco CV SBC2025), formHelpers.ts, index.ts
-│   └── riscoCv/            UI dedicada da calculadora de risco cardiovascular SBC2025
-│       └── steps/            wizard: TriagemStep, DiabetesStep, AgravantesStep, AltoRiscoStep, PreventStep
-├── components/            AiPrefillBox/Section, CalculatorCard, CalculatorTopbar, DynamicCalculatorForm,
-│                         FieldWidget, GenericResultPanel, ResultPanel, WizardStepper
-├── hooks/                 useCalculatorDetail, useCalculators, useExecuteCalculator, useExtractFields,
-│                         useFavorites
-├── lib/                   auth.ts, specialtyStyles.tsx, useCurrentUser.ts
-├── pages/                 CalculatorsListPage, EmbedAuthPage, GenericCalculatorPage, LoginPage,
-│                         RiscoCvSbc2025Page
-└── tokens.ts, index.css
-e2e/                        testes Playwright, playwright.config.ts
+├── App.tsx               rotas: /login /embed-auth / /calculadoras/risco-cv-sbc2025 /calculadoras/:slug
+├── api/                   auth, calculators, prevent
+├── calculators/           formSpecs registrados por side-effect import (index.ts):
+│                          cockcroftGault, cha2ds2vaschHasbled, curb65
+│   └── riscoCv/            wizard dedicado do risco CV: RiskCalculator, StepIndicator,
+│       └── steps/          RiscoCvResultDashboard, visibility.ts, riskGoals.ts,
+│                           steps: Triagem, Diabetes, Agravantes, AltoRisco, Prevent
+├── components/            AiPrefillBox/Section, CalculatorCard, CalculatorTopbar,
+│                          DynamicCalculatorForm, FieldWidget, GenericResultPanel,
+│                          ResultPanel, WizardStepper, RequestCalculatorModal
+├── hooks/                 useCalculatorDetail, useCalculators, useExecuteCalculator,
+│                          useExtractFields, useFavorites, usePreventCalculator
+├── lib/                   auth, specialtyStyles, useCurrentUser
+└── pages/                 CalculatorsList, EmbedAuth, GenericCalculator, Login, RiscoCvSbc2025
+e2e/                       risco-cv-sbc2025.spec.ts + helpers (auth, wizard)
 ```
+
+Duas formas de calculadora: **genérica**, um `formSpec` declarativo renderizado por `DynamicCalculatorForm`; e **com wizard próprio**, uma página dedicada. `RequestCalculatorModal` é a ponte para `/landing-pages/calculators/submit`.
+
+### 10.3 LPs
+
+`lp-financas`, `lp-contabilidade`, `lp-parceiros`: React 19 + Vite + Tailwind 4 + shadcn/ui, cada uma com um formulário (`LeadForm` / `InterestForm` / `PartnerForm`), schema de perguntas em `src/lib/*-interest-schema.ts` e `src/lib/api.ts` apontando para o backend via `VITE_API_URL`.
 
 ---
 
-## 5. Banco de dados
+## 11. Banco de dados
 
-PostgreSQL com extensão `vector` (pgvector). Baseline único em `alembic/versions/000_baseline_baseline_do_schema_completo.py` (`revision=000_baseline`, `down_revision=None`). Migrations antigas ficam arquivadas em `alembic/versions_legacy/` — fora da cadeia ativa, não devem ser tocadas. Não há `CREATE TYPE` (enums) nem triggers no baseline: campos categóricos (`role`, `status`, `feature`, `engine_type` etc.) são `VARCHAR` validados na camada de aplicação (Pydantic), não por CHECK constraint no banco.
+PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco físico: `public`, `calculators`, `landing_pages`.
 
-O schema `calculators` é separação lógica dentro do **mesmo** banco físico — não é multi-tenant nem instância separada — e suas tabelas têm FKs cruzando para `public.users`, `public.company` e `public.interactions`.
+### 11.1 Cadeia de migrations
 
-### 5.1 Diagrama ER
+```
+000_baseline → 000a_lp_schema → 000b_lp_tables → 000c → 000d → 000e → 000f → 000g
+             → 000h_lp_partners → 001_file_interaction → 002_msg_embeddings
+             → 003_cache_hnsw   (head)
+```
+
+| Revisão | O que faz |
+|---|---|
+| `000_baseline` | Schema completo (`down_revision=None`). Cria a extensão `vector` e o schema `calculators` |
+| `000a`–`000h` | Schema `landing_pages`: criação, tabelas, índice em `submissions.email`, flag `email_missing`, rework de `accounting_answers`, vínculo com `users`, flag `notify_on_availability`, tabelas de parceiros |
+| `001_file_interaction` | `file_extractions.interaction_id` (nullable, `SET NULL`) — liga o anexo à mensagem em que foi enviado |
+| `002_msg_embeddings` | Tabela `message_embeddings` para o contexto de pasta |
+| `003_cache_hnsw` | Troca o índice de `semantic_cache` de ivfflat para HNSW, com `CONCURRENTLY` |
+
+`alembic/versions_legacy/` é histórico arquivado, **fora da cadeia ativa** — não deve ser alterado nem referenciado por migrations novas.
+
+Decisões registradas nas próprias migrations, que vale ler antes de mexer:
+
+- `message_embeddings` é tabela nova, e não coluna vetorial em `interactions`: uma interação vira **dois** trechos indexáveis (pergunta e resposta), e uma coluna só não comportaria os dois. `content` é duplicado ali de propósito — ir buscar o texto na origem exigiria uma segunda consulta no caminho quente, por linha recuperada.
+- `message_embeddings` **não tem índice ivfflat**, ao contrário de `semantic_cache`: a busca é sempre dentro de uma pasta de um usuário, o conjunto filtrado é pequeno, e a varredura exata é mais correta e rápida o bastante (débito 11).
+- `file_extractions.interaction_id` é `SET NULL` e não CASCADE: apagar uma conversa não deve apagar o arquivo, que pode estar referenciado em outra mensagem.
+
+Não há `CREATE TYPE` (enums nativos) nem triggers: campos categóricos (`role`, `status`, `feature`, `engine_type`…) são `VARCHAR` validados na camada de aplicação (Pydantic), não por CHECK constraint.
+
+### 11.2 Diagrama ER
 
 ```mermaid
 erDiagram
@@ -322,6 +655,7 @@ erDiagram
         uuid user_id FK "ON DELETE CASCADE"
         varchar file_name
         varchar file_type
+        uuid interaction_id FK "ON DELETE SET NULL"
         text extracted_text
         text image_base64
         varchar image_media_type
@@ -541,42 +875,112 @@ erDiagram
         text interpretation
         timestamptz created_at
     }
+    MESSAGE_EMBEDDINGS {
+        uuid id PK
+        uuid interaction_id FK "ON DELETE CASCADE"
+        uuid conversation_id FK "ON DELETE CASCADE"
+        uuid user_id FK "ON DELETE CASCADE, denormalizado"
+        varchar role "user ou assistant"
+        text content "duplicado de proposito"
+        vector embedding "vector(1536), sem indice ivfflat"
+        timestamptz created_at
+    }
+    LP_LANDING_PAGES {
+        uuid id PK
+        varchar slug UK
+        varchar name
+        timestamptz created_at
+    }
+    LP_SUBMISSIONS {
+        uuid id PK
+        uuid landing_page_id FK "ON DELETE RESTRICT"
+        uuid user_id FK "public.users, ON DELETE SET NULL"
+        varchar name
+        varchar email "idx"
+        boolean email_missing
+        varchar phone
+        timestamptz lgpd_consent_at
+        boolean notify_on_availability
+        timestamptz created_at
+    }
+    LP_FINANCE_ANSWERS {
+        uuid id PK
+        uuid submission_id FK,UK "ON DELETE CASCADE"
+        varchar career_stage
+        varchar main_pain_point
+        timestamptz created_at
+    }
+    LP_ACCOUNTING_ANSWERS {
+        uuid id PK
+        uuid submission_id FK,UK "ON DELETE CASCADE"
+        varchar career_stage
+        varchar income_method
+        varchar accountant_status
+        varchar revenue_range
+        varchar willingness_to_pay
+        timestamptz created_at
+    }
+    LP_PARTNER_ANSWERS {
+        uuid id PK
+        uuid submission_id FK,UK "ON DELETE CASCADE"
+        varchar career_stage
+        varchar desired_brands
+        timestamptz created_at
+    }
+    LP_SELECTIONS {
+        uuid id PK
+        uuid submission_id FK "ON DELETE CASCADE"
+        varchar option
+        timestamptz created_at
+    }
+
+    INTERACTIONS ||--o{ MESSAGE_EMBEDDINGS : "interaction_id (CASCADE)"
+    CONVERSATIONS ||--o{ MESSAGE_EMBEDDINGS : "conversation_id (CASCADE)"
+    USERS ||--o{ MESSAGE_EMBEDDINGS : "user_id (CASCADE)"
+    INTERACTIONS ||--o{ FILE_EXTRACTIONS : "interaction_id (SET NULL)"
+
+    LP_LANDING_PAGES ||--o{ LP_SUBMISSIONS : "landing_page_id (RESTRICT)"
+    USERS ||--o{ LP_SUBMISSIONS : "user_id (SET NULL)"
+    LP_SUBMISSIONS ||--o| LP_FINANCE_ANSWERS : "submission_id (CASCADE)"
+    LP_SUBMISSIONS ||--o| LP_ACCOUNTING_ANSWERS : "submission_id (CASCADE)"
+    LP_SUBMISSIONS ||--o| LP_PARTNER_ANSWERS : "submission_id (CASCADE)"
+    LP_SUBMISSIONS ||--o{ LP_SELECTIONS : "accounting_pain / benefit / calculator / partner_category"
 ```
 
-### 5.2 Constraints e regras notáveis
+> No diagrama, `LP_*` são as tabelas do schema `landing_pages`; `LP_SELECTIONS` representa as quatro tabelas de seleção 1:N, que têm a mesma forma (`accounting_pain_selections`, `benefit_selections`, `calculator_selections`, `partner_category_selections`). Um `FileExtraction` agora aponta para a `Interaction` em que foi enviado (nullable: extrações anteriores à migration `001`, e o intervalo entre o upload e o envio da mensagem).
 
-- **`semantic_cache.prompt_embedding`**: `VECTOR(1536)` (pgvector); índice `semantic_cache_embedding_idx` — `CREATE INDEX ... USING ivfflat (prompt_embedding vector_cosine_ops) WITH (lists = 100)`; índice composto `semantic_cache_mode_expires_idx (mode, expires_at)` para varredura de expiração por modo.
-- **`calculators.calculator_versions`**: índice único parcial `uq_calculator_versions_one_active` — `CREATE UNIQUE INDEX ... ON calculator_versions (calculator_id) WHERE is_active` — garante no máximo **uma** versão ativa por calculadora ao mesmo tempo, sem impedir múltiplas versões inativas/históricas.
-- **`calculators.calculator_favorites`**: `UNIQUE(user_id, calculator_id)` (`uq_calculator_favorites_user_calculator`) — evita favoritar a mesma calculadora duas vezes.
-- **`calculators.calculator_fields`**: `UNIQUE(calculator_id, key)` (`uq_calculator_fields_calculator_key`) — chave de campo única por calculadora.
-- **`calculators.calculator_versions`**: `UNIQUE(calculator_id, version_number)` (`uq_calculator_versions_calculator_version`).
+### 11.3 Constraints e regras notáveis
+
+- **`semantic_cache.prompt_embedding`**: `VECTOR(1536)`; índice **`semantic_cache_embedding_hnsw_idx`** — `USING hnsw (prompt_embedding vector_cosine_ops)` desde a migration `003` (era ivfflat `lists = 100`, criado sobre tabela vazia). Índice composto `semantic_cache_mode_expires_idx (mode, expires_at)` para varredura de expiração por modo.
+- **`message_embeddings`**: dois índices B-tree — `ix_message_embeddings_user_conversation (user_id, conversation_id)`, que é a garantia de isolamento e não uma otimização, e `ix_message_embeddings_interaction (interaction_id, role)`, usado para saber o que falta indexar. **Sem índice vetorial**, de propósito.
+- **`calculators.calculator_versions`**: índice único parcial `uq_calculator_versions_one_active` — `CREATE UNIQUE INDEX ... ON calculator_versions (calculator_id) WHERE is_active` — no máximo **uma** versão ativa por calculadora, sem impedir múltiplas versões históricas.
+- **`calculators.calculator_favorites`**: `UNIQUE(user_id, calculator_id)`.
+- **`calculators.calculator_fields`**: `UNIQUE(calculator_id, key)`.
+- **`calculators.calculator_versions`**: `UNIQUE(calculator_id, version_number)`.
+- **`landing_pages.landing_pages.slug`**: `UNIQUE`; `submissions.landing_page_id` é `ON DELETE RESTRICT` (o catálogo não some por baixo de submissões existentes); cada tabela `*_answers` tem `UNIQUE(submission_id)` — uma resposta tipada por submissão.
 - **`users.email`**, **`company.slug`**, **`model_pricing.model_id`**, **`invite_tokens.token`**, **`specialties.slug`**, **`calculator_definitions.slug`**: todos `UNIQUE`.
-- **`user_preferences.user_id`** e **`user_weekly_usage.user_id`**: `UNIQUE` (relação 1:1 com `users`).
-- **Cascades explícitos**: `file_extractions.user_id`, `user_weekly_usage.user_id`, `calculator_favorites.user_id/calculator_id`, `calculator_fields.calculator_id`, `calculator_versions.calculator_id` → `ON DELETE CASCADE`. `conversations.folder_id` → `ON DELETE SET NULL`.
-- **Sem enums nativos e sem triggers** no baseline — validação de valores categóricos e regras de negócio (ex.: workflow de status) vivem na camada de aplicação, não no banco.
-- **Isolamento lógico, não físico**: schema `calculators` no mesmo database do schema público; FKs cruzam livremente entre os dois (`calculator_favorites.user_id → public.users`, `calculator_executions.company_id → public.company`, `calculator_executions.interaction_id → public.interactions`).
+- **`user_preferences.user_id`** e **`user_weekly_usage.user_id`**: `UNIQUE` (1:1 com `users`).
+- **Cascades explícitos**: `file_extractions.user_id`, `user_weekly_usage.user_id`, `calculator_favorites.user_id/calculator_id`, `calculator_fields.calculator_id`, `calculator_versions.calculator_id`, `message_embeddings.*`, `landing_pages.*_answers.submission_id` → `ON DELETE CASCADE`. `conversations.folder_id`, `file_extractions.interaction_id`, `landing_pages.submissions.user_id` → `ON DELETE SET NULL`.
+- **Sem enums nativos e sem triggers** — validação de valores categóricos e regras de workflow vivem na camada de aplicação.
+- **Isolamento lógico, não físico**: os três schemas no mesmo database; FKs cruzam livremente (`calculator_favorites.user_id → public.users`, `calculator_executions.interaction_id → public.interactions`, `landing_pages.submissions.user_id → public.users`).
 
 ---
 
-## 6. Variáveis de ambiente
+## 12. Variáveis de ambiente
 
-### 6.1 Backend (`app/core/config.py`)
+### 12.1 Backend (`app/core/config.py`)
 
 | Variável | Default | Obrigatória em produção |
 |---|---|---|
-| APP_ENV | — | sim |
+| APP_ENV | **sem default, de propósito** | sim |
 | APP_DEBUG | False | não |
 | LOG_LEVEL | INFO | não |
 | DATABASE_URL | — | sim |
 | JWT_SECRET_KEY | — | sim |
 | JWT_ALGORITHM | HS256 | não |
 | JWT_ACCESS_TOKEN_EXPIRE_MINUTES | 60 | não |
-| ANTHROPIC_API_KEY | "" | não |
-| OPENAI_API_KEY | "" | não |
-| GOOGLE_AI_API_KEY | "" | não |
-| PERPLEXITY_API_KEY | "" | não |
-| PHARMADB_API_KEY | "" | não |
-| PUBMED_API_KEY | "" | não |
+| ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_API_KEY / PERPLEXITY_API_KEY | "" | não |
+| PHARMADB_API_KEY / PUBMED_API_KEY | "" | não |
 | SENDGRID_API_KEY | "" | sim |
 | SENDGRID_FROM_EMAIL | noreply@medico360.com.br | não |
 | FRONTEND_URL | http://localhost:5173 | não |
@@ -586,15 +990,15 @@ erDiagram
 | ALLOW_PUBLIC_REGISTRATION | False | não |
 | COOKIE_DOMAIN | None | não |
 | EMBED_ALLOWED_ORIGINS | `["https://adminportalmedico360.curseduca.pro"]` | não |
+| **LANDING_PAGES_ORIGINS** | `["http://localhost:5175"]` | não (mas necessária para as LPs em produção) |
 | CURSEDUCA_VALIDATION_ENABLED | False | sim (deve ser `true`) |
 | CURSEDUCA_API_BASE | https://prof.curseduca.pro | sim, se validação habilitada |
 | CURSEDUCA_API_KEY | "" | sim, se validação habilitada |
-| CURSEDUCA_ACCESS_TOKEN | "" | efetivamente exigida pelo endpoint members/by |
+| CURSEDUCA_ACCESS_TOKEN | "" | exigida na prática pelo endpoint `members/by` |
 | INTERCOM_IDENTITY_SECRET | "" | não |
 | REDIS_URL | redis://localhost:6379/0 | não |
-| SENTRY_DSN | "" | não |
-| SENTRY_RELEASE | "" | não |
-| PHOENIX_API_KEY / PHOENIX_PROJECT_NAME / PHOENIX_ENDPOINT | — / medico-360 / app.phoenix.arize.com/... | não |
+| SENTRY_DSN / SENTRY_RELEASE | "" | não (vazio desliga o Sentry) |
+| PHOENIX_API_KEY / PHOENIX_PROJECT_NAME / PHOENIX_ENDPOINT | "" / medico-360 / app.phoenix.arize.com/s/ruben-nogueira | não |
 | MAX_MODELS_PER_QUERY | 4 | não |
 | MAX_PROMPT_CHARS | 4000 | não |
 | DEFAULT_TIMEOUT_SECONDS | 30 | não |
@@ -603,21 +1007,29 @@ erDiagram
 | CALCULATOR_EXTRACTION_MAX_CONCURRENCY | 8 | não |
 | CALCULATOR_EXTRACTION_TIMEOUT_SECONDS | 15 | não |
 
-Validação fail-closed em produção (`_validate_production_secrets`): o startup derruba (`ValueError`) se `jwt_secret_key`, `database_url` ou `sendgrid_api_key` estiverem vazios, se `curseduca_validation_enabled` for `false`, ou se estiver `true` mas faltar `curseduca_api_base`/`curseduca_api_key`.
+Duas sutilezas que já causaram incidente:
 
-### 6.2 Frontends (build-time, Vite)
+- **`APP_ENV` não tem default.** Todo o endurecimento de produção está atrás de `is_production` — docs fechada, cookie `Secure`, validação fail-closed do embed. Com um default, esquecer a variável fazia a aplicação rodar em modo de desenvolvimento em produção, em silêncio. Aconteceu. Hoje a falta de `APP_ENV` derruba o startup com mensagem clara.
+- **`LANDING_PAGES_ORIGINS` usa `NoDecode`.** O auto-parse JSON do pydantic-settings roda *antes* de qualquer `field_validator` e derrubava o processo no import se a env não viesse com colchetes e aspas exatos — foi o que aconteceu em produção. O validator próprio aceita JSON array, CSV (`a,b`) ou uma URL única.
+
+**Validação fail-closed em produção** (`_validate_production_secrets`): o startup levanta `ValueError` se `jwt_secret_key`, `database_url` ou `sendgrid_api_key` estiverem vazios; se `curseduca_validation_enabled` for `false`; ou se estiver `true` e faltar `curseduca_api_base`/`curseduca_api_key`. O motivo do segundo: sem validação server-to-server, `/auth/embed/token` confia apenas no header `Origin` (forjável) e emite JWT para qualquer e-mail.
+
+Use `python -m scripts.verificar_prontidao_producao` para saber, sem mudar nada, se a aplicação subiria com `APP_ENV=production`.
+
+### 12.2 Frontends (build-time, Vite)
 
 | Variável | Usada em | Comportamento |
 |---|---|---|
-| VITE_API_URL | `frontend-app/src/api/*.ts` | fallback `http://localhost:8000` se ausente |
-| VITE_API_URL | `calculadoras-app/src/api/{auth,calculators}.ts` | em dev, ausência = caminho relativo (proxy Vite cuida do CORS); em prod aponta para o domínio do backend |
-| VITE_INTERCOM_APP_ID | `frontend-app/src/main.tsx` | só no frontend-app, ativa widget do Intercom |
+| VITE_API_URL | `frontend-app/src/api/*.ts` | fallback `http://localhost:8000` |
+| VITE_API_URL | `calculadoras-app/src/api/*.ts` | em dev, ausência = caminho relativo (o proxy do Vite cuida do CORS); em prod aponta para o domínio do backend |
+| VITE_API_URL | `lp-*/src/lib/api.ts` | idem |
+| VITE_INTERCOM_APP_ID | `frontend-app/src/main.tsx` | só no frontend-app; ativa o widget do Intercom |
 
 ---
 
-## 7. Infraestrutura e deploy
+## 13. Infraestrutura e deploy
 
-### 7.1 Backend — Dockerfile único (raiz do repo)
+### 13.1 Backend — Dockerfile único (raiz)
 
 ```dockerfile
 FROM python:3.12-slim
@@ -632,9 +1044,9 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
 ```
 
-Não há `docker-compose.yml` nem `Procfile` no repositório — apenas este Dockerfile serve o backend.
+Não há `docker-compose.yml` nem `Procfile` — apenas este Dockerfile serve o backend.
 
-### 7.2 Frontends — `railway.json` (idêntico nos dois)
+### 13.2 Frontends — `railway.json` (idêntico nos cinco)
 
 ```json
 {
@@ -646,25 +1058,111 @@ Não há `docker-compose.yml` nem `Procfile` no repositório — apenas este Doc
 }
 ```
 
-### 7.3 CI — `.github/workflows/ci.yml` (4 jobs)
+As LPs e o `frontend-app` também trazem `nixpacks.toml` com as mesmas duas linhas.
 
-1. **backend**: serviço `pgvector/pgvector:pg16` na porta `55433` (precisa do ivfflat, não Postgres puro) → `ruff check .` → `pytest -q --cov=app --cov-fail-under=50` → valida `alembic upgrade head` do zero → `pip-audit -r requirements.txt --strict`.
-2. **frontend-app**: node 20 → `npm ci` → `npm run lint` → `tsc -b --noEmit` → `npm run build`.
-3. **calculadoras-app**: idêntico ao anterior.
-4. **e2e-calculadoras**: sobe Postgres pgvector, roda `alembic upgrade head` + seeds (`seed_calculators`, `seed_risco_cv_sbc2025`, `seed_usuario_e2e`), sobe backend e `calculadoras-app` (dev server, porta 5174) em background, espera `/api/v1/health` e a porta do front responderem, roda Playwright (`npm run test:e2e`).
+### 13.3 Backup
 
----
+**O Railway não faz backup gerenciado.** A estratégia real é dump manual verificado + armazenamento externo:
 
-## 8. Testes
-
-- Backend: `tests/` (~20 arquivos), cobertura mínima de 50% cobrada em CI.
-- `calculadoras-app/e2e/`: testes Playwright end-to-end contra backend + frontend reais (não mockados), rodando por cima de seeds determinísticos.
+- `python -m scripts.backup_producao --dsn ... --saida backups/` — gera o dump com carimbo de data e **prova que ele é legível** antes de declarar sucesso.
+- `python -m scripts.verificar_restore` — ensaio de restore: só faz `SELECT` (contagens, `max(created_at)`, `alembic_version`) nos dois bancos, e pode apontar para produção como origem sem risco.
+- RPO/RTO medidos no ensaio de 2026-08-19 estão em `docs/runbook.md`, junto com os três achados daquele ensaio.
 
 ---
 
-## 9. Pontos de atenção para quem for mexer no código
+## 14. Testes e CI
 
-- O harness local de testes precisa do container `pgvector` na porta `55433` (ver [[medico360-harness-testes]] em memória) — não roda contra o Postgres de produção.
-- A cadeia de migrations parte de `000_baseline`; `alembic/versions_legacy/` é histórico arquivado, não deve ser alterado nem referenciado por novas migrations.
-- Os filtros de DLP (`app/middleware/dlp.py` + `ner.py`) têm exceções para epônimos médicos calibradas por medição real — não simplificar sem reler a justificativa.
-- Não há backup automático gerenciado pelo Railway; a estratégia de continuidade é dump manual + armazenamento externo (ver runbook e memória de projeto).
+### 14.1 Suíte
+
+- **Backend** — `tests/`, 35 arquivos (30 na raiz + 5 de calculadoras). Cobertura mínima de 50% cobrada no CI como catraca contra regressão (o número é o medido, arredondado para baixo — não é um atestado de qualidade).
+  - Segurança/LGPD: `test_authorization`, `test_idor`, `test_lgpd`, `test_consentimento`, `test_dlp`, `test_dlp_enforcement`, `test_expurgo_agendado`, `test_calculadoras_isolamento`, `test_contexto_seguranca`
+  - Orquestrador: `test_orquestrador_paridade` (garante que `/query` e `/stream` não divirjam), `test_orquestrador_stream`, `test_contexto`, `test_contexto_cache`, `test_folder_context`, `test_exames`, `test_conversas_referencias`, `test_response_metadata`
+  - Cache: `test_cache_semantico_contrato`, `test_cache_hit_historico`
+  - Resiliência/infra: `test_circuit_breaker`, `test_agregador_resiliencia`, `test_health`, `test_logging`, `test_error_tracking`, `test_usage_limits`, `test_harness`
+  - Calculadoras: `tests/calculators/` (fórmulas + validação)
+- **frontend-app** — Vitest + Testing Library, roda no CI **antes** do build (falha de teste deve aparecer como falha de teste, não como build verde de código quebrado).
+- **calculadoras-app** — Playwright, contra backend e frontend reais (não mockados), por cima de seeds determinísticos.
+
+**Harness de teste** (`tests/conftest.py`): trava de banco explícita — o nome do banco precisa conter `test`, senão o pytest se recusa a rodar. O `.env` do projeto aponta para o banco hospedado; sem a trava, um `pytest` distraído roda migrations e apaga tabelas em produção. Rodar localmente exige o container pgvector:
+
+```bash
+docker run -d --name m360-test-db -p 55433:5432 \
+    -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
+    -e POSTGRES_DB=medico360_test pgvector/pgvector:pg16
+pytest
+```
+
+A imagem precisa ser `pgvector` (índices vetoriais). SQLite não serve — os modelos usam JSONB e UUID do dialeto PostgreSQL.
+
+### 14.2 CI — `.github/workflows/ci.yml` (4 jobs, todos bloqueantes)
+
+1. **backend**: serviço `pgvector/pgvector:pg16` na porta `55433` → `ruff check .` (escopo total; exceções declaradas em `ruff.toml`) → `pytest --cov=app --cov-fail-under=50` → **`alembic upgrade head` num banco vazio** → `pip-audit -r requirements.txt --strict`.
+2. **frontend-app**: node 20 → `npm ci` → `npm run lint` → `tsc -b --noEmit` → `npm test` → `npm run build`.
+3. **calculadoras-app**: igual, sem o passo de teste unitário.
+4. **e2e-calculadoras**: sobe Postgres pgvector, `alembic upgrade head` + seeds (`seed_calculators`, `seed_risco_cv_sbc2025`, `seed_usuario_e2e`), sobe backend e o dev server na 5174 em background, **espera as duas portas responderem** e roda o Playwright.
+
+Detalhes do CI que valem saber antes de mexer:
+
+- O passo de migrations existe porque a cadeia ficou **quebrada por muito tempo** — o schema nasceu de um `create_all` fora do Alembic. O harness monta o schema pelos models, então sem este passo uma migration quebrada passaria despercebida.
+- Os seeds rodam como `python -m scripts.x`, nunca `python scripts/x.py`: a forma com caminho coloca `scripts/` no `sys.path` em vez da raiz, e os seeds importam `app.*`. Mesma causa do `prepend_sys_path` que o Alembic precisou.
+- As senhas dos serviços são derivadas do `github.run_id`, e os segredos JWT gerados com `openssl rand`: literal com cara de credencial dispara scanner, e scanner que dá alarme falso é scanner ignorado.
+- A espera pelos servidores foi o que eliminou a intermitência do E2E. O alvo é `/api/v1/health` (o router tem prefixo) e é liveness puro, não consulta banco.
+
+---
+
+## 15. Scripts operacionais (`scripts/`)
+
+| Script | Para quê |
+|---|---|
+| `backup_producao.py` | Dump com carimbo de data que **prova** ser legível antes de reportar sucesso |
+| `verificar_restore.py` | Ensaio de restore; só faz `SELECT`, seguro contra produção |
+| `verificar_prontidao_producao.py` | "A aplicação subiria com `APP_ENV=production`?" — lista o que falta, não muda nada |
+| `expurgar_dados_vencidos.py` | Expurgo LGPD manual (o automático roda no backend) |
+| `verificar_expurgo.py` | Conta o que já passou do prazo e continua no banco; não apaga |
+| `verificar_vigilancia.py` | Mostra cache, custo e último expurgo agora; só `SELECT`, sai 1 se algo estiver em alarme |
+| `verificar_sentry.py` | Envia um evento de teste e confirma que o scrubbing funciona no ambiente real |
+| `simular_erro_de_usuario.py` | Exercita o contexto de **requisição** no Sentry (corpo, headers, cookie, query) |
+| `medir_cache_semantico.py` | Mede o cache antes de mexer no índice vetorial |
+| `seed_calculators.py` + `seed_*` | Catálogo e calculadoras (Cockcroft-Gault, CURB-65, CHA₂DS₂-VASc/HAS-BLED, Risco CV SBC 2025) |
+| `seed_usuario_e2e.py` | Usuário fixo de UUID conhecido que o Playwright usa para assinar token |
+| `add_gemini_2_5_flash.py`, `deactivate_gemini_3_flash.py`, `update_claude_sonnet_model_id.py` | Manutenção de `model_pricing` — a disponibilidade de modelo é controlada pelo backend, nunca por exclusão hardcoded no frontend |
+| `generate_dev_token.py` | JWT de desenvolvimento (não versionado no git) |
+
+---
+
+## 16. Convenções do repositório
+
+- **Commits direto na `main`**, sem branch. Mensagens em português, no formato `tipo(escopo): o que mudou` — descrevem o efeito observável, não o mecanismo.
+- **Comentários no código carregam o porquê, não o quê.** Boa parte do raciocínio de arquitetura deste sistema está em docstrings de módulo e em cabeçalhos de migration; várias seções acima são resumo delas. Ao mexer numa dessas áreas, leia o cabeçalho antes.
+- `ruff` em escopo total, exceções declaradas em `ruff.toml` via `per-file-ignores`.
+- Diretórios não versionados: `.venv/`, `venv/`, `medico-360/` (rascunho antigo), `backups/` (o dump ali é local).
+
+---
+
+## 17. Pontos de atenção para quem for mexer
+
+Armadilhas conhecidas, em ordem de quanto custam se ignoradas:
+
+1. **Nunca rode `pytest` sem a trava de banco.** O `.env` aponta para o banco hospedado. A trava exige `test` no nome do banco — não a contorne.
+2. **Migrations partem de `000_baseline`.** `alembic/versions_legacy/` é arquivo morto; não altere nem referencie.
+3. **Os filtros de DLP têm exceções calibradas por medição real** (epônimos médicos — "manobra de Valsalva" não é um paciente). Simplificar `ner._is_person` sem ler a justificativa reintroduz falsos positivos que apagam termos clínicos em definitivo.
+4. **O isolamento da busca em pasta é filtro por `user_id` + `folder_id` em todo caminho de leitura.** É o ponto do sistema onde um filtro frouxo vaza dado de um paciente para a discussão de outro.
+5. **`/query` e `/stream` precisam continuar equivalentes.** Há teste de paridade (`tests/test_orquestrador_paridade.py`) porque os dois já divergiram por cópia. Mudança em um dos dois provavelmente pertence a `orquestrador_shared.py`.
+6. **Modos se definem em `orquestrador_modes.py` e em nenhum outro lugar.** O mapa modo→prompt em `core/prompts.py` ainda é um segundo lugar — é o débito 6, conhecido e aberto.
+7. **Não há backup automático do Railway.** Antes de qualquer operação destrutiva no banco, rode `scripts/backup_producao.py`.
+8. **Alarme novo exige medição nova.** Toda garantia que o sistema passar a oferecer em silêncio (uma tarefa agendada, um cache, um limite) deve virar uma medição em `vigilancia_service.py`. As duas falhas silenciosas de agosto não foram falta de código correto — foram falta de alguém perguntando.
+9. **`docs/debitos.md` tem 14 itens com o raciocínio de cada um** — incluindo quatro já resolvidos e um marcado como "não é dívida". Vale ler antes de propor melhorias: várias já foram consideradas e recusadas por motivo registrado.
+
+Débitos abertos que mais afetam quem for programar aqui:
+
+| # | Débito | Impacto prático |
+|---|---|---|
+| 2 | PDF escaneado sem OCR (mitigado com aviso) | O médico é avisado, mas o conteúdo não chega ao modelo |
+| 6 | Mapa de prompts e mapa de modos em arquivos diferentes | Acrescentar modo exige achar os dois |
+| 7 | Teste intermitente de consentimento — causa não identificada | Pode falhar sem relação com a sua mudança |
+| 8 | Anexos sem backfill no histórico | Conversas antigas não mostram os arquivos enviados |
+| 10 | Calibração da busca em pasta só parcialmente medida | Threshold e nº de trechos são estimativas informadas |
+| 11 | Sem índice vetorial em `message_embeddings` | Decisão consciente; revisar se pastas crescerem muito |
+| 12 | Indexação preguiçosa cobra a conta na primeira pergunta | Primeira pergunta numa pasta grande é mais lenta |
+| 13 | Embeddings não reindexados quando a mensagem muda | Só importa se edição de mensagem for implementada |
+| 14 | Sem cobertura end-to-end do fluxo de exames | Regressão em anexo+visão só aparece manualmente |

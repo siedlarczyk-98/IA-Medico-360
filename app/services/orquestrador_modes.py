@@ -42,6 +42,20 @@ PHARMA_MODES: frozenset[str] = frozenset({
     OrquestradorMode.PHARMA_GENERICO,
 })
 
+# Modos que consultam o cache semântico. Estava escrito como literal em
+# `orquestrador_service` e `orquestrador_stream_service` — as duas cópias que
+# este módulo existe para evitar —, e agora também é lido pela vigilância, que
+# mede a taxa de acerto do cache. Se a medição usasse a própria lista, ela
+# poderia continuar dizendo "o cache está saudável" depois de alguém mudar
+# quais modos o consultam.
+#
+# `EXAM_REVIEW` fica de fora de propósito: a pergunta vem acompanhada de um
+# exame específico de um paciente, e nada ali é reaproveitável entre usuários.
+MODOS_CACHEAVEIS: frozenset[str] = frozenset({
+    OrquestradorMode.QUICK_SEARCH,
+    OrquestradorMode.CLINICAL_REASONING,
+})
+
 # Threshold mínimo de confiança para acionar o PharmaDB.
 PHARMA_CHECK_MIN_CONFIDENCE = 0.90
 

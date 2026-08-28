@@ -24,12 +24,15 @@ justamente isso que o alarme abaixo reporta na volta.
 import asyncio
 import logging
 
+from app.core.alarme import alarmar
 from app.core.database import async_session_factory
+from app.models.models import AuditLog
 from app.services.data_subject_service import (
     RETENCAO_IMAGEM_DIAS,
     expurgar_dados_vencidos,
     medir_passivo,
 )
+from app.services.vigilancia_service import ACAO_EXPURGO
 
 logger = logging.getLogger(__name__)
 
@@ -50,27 +53,18 @@ def _alertar(passivo: dict) -> None:
     Reporta atraso ao Sentry, se houver DSN.
 
     `warning` e não `error`: nada está quebrado neste instante, mas uma política
-    de retenção deixou de ser cumprida e alguém precisa olhar.
+    de retenção deixou de ser cumprida e alguém precisa olhar. A mecânica do
+    envio vive em `app.core.alarme` desde que um segundo alarme precisou dela.
     """
-    try:
-        import sentry_sdk
-
-        # `get_client()` e `new_scope()` são a API do sentry-sdk 2.x; `Hub` e
-        # `push_scope` continuam funcionando mas emitem aviso de depreciação.
-        if not sentry_sdk.get_client().is_active():
-            return  # Sentry não inicializado — o log acima já registrou
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_level("warning")
-            scope.set_tag("alarme", "expurgo_lgpd")
-            scope.set_context("passivo", passivo)
-            sentry_sdk.capture_message(
-                f"Expurgo LGPD atrasado: {passivo['total']} registros vencidos, "
-                f"o mais antigo há {passivo['dias_de_atraso']} dias além do prazo "
-                f"de {RETENCAO_IMAGEM_DIAS} dias"
-            )
-    except Exception as exc:  # noqa: BLE001 — alarme não pode derrubar o expurgo
-        logger.warning("Falha ao alarmar atraso de expurgo: %s", exc)
+    alarmar(
+        tag="expurgo_lgpd",
+        mensagem=(
+            f"Expurgo LGPD atrasado: {passivo['total']} registros vencidos, "
+            f"o mais antigo há {passivo['dias_de_atraso']} dias além do prazo "
+            f"de {RETENCAO_IMAGEM_DIAS} dias"
+        ),
+        contexto=passivo,
+    )
 
 
 async def _uma_rodada() -> None:
@@ -83,6 +77,19 @@ async def _uma_rodada() -> None:
             _alertar(passivo)
 
         resultado = await expurgar_dados_vencidos(db)
+
+        # Rastro da rodada em `audit_logs`. Sem ele, "quando o expurgo rodou
+        # pela última vez?" só tinha resposta na memória de quem estava por
+        # perto — e foi assim que 39 dias de silêncio passaram despercebidos.
+        # `user_id` e `interaction_id` ficam nulos de propósito: o autor é o
+        # próprio sistema, e inventar um usuário sintético sujaria a trilha de
+        # auditoria que o mesmo campo serve nas ações de gente de verdade.
+        db.add(AuditLog(
+            action=ACAO_EXPURGO,
+            entity_type="retencao",
+            metadata_=resultado,
+        ))
+        await db.commit()
 
     logger.info("Expurgo agendado concluído", extra=resultado)
 

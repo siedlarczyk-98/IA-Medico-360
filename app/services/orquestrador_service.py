@@ -34,6 +34,7 @@ from app.services.orquestrador_modes import (
     GREETING_REPLY,
     MODE_MODEL_MAP,
     MODE_TEMPERATURE_MAP,
+    MODOS_CACHEAVEIS,
     PHARMA_CHECK_MIN_CONFIDENCE,
     PHARMA_MODES,
     upgrade_mode_for_attachments,
@@ -176,7 +177,7 @@ class OrquestradorService:
             # 5. Cache semântico (apenas modos clínicos)
             _cache_normalized: str = ""
             _cache_embedding: list = []
-            if mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}:
+            if mode in MODOS_CACHEAVEIS:
                 cached, _cache_normalized, _cache_embedding = await get_cached_response(
                     self.db, mode, sanitized_prompt
                 )

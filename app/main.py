@@ -31,7 +31,7 @@ from app.core.error_tracking import setup_sentry
 from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.telemetry import setup_phoenix
 from app.middleware import ner
-from app.services import expurgo_agendado
+from app.services import expurgo_agendado, vigilancia_agendada
 
 settings = get_settings()
 
@@ -64,8 +64,14 @@ async def lifespan(app: FastAPI):
     # externo: o agendamento no painel do Railway parou sem avisar e ficou 39
     # dias sem ninguém saber. Ver app/services/expurgo_agendado.py.
     tarefa_expurgo = expurgo_agendado.iniciar()
+    # Vigilancia: pergunta a cada 6h se as garantias silenciosas do
+    # sistema continuam valendo (cache gravando, custo estavel, expurgo
+    # rodando). O cache semantico ficou meses desligado porque o dado existia
+    # e ninguem consultava. Ver app/services/vigilancia_agendada.py.
+    tarefa_vigilancia = vigilancia_agendada.iniciar()
     yield
     # Shutdown
+    await vigilancia_agendada.parar(tarefa_vigilancia)
     await expurgo_agendado.parar(tarefa_expurgo)
     await http_client.shutdown()
     logger.info("Médico 360 encerrando")

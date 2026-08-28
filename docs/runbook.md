@@ -264,11 +264,82 @@ Nunca ligar `send_default_pii=True` nem remover o `before_send`: é o que separa
 
 ---
 
+## Alarmes de vigilância
+
+**O backend se pergunta a cada 6 horas se as garantias silenciosas continuam
+valendo** — ver `app/services/vigilancia_agendada.py`. Quando alguma não vale,
+abre um `warning` no Sentry com a tag `alarme=<nome>`, no máximo **um por tag
+por dia** (alarme repetido é alarme ignorado).
+
+Para ver o estado agora, sem esperar o ciclo e **sem escrever nada**:
+
+```bash
+python -m scripts.verificar_vigilancia   # sai 1 se algo estiver em nível de alarme
+```
+
+### `alarme=cache_semantico_sem_escrita`
+
+**Significa:** houve tráfego elegível (≥50 interações em `QUICK_SEARCH` ou
+`CLINICAL_REASONING` em 7 dias) e a tabela `semantic_cache` não tem **nenhuma**
+entrada vigente. A escrita está falhando em silêncio.
+
+1. Procure no log por `[Cache]` — o lookup registra o corpo da resposta quando a
+   API recusa (`API recusou o lookup (HTTP ...)`).
+2. Causa mais provável: contrato com a API da OpenAI. Foi exatamente assim que o
+   cache passou meses desligado — `max_tokens` em vez de `max_completion_tokens`,
+   HTTP 400 engolido por um `except`.
+3. Confirme a chave: `OPENAI_API_KEY` alimenta a normalização **e** o embedding.
+   Sem ela, o cache degrada para sempre-miss sem erro visível.
+
+**Urgência:** média. Nada quebra para o médico — só se paga modelo por toda
+pergunta repetida.
+
+### `alarme=custo_escalando`
+
+**Significa:** o gasto com modelo nos últimos 7 dias é ≥3x o dos 7 anteriores,
+partindo de uma base ≥US$ 5. Não é crescimento de produto: 3x em uma semana é
+laço de retry, abuso, ou um fallback que virou o caminho principal.
+
+1. `SELECT mode, count(*), sum(token_cost_usd) FROM interactions
+   WHERE created_at > now() - interval '7 days' GROUP BY 1 ORDER BY 3 DESC;`
+2. Compare com a janela anterior. Um modo que explodiu sozinho aponta para
+   roteamento; crescimento parelho aponta para volume real de uso.
+3. Verifique `is_fallback` em `interaction_responses`: se o provider primário
+   está caindo, todo tráfego vai para o fallback, que pode custar mais.
+
+**Urgência:** alta — é dinheiro saindo a cada hora que passa.
+
+### `alarme=expurgo_parado` / `alarme=expurgo_sem_rastro`
+
+**Significa:** não há rodada de expurgo registrada em `audit_logs` há mais de 2
+dias (`parado`), ou nunca houve nenhuma (`sem_rastro`). Complementa o
+`alarme=expurgo_lgpd`, que dispara quando a rodada **acontece** e acha atraso —
+estes dois disparam quando ela **não acontece**, que foi o modo de falha original.
+
+1. `python -m scripts.verificar_expurgo` para ver o passivo.
+2. Procure no log por `Rodada de expurgo falhou`.
+3. `sem_rastro` logo após um deploy de banco novo é esperado até a primeira
+   rodada (90s após o boot). Se persiste, a tarefa não está subindo.
+
+**Urgência:** alta — é obrigação legal (LGPD art. 16), não preferência.
+
+> **Por que isto existe.** O cache semântico ficou meses sem gravar uma linha e
+> ninguém soube. O dado para descobrir sempre esteve lá: `interactions.cache_hit`
+> é gravado em toda interação, e um `SELECT avg(cache_hit::int)` teria mostrado
+> zero a qualquer momento. Não faltou instrumentação — faltou alguém perguntando.
+> Estes alarmes são a pergunta, feita pelo próprio backend.
+
+---
+
 ## Retenção de dados
 
 **O expurgo roda sozinho, dentro do backend.** Uma tarefa em background dispara
 90 segundos após o boot e depois a cada 24 horas — ver
 `app/services/expurgo_agendado.py`. **Não há cron a configurar em painel nenhum.**
+
+Cada rodada bem-sucedida grava uma linha em `audit_logs` com
+`action='expurgo.rodada'` — é o rastro que responde "quando rodou pela última
+vez?" sem depender da memória de quem estava por perto.
 
 Se ele encontrar mais de 2 dias de atraso ao rodar, abre um evento `warning` no
 Sentry com a tag `alarme=expurgo_lgpd` — o que significa que o backend ficou
