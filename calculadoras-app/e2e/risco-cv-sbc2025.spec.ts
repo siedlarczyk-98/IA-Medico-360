@@ -163,7 +163,7 @@ test.describe('Passo 4 — PREVENT', () => {
     await irAtePrevent(page);
     await calcularPrevent(page, JOVEM_SAUDAVEL);
     // 35 anos, perfil normal -> ASCVD 0,22%: abaixo de 5%, o passo pede o LDL-c.
-    await expect(page.locator('#prevent-score')).toHaveText('0.22%', { timeout: 15_000 });
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('0.22%', { timeout: 15_000 });
     await expect(page.getByRole('button', { name: /Informe o LDL-c/ })).toBeDisabled();
     await preencher(page, 'prevent-ldl', 100);
     await avancar(page, 'Avaliar Agravantes');
@@ -175,7 +175,7 @@ test.describe('Passo 4 — PREVENT', () => {
   test('mesmo perfil com 1 agravante -> reclassifica para INTERMEDIÁRIO', async ({ page }) => {
     await irAtePrevent(page);
     await calcularPrevent(page, JOVEM_SAUDAVEL);
-    await expect(page.locator('#prevent-score')).toHaveText('0.22%', { timeout: 15_000 });
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('0.22%', { timeout: 15_000 });
     await preencher(page, 'prevent-ldl', 100);
     await avancar(page, 'Avaliar Agravantes');
     await esperarPasso(page, 'agravantes');
@@ -190,9 +190,12 @@ test.describe('Passo 4 — PREVENT', () => {
       sexo: 'Masculino', idade: 70, ct: 260, hdl: 32, sbp: 175, bmi: 31, egfr: 48,
       fumante: true, antiHipertensivo: true,
     });
-    await expect(page.locator('#prevent-score')).toHaveText('26.24%', { timeout: 15_000 });
-    // 70 anos: o risco em 10 anos vale, o de 30 anos não — e a tela precisa dizer por quê.
-    await expect(page.getByRole('row', { name: /Aterosclerótica/ })).toContainText('—');
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('26.24%', { timeout: 15_000 });
+    // 70 anos: o risco em 10 anos vale, o de 30 anos não — o bloco de 30 anos
+    // some inteiro e o aviso explica o porquê.
+    await expect(page.locator('#prevent-cvd_10a')).toBeVisible();
+    await expect(page.locator('#prevent-cvd_30a')).toHaveCount(0);
+    await expect(page.locator('#prevent-ascvd_30a')).toHaveCount(0);
     await expect(page.getByText(/horizonte de 30 anos é validado apenas dos 30 aos 59 anos/)).toBeVisible();
     await avancar(page, 'Ver Resultado (Alto)');
     await esperarResultado(page, 'ALTO');
@@ -207,20 +210,40 @@ test.describe('Passo 4 — PREVENT', () => {
       sexo: 'Masculino', idade: 55, ct: 220, hdl: 40, sbp: 145, bmi: 42, egfr: 85,
       fumante: true, antiHipertensivo: true,
     });
-    await expect(page.locator('#prevent-score')).toHaveText('8.45%', { timeout: 15_000 });
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('8.45%', { timeout: 15_000 });
     await expect(page.getByText(/não foi calculado para este paciente/)).toHaveCount(0);
-    // A tabela de desfechos vem parcial: sem IC, com as duas colunas de ASCVD.
-    await expect(page.getByRole('row', { name: /Insuficiência cardíaca/ })).toContainText('—');
+    // O painel vem parcial: só as linhas de IC ficam vazias, os demais desfechos
+    // (inclusive os dois horizontes de DCV total) seguem preenchidos.
+    await expect(page.locator('#prevent-hf_10a')).toHaveText('—');
+    await expect(page.locator('#prevent-hf_30a')).toHaveText('—');
+    await expect(page.locator('#prevent-cvd_10a')).toHaveText('12.87%');
+    await expect(page.locator('#prevent-cvd_30a')).toHaveText('42.45%');
     // E o motivo da lacuna fica explícito, em vez de a célula parecer defeito.
     await expect(page.getByText(/Só as equações de insuficiência cardíaca usam IMC/)).toBeVisible();
     await avancar(page, 'Avaliar Agravantes');
     await esperarPasso(page, 'agravantes');
   });
 
+  test('hierarquia: DCV total em destaque, ASCVD marcado como o que classifica', async ({ page }) => {
+    await irAtePrevent(page);
+    await calcularPrevent(page, JOVEM_SAUDAVEL);
+    // Mesmo recorte do MDCalc: o número grande de cada horizonte é o DCV total.
+    await expect(page.locator('#prevent-cvd_10a')).toHaveText('0.32%');
+    await expect(page.locator('#prevent-cvd_30a')).toHaveText('2.60%');
+    await expect(page.getByText('Risco de DCV total em 10 anos')).toBeVisible();
+    // E os cinco desfechos aparecem desdobrados, com o ASCVD identificado como
+    // o que puxa a conduta — o MDCalc não precisa disso porque não classifica.
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('0.22%');
+    await expect(page.locator('#prevent-chd_10a')).toHaveText('0.09%');
+    await expect(page.locator('#prevent-stroke_10a')).toHaveText('0.14%');
+    await expect(page.locator('#prevent-hf_10a')).toHaveText('0.12%');
+    await expect(page.getByText('define a classificação SBC')).toBeVisible();
+  });
+
   test('alternar para mmol/L converte os lipídios exibidos', async ({ page }) => {
     await irAtePrevent(page);
     await calcularPrevent(page, JOVEM_SAUDAVEL);
-    await expect(page.locator('#prevent-score')).toHaveText('0.22%', { timeout: 15_000 });
+    await expect(page.locator('#prevent-ascvd_10a')).toHaveText('0.22%', { timeout: 15_000 });
     await escolher(page, 'mmol/L');
     // 180 mg/dL x 0,02586 = 4,65 mmol/L; 60 mg/dL = 1,55 mmol/L.
     await expect(page.locator('#prevent-ct')).toHaveValue('4.65');

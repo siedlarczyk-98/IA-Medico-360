@@ -48,42 +48,99 @@ const paraMgdl = (digitado: string, unidade: UnidadeLipides): string => {
  * é normal a tabela vir parcial (idade > 59 zera a coluna de 30 anos; IMC fora
  * de 18,5–39,9 zera a linha de insuficiência cardíaca).
  */
-const DESFECHOS = [
-  { rotulo: 'DCV total', dez: 'cvd_10a', trinta: 'cvd_30a' },
-  { rotulo: 'Aterosclerótica (ASCVD)', dez: 'ascvd_10a', trinta: 'ascvd_30a' },
-  { rotulo: 'Doença coronariana', dez: 'chd_10a', trinta: 'chd_30a' },
-  { rotulo: 'AVC', dez: 'stroke_10a', trinta: 'stroke_30a' },
-  { rotulo: 'Insuficiência cardíaca', dez: 'hf_10a', trinta: 'hf_30a' },
+type CampoPrevent = keyof Omit<PreventCalculateResponse, 'avisos'>;
+
+/**
+ * Hierarquia espelhada no MDCalc: o DCV total é o número grande de cada
+ * horizonte, os demais desfechos vêm desdobrados abaixo. A diferença é que aqui
+ * o ASCVD leva marcação — no MDCalc nenhum número decide nada, enquanto nesta
+ * tela é o ASCVD de 10 anos que define a classificação SBC 2025, e o médico
+ * precisa saber qual dos cinco puxou a conduta.
+ */
+const HORIZONTES = [
+  {
+    rotulo: '10 anos',
+    principal: 'cvd_10a' as CampoPrevent,
+    linhas: [
+      { rotulo: 'Aterosclerótica (ASCVD)', campo: 'ascvd_10a' as CampoPrevent, classifica: true },
+      { rotulo: 'Insuficiência cardíaca', campo: 'hf_10a' as CampoPrevent, classifica: false },
+      { rotulo: 'Doença coronariana', campo: 'chd_10a' as CampoPrevent, classifica: false },
+      { rotulo: 'AVC', campo: 'stroke_10a' as CampoPrevent, classifica: false },
+    ],
+  },
+  {
+    rotulo: '30 anos',
+    principal: 'cvd_30a' as CampoPrevent,
+    linhas: [
+      { rotulo: 'Aterosclerótica (ASCVD)', campo: 'ascvd_30a' as CampoPrevent, classifica: false },
+      { rotulo: 'Insuficiência cardíaca', campo: 'hf_30a' as CampoPrevent, classifica: false },
+      { rotulo: 'Doença coronariana', campo: 'chd_30a' as CampoPrevent, classifica: false },
+      { rotulo: 'AVC', campo: 'stroke_30a' as CampoPrevent, classifica: false },
+    ],
+  },
 ] as const;
 
-const celula = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+const formata = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
-function DetalhePrevent({ dados }: { dados: PreventCalculateResponse }) {
-  const cabecalho: React.CSSProperties = {
-    fontSize: 11, fontWeight: 600, color: 'var(--pen2)', textAlign: 'right', padding: '0 0 6px',
-  };
-  const valor: React.CSSProperties = {
-    fontSize: 13, color: 'var(--ink)', textAlign: 'right', padding: '5px 0',
-  };
+function BlocoHorizonte({
+  dados,
+  horizonte,
+}: {
+  dados: PreventCalculateResponse;
+  horizonte: (typeof HORIZONTES)[number];
+}) {
+  const { rotulo, principal, linhas } = horizonte;
+  // Horizonte inteiro fora de faixa (idade > 59 zera os 30 anos): esconde o
+  // bloco e deixa o aviso explicar, em vez de empilhar cinco travessões.
+  const vazio = dados[principal] == null && linhas.every(l => dados[l.campo] == null);
+  if (vazio) return null;
+
   return (
-    <table style={{ width: '100%', marginTop: 16, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-      <thead>
-        <tr>
-          <th style={{ ...cabecalho, textAlign: 'left' }}>Desfecho</th>
-          <th style={cabecalho}>10 anos</th>
-          <th style={cabecalho}>30 anos</th>
-        </tr>
-      </thead>
-      <tbody>
-        {DESFECHOS.map(({ rotulo, dez, trinta }) => (
-          <tr key={rotulo} style={{ borderTop: '1px solid var(--line)' }}>
-            <td style={{ ...valor, textAlign: 'left', color: 'var(--pen2)', fontSize: 12.5 }}>{rotulo}</td>
-            <td style={valor}>{celula(dados[dez])}</td>
-            <td style={valor}>{celula(dados[trinta])}</td>
-          </tr>
+    <div style={{ textAlign: 'left' }}>
+      <p style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        Risco de DCV total em {rotulo}
+      </p>
+      <p id={`prevent-${principal}`} style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.01em', margin: '2px 0 10px' }}>
+        {formata(dados[principal])}
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {linhas.map(({ rotulo: nome, campo, classifica }) => (
+          <div
+            key={campo}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12,
+              padding: '5px 8px', borderRadius: 6,
+              background: classifica ? 'var(--fill1, rgba(0,0,0,0.03))' : 'transparent',
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: 'var(--pen2)' }}>
+              {nome}
+              {classifica && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--petrol)', fontWeight: 600 }}>
+                  define a classificação SBC
+                </span>
+              )}
+            </span>
+            <span
+              id={`prevent-${campo}`}
+              style={{ fontSize: 13.5, fontWeight: classifica ? 700 : 500, color: 'var(--ink)', whiteSpace: 'nowrap' }}
+            >
+              {formata(dados[campo])}
+            </span>
+          </div>
         ))}
-      </tbody>
-    </table>
+      </div>
+    </div>
+  );
+}
+
+function PainelPrevent({ dados }: { dados: PreventCalculateResponse }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {HORIZONTES.map(h => (
+        <BlocoHorizonte key={h.rotulo} dados={dados} horizonte={h} />
+      ))}
+    </div>
   );
 }
 
@@ -306,15 +363,22 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
               </>
             ) : (
               <>
-                <p style={{ fontSize: 12, color: 'var(--pen2)', marginBottom: 4 }}>
-                  Risco PREVENT de doença aterosclerótica em 10 anos
-                </p>
-                <p id="prevent-score" style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)' }}>{scoreNum.toFixed(2)}%</p>
-                {data && (
+                {data ? (
                   <>
-                    <DetalhePrevent dados={data} />
+                    <PainelPrevent dados={data} />
                     <AvisosPrevent avisos={data.avisos} />
                   </>
+                ) : (
+                  // Sem o payload (ao voltar para o passo), resta o valor que
+                  // ficou no estado do wizard — que é o que definiu a conduta.
+                  <div style={{ textAlign: 'left' }}>
+                    <p style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Risco aterosclerótico em 10 anos
+                    </p>
+                    <p id="prevent-ascvd_10a" style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)' }}>
+                      {scoreNum.toFixed(2)}%
+                    </p>
+                  </div>
                 )}
               </>
             )}
