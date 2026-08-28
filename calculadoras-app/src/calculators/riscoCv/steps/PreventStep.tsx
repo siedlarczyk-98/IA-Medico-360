@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Card, CardHeader, Separator, SubHeading, Button, ToggleGroup, Label, InputField, CheckItem } from '../ui';
 import { IconTarget, IconChevronRight, IconChevronLeft } from '../icons';
 import { usePreventCalculator } from '../../../hooks/usePreventCalculator';
+import type { PreventAviso, PreventCalculateResponse } from '../../../api/prevent';
 import type { RiskLevel } from '../riskTypes';
 import type { WizardStepProps } from './types';
 
@@ -13,12 +15,122 @@ import type { WizardStepProps } from './types';
  * branching a partir do score é idêntico ao da referência.
  */
 
+/**
+ * O MDCalc abre o PREVENT em mmol/L com alternador de unidade. Aqui o canônico
+ * é mg/dL (o que o backend recebe e o que o laboratório brasileiro reporta); a
+ * unidade é só de exibição. Constante idêntica à `mmol_conversion` da AHA.
+ */
+const MMOL_POR_MGDL = 0.02586;
+
+type UnidadeLipides = 'mgdl' | 'mmoll';
+
+const rotuloUnidade = (u: UnidadeLipides) => (u === 'mgdl' ? 'mg/dL' : 'mmol/L');
+
+/** mg/dL guardado no estado -> string exibida na unidade escolhida. */
+const paraExibicao = (mgdl: string, unidade: UnidadeLipides): string => {
+  const n = parseFloat(mgdl);
+  if (isNaN(n)) return '';
+  return unidade === 'mmoll' ? (n * MMOL_POR_MGDL).toFixed(2) : String(n);
+};
+
+/** String digitada na unidade escolhida -> mg/dL para o estado. */
+const paraMgdl = (digitado: string, unidade: UnidadeLipides): string => {
+  if (unidade === 'mgdl') return digitado;
+  const n = parseFloat(digitado.replace(',', '.'));
+  if (isNaN(n)) return '';
+  return (n / MMOL_POR_MGDL).toFixed(1);
+};
+
+/**
+ * Os cinco desfechos do modelo base. É um superconjunto do MDCalc, que exibe
+ * DCV total, ASCVD, coronariana e AVC mas omite insuficiência cardíaca.
+ * `—` onde o backend devolveu `null`: a AHA invalida desfecho a desfecho, então
+ * é normal a tabela vir parcial (idade > 59 zera a coluna de 30 anos; IMC fora
+ * de 18,5–39,9 zera a linha de insuficiência cardíaca).
+ */
+const DESFECHOS = [
+  { rotulo: 'DCV total', dez: 'cvd_10a', trinta: 'cvd_30a' },
+  { rotulo: 'Aterosclerótica (ASCVD)', dez: 'ascvd_10a', trinta: 'ascvd_30a' },
+  { rotulo: 'Doença coronariana', dez: 'chd_10a', trinta: 'chd_30a' },
+  { rotulo: 'AVC', dez: 'stroke_10a', trinta: 'stroke_30a' },
+  { rotulo: 'Insuficiência cardíaca', dez: 'hf_10a', trinta: 'hf_30a' },
+] as const;
+
+const celula = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+
+function DetalhePrevent({ dados }: { dados: PreventCalculateResponse }) {
+  const cabecalho: React.CSSProperties = {
+    fontSize: 11, fontWeight: 600, color: 'var(--pen2)', textAlign: 'right', padding: '0 0 6px',
+  };
+  const valor: React.CSSProperties = {
+    fontSize: 13, color: 'var(--ink)', textAlign: 'right', padding: '5px 0',
+  };
+  return (
+    <table style={{ width: '100%', marginTop: 16, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+      <thead>
+        <tr>
+          <th style={{ ...cabecalho, textAlign: 'left' }}>Desfecho</th>
+          <th style={cabecalho}>10 anos</th>
+          <th style={cabecalho}>30 anos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {DESFECHOS.map(({ rotulo, dez, trinta }) => (
+          <tr key={rotulo} style={{ borderTop: '1px solid var(--line)' }}>
+            <td style={{ ...valor, textAlign: 'left', color: 'var(--pen2)', fontSize: 12.5 }}>{rotulo}</td>
+            <td style={valor}>{celula(dados[dez])}</td>
+            <td style={valor}>{celula(dados[trinta])}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * Toda célula vazia na tabela precisa vir com o motivo — sem isso o médico não
+ * distingue "fora da faixa de validação" de defeito do sistema. As mensagens
+ * vêm do backend, da mesma tabela de regras que decide o que não calcular
+ * (`app/calculators/formulas/cardiologia/prevent.py`), para as duas não
+ * divergirem com o tempo.
+ */
+function AvisosPrevent({ avisos }: { avisos: PreventAviso[] }) {
+  if (avisos.length === 0) return null;
+  return (
+    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}>
+      {avisos.map(aviso => (
+        <p
+          key={aviso.codigo}
+          style={{
+            fontSize: 12.5,
+            color: 'var(--pen2)',
+            lineHeight: 1.45,
+            paddingLeft: 10,
+            borderLeft: '2px solid var(--line)',
+          }}
+        >
+          {aviso.mensagem}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 interface Step4Props extends Omit<WizardStepProps, 'onResult'> {
   onResult: (level: RiskLevel, goToAggravants: boolean) => void;
 }
 
 export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
-  const { mutate: execute, isPending, error } = usePreventCalculator();
+  const { mutate: execute, isPending, error, data } = usePreventCalculator();
+  const [unidade, setUnidade] = useState<UnidadeLipides>('mgdl');
+  const [ctExibido, setCtExibido] = useState(state.ctMgdl);
+  const [hdlExibido, setHdlExibido] = useState(state.hdlMgdl);
+
+  const trocarUnidade = (nova: UnidadeLipides) => {
+    setUnidade(nova);
+    setCtExibido(paraExibicao(state.ctMgdl, nova));
+    setHdlExibido(paraExibicao(state.hdlMgdl, nova));
+  };
 
   const clinicalFieldsValid =
     state.idade !== '' && state.ctMgdl !== '' && state.hdlMgdl !== '' &&
@@ -41,9 +153,11 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
       },
       {
         onSuccess: data => {
-          // -1 é um sentinela local: "já calculado, mas fora da faixa válida do
-          // PREVENT" (idade < 30 ou > 79, ou IMC > 39,9) — o backend nesse caso
-          // devolve todos os campos `null`. Distinto de `null` = "ainda não calculado".
+          // -1 é um sentinela local: "já calculado, mas o ASCVD não é aplicável".
+          // Desde o alinhamento com a AHA o backend invalida desfecho a desfecho,
+          // então isso ocorre com idade fora de 30–79, ou CT/HDL-c/PAS/TFGe fora
+          // da faixa do modelo. IMC fora de faixa derruba só os desfechos de IC —
+          // o ASCVD continua válido. Distinto de `null` = "ainda não calculado".
           onChange({ preventScore: data.ascvd_10a ?? -1 });
         },
       }
@@ -59,8 +173,8 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
   const needsLdl = !unavailable && !isNaN(scoreNum) && scoreNum < 5;
 
   const getResultLevel = (): { level: RiskLevel; goToAggravants: boolean } | null => {
-    // Fora da faixa válida do PREVENT (idade < 30/> 79 ou IMC > 39,9): segue direto
-    // para os fatores agravantes, igual ao fallback do backend quando não há score.
+    // Sem ASCVD aplicável: segue direto para os fatores agravantes, igual ao
+    // fallback do backend quando não há score.
     if (unavailable) return { level: 'low', goToAggravants: true };
     if (isNaN(scoreNum)) return null;
     if (scoreNum >= 20) return { level: 'high', goToAggravants: false };
@@ -115,14 +229,34 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
         <Separator />
 
         <SubHeading>Perfil lipídico e pressórico</SubHeading>
+        <div style={{ maxWidth: 240, marginBottom: 14 }}>
+          <Label>Unidade do perfil lipídico</Label>
+          <ToggleGroup
+            value={unidade}
+            onChange={v => trocarUnidade(v as UnidadeLipides)}
+            options={[{ value: 'mgdl', label: 'mg/dL' }, { value: 'mmoll', label: 'mmol/L' }]}
+          />
+        </div>
         <div style={{ display: 'flex', gap: 16 }}>
           <div style={{ flex: 1 }}>
-            <Label htmlFor="prevent-ct">Colesterol total (mg/dL)</Label>
-            <InputField id="prevent-ct" type="number" value={state.ctMgdl} onChange={v => { onChange({ ctMgdl: v }); clinicalInputChanged(); }} />
+            <Label htmlFor="prevent-ct">Colesterol total ({rotuloUnidade(unidade)})</Label>
+            <InputField
+              id="prevent-ct"
+              type="number"
+              placeholder={unidade === 'mgdl' ? '130 – 320' : '3,4 – 8,3'}
+              value={ctExibido}
+              onChange={v => { setCtExibido(v); onChange({ ctMgdl: paraMgdl(v, unidade) }); clinicalInputChanged(); }}
+            />
           </div>
           <div style={{ flex: 1 }}>
-            <Label htmlFor="prevent-hdl">HDL-c (mg/dL)</Label>
-            <InputField id="prevent-hdl" type="number" value={state.hdlMgdl} onChange={v => { onChange({ hdlMgdl: v }); clinicalInputChanged(); }} />
+            <Label htmlFor="prevent-hdl">HDL-c ({rotuloUnidade(unidade)})</Label>
+            <InputField
+              id="prevent-hdl"
+              type="number"
+              placeholder={unidade === 'mgdl' ? '20 – 100' : '0,5 – 2,6'}
+              value={hdlExibido}
+              onChange={v => { setHdlExibido(v); onChange({ hdlMgdl: paraMgdl(v, unidade) }); clinicalInputChanged(); }}
+            />
           </div>
           <div style={{ flex: 1 }}>
             <Label htmlFor="prevent-sbp">PA sistólica (mmHg)</Label>
@@ -156,13 +290,32 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
         {calculated && (
           <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--fill2)', textAlign: 'center' }}>
             {unavailable ? (
-              <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
-                PREVENT não aplicável fora da faixa de 30–79 anos (ou IMC &gt; 39,9) — segue direto para os fatores agravantes.
-              </p>
+              <>
+                <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
+                  O PREVENT não foi calculado para este paciente. Segue direto para os fatores
+                  agravantes.
+                </p>
+                {data ? (
+                  <AvisosPrevent avisos={data.avisos} />
+                ) : (
+                  <p style={{ fontSize: 12.5, color: 'var(--pen2)', marginTop: 10 }}>
+                    Algum dado está fora da faixa em que o escore foi validado. Recalcule para ver
+                    qual.
+                  </p>
+                )}
+              </>
             ) : (
               <>
-                <p style={{ fontSize: 12, color: 'var(--pen2)', marginBottom: 4 }}>Risco PREVENT em 10 anos</p>
-                <p style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)' }}>{score}%</p>
+                <p style={{ fontSize: 12, color: 'var(--pen2)', marginBottom: 4 }}>
+                  Risco PREVENT de doença aterosclerótica em 10 anos
+                </p>
+                <p id="prevent-score" style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink)' }}>{scoreNum.toFixed(2)}%</p>
+                {data && (
+                  <>
+                    <DetalhePrevent dados={data} />
+                    <AvisosPrevent avisos={data.avisos} />
+                  </>
+                )}
               </>
             )}
           </div>

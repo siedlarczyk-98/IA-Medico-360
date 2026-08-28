@@ -15,11 +15,32 @@ class PreventCalculateRequest(BaseModel):
     statin_use: bool = False
 
 
-class PreventCalculateResponse(BaseModel):
-    """`None` quando fora da faixa válida do modelo (idade 30–79, IMC ≤ 39,9)."""
+class PreventAviso(BaseModel):
+    """Por que um conjunto de desfechos não foi calculado."""
 
-    ascvd_10a: float | None
+    codigo: str
+    mensagem: str
+    desfechos: list[str]
+
+
+class PreventCalculateResponse(BaseModel):
+    """
+    Os dez campos do modelo base (cinco desfechos x dois horizontes). `None`
+    segue a regra da AHA, que invalida
+    desfecho a desfecho: idade fora de 30–79 derruba tudo; idade > 59 derruba só
+    os 30 anos; CT/HDL fora de faixa derrubam os desfechos que usam lipídios
+    (todos menos IC); IMC fora de 18,5–39,9 derruba só os de IC; PAS ou TFGe
+    fora de faixa derrubam tudo.
+    """
+
     cvd_10a: float | None
+    ascvd_10a: float | None
+    chd_10a: float | None
+    stroke_10a: float | None
     hf_10a: float | None
-    ascvd_30a: float | None
     cvd_30a: float | None
+    ascvd_30a: float | None
+    chd_30a: float | None
+    stroke_30a: float | None
+    hf_30a: float | None
+    avisos: list[PreventAviso] = []

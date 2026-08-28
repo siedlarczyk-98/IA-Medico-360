@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import get_current_user
-from app.calculators.formulas.cardiologia.prevent import prevent_risk
+from app.calculators.formulas.cardiologia.prevent import prevent_all, prevent_avisos
 from app.calculators.schemas.prevent_schemas import PreventCalculateRequest, PreventCalculateResponse
 from app.core.limiter import limiter
 from app.models.models import User
@@ -17,14 +17,12 @@ async def calculate_prevent(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Escore PREVENT (AHA, Khan et al. 2024) — modelo válido para idade 30–79 e
-    IMC ≤ 39,9. Fora dessa faixa, todos os campos vêm `None` (não há coeficiente
-    calibrado). Não persiste execução nem audit log — cálculo sem estado.
+    Escore PREVENT (AHA, Khan et al. 2024) — modelo base, seis desfechos.
+    Campos fora da faixa de validade do modelo vêm `None`, seguindo a regra da
+    AHA (`AHAprevent::pred_risk_base`), que invalida desfecho a desfecho e não
+    em bloco. Não persiste execução nem audit log — cálculo sem estado.
     """
-    if not (30 <= body.idade <= 79) or body.bmi > 39.9:
-        return PreventCalculateResponse(ascvd_10a=None, cvd_10a=None, hf_10a=None, ascvd_30a=None, cvd_30a=None)
-
-    kwargs = dict(
+    dados = dict(
         sex=body.sexo,
         age=body.idade,
         tc_mgdl=body.ct_mgdl,
@@ -37,15 +35,11 @@ async def calculate_prevent(
         egfr=body.egfr,
         bmi=body.bmi,
     )
-    ascvd_30a = cvd_30a = None
-    if body.idade <= 59:
-        ascvd_30a = round(prevent_risk(**kwargs, outcome="ascvd", horizon=30), 1)
-        cvd_30a = round(prevent_risk(**kwargs, outcome="cvd", horizon=30), 1)
-
+    riscos = prevent_all(**dados)
     return PreventCalculateResponse(
-        ascvd_10a=round(prevent_risk(**kwargs, outcome="ascvd", horizon=10), 1),
-        cvd_10a=round(prevent_risk(**kwargs, outcome="cvd", horizon=10), 1),
-        hf_10a=round(prevent_risk(**kwargs, outcome="hf", horizon=10), 1),
-        ascvd_30a=ascvd_30a,
-        cvd_30a=cvd_30a,
+        # 2 casas, igual ao MDCalc. Os limiares da SBC (5% e 20%) são aplicados no
+        # front sobre este valor já arredondado, então a precisão extra muda a
+        # classificação em casos de borda — para mais perto do valor verdadeiro.
+        **{campo: None if valor is None else round(valor, 2) for campo, valor in riscos.items()},
+        avisos=prevent_avisos(**dados),
     )

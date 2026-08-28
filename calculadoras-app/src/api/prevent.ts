@@ -18,12 +18,25 @@ export interface PreventCalculateRequest {
   statin_use: boolean;
 }
 
+/** Por que um conjunto de desfechos não foi calculado, vindo do backend. */
+export interface PreventAviso {
+  codigo: string;
+  mensagem: string;
+  desfechos: string[];
+}
+
 export interface PreventCalculateResponse {
-  ascvd_10a: number | null;
   cvd_10a: number | null;
+  ascvd_10a: number | null;
+  chd_10a: number | null;
+  stroke_10a: number | null;
   hf_10a: number | null;
-  ascvd_30a: number | null;
   cvd_30a: number | null;
+  ascvd_30a: number | null;
+  chd_30a: number | null;
+  stroke_30a: number | null;
+  hf_30a: number | null;
+  avisos: PreventAviso[];
 }
 
 function authHeaders(): Record<string, string> {
