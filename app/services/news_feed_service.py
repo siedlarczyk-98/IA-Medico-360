@@ -23,7 +23,7 @@ ignorar esses itens (ver `news_digest_service`).
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -39,6 +39,7 @@ from app.models.news import (
     TopicSpecialty,
     UserTopic,
 )
+from app.services import news_keyword_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,9 @@ class ItemFeed:
     temas: list[tuple[str, str]]  # [(slug, nome_pt)] que casaram com o usuário
     score: float
     preenchimento: bool
+    # Palavras-chave do usuário que casaram com o TEXTO deste artigo. Eixo
+    # separado dos temas: ver `news_keyword_service`.
+    palavras: list[str] = field(default_factory=list)
 
 
 # Piso de sugestão para quem não tem especialidade registrada. Precisa existir:
@@ -183,6 +187,24 @@ async def montar_feed(
         for a, s in casados
     ]
 
+    # --- Palavras-chave -------------------------------------------------
+    # ADITIVA, nunca subtrativa: só acrescenta ao que já casou por tema. Se
+    # filtrasse, um erro de digitação esvaziaria a tela do usuário.
+    #
+    # Entra ANTES do preenchimento de propósito: um artigo que casou com um
+    # termo que a pessoa escolheu a dedo é conteúdo pedido, não cortesia para a
+    # tela não ficar vazia — e, ao contrário do preenchimento, ele pode disparar
+    # o digest.
+    termos = [k.termo for k in await news_keyword_service.listar(db, user.id)]
+    if termos:
+        por_palavra = await news_keyword_service.artigos_por_palavras(
+            db, termos, desde, limite=limite, excluir_ids={i.article.id for i in itens}
+        )
+        itens += [
+            ItemFeed(article=a, temas=[], score=0.0, preenchimento=False, palavras=p)
+            for a, p in por_palavra
+        ]
+
     # --- Preenchimento ---------------------------------------------------
     if len(itens) < settings.news_feed_minimo_itens:
         adjacentes = list(await db.scalars(
@@ -219,3 +241,105 @@ async def montar_feed(
 
     motivo = MOTIVO_SEM_MATCH if houve_publicacao else MOTIVO_SEM_CONTEUDO
     return itens, motivo
+
+# ── Apoio à tela de escolha de temas ─────────────────────────────────────────
+
+ORIGEM_CURADORIA = "curadoria"
+ORIGEM_SOCIAL = "social"
+
+
+async def amostra_por_tema(
+    db: AsyncSession, topic_ids: list, por_tema: int = 2
+) -> dict:
+    """
+    Até `por_tema` títulos recentes por tema, para a tela de escolha mostrar o
+    que cada tema realmente traria.
+
+    Transforma a tela de uma lista de rótulos abstratos em evidência: o médico
+    vê o conteúdo antes de marcar. E um tema que volta VAZIO é informação útil,
+    não falha — quer dizer que o tema está quieto, e dizer isso é melhor do que
+    deixar a pessoa marcar e esperar por nada.
+
+    Uma query só para todos os temas, via `row_number()`: uma por tema seriam
+    dezenas de round-trips contra um banco remoto a cada abertura da tela.
+    """
+    if not topic_ids:
+        return {}
+
+    settings = get_settings()
+    desde = datetime.now(UTC) - timedelta(days=settings.news_feed_janela_dias)
+
+    ranqueado = (
+        select(
+            ArticleTopic.topic_id,
+            Article.rewritten_title,
+            func.row_number()
+            .over(
+                partition_by=ArticleTopic.topic_id,
+                order_by=Article.visible_at.desc(),
+            )
+            .label("posicao"),
+        )
+        .join(Article, Article.id == ArticleTopic.article_id)
+        .where(
+            Article.status == ArticleStatus.PUBLISHED.value,
+            Article.visible_at >= desde,
+            ArticleTopic.topic_id.in_(topic_ids),
+            ArticleTopic.score >= settings.news_feed_score_minimo,
+        )
+        .subquery()
+    )
+
+    linhas = (await db.execute(
+        select(ranqueado.c.topic_id, ranqueado.c.rewritten_title)
+        .where(ranqueado.c.posicao <= por_tema)
+    )).all()
+
+    amostras: dict = {}
+    for topic_id, titulo in linhas:
+        if titulo:
+            amostras.setdefault(topic_id, []).append(titulo)
+    return amostras
+
+
+async def sugestao_social(db: AsyncSession, specialty: str | None) -> tuple[str, dict]:
+    """
+    Decide se a tela fala em nome da curadoria ou dos colegas.
+
+    O pedido original era "Os colegas da {especialidade} costumam buscar por".
+    Só que no lançamento não existe esse dado: as sugestões saem do nosso
+    mapeamento curado, e há zero usuários. Afirmar comportamento de colegas ali
+    seria apresentar invenção como fato — para médicos.
+
+    Então a mesma tela troca de texto quando o dado passa a existir:
+
+      curadoria -> "Selecionamos para quem é de Cardiologia"
+      social    -> "O que os colegas de Cardiologia mais acompanham", com o
+                   percentual real vindo de `news.user_topics`
+
+    A troca é automática, sem deploy. Retorna (origem, {topic_id: percentual}).
+    """
+    settings = get_settings()
+    if not specialty:
+        return ORIGEM_CURADORIA, {}
+
+    # Quantos colegas da especialidade já fizeram uma escolha. `distinct` porque
+    # cada um tem várias linhas em user_topics.
+    colegas = (await db.execute(
+        select(func.count(func.distinct(UserTopic.user_id)))
+        .join(User, User.id == UserTopic.user_id)
+        .where(User.specialty == specialty)
+    )).scalar_one()
+
+    if colegas < settings.news_min_amostra_social:
+        return ORIGEM_CURADORIA, {}
+
+    linhas = (await db.execute(
+        select(UserTopic.topic_id, func.count(func.distinct(UserTopic.user_id)))
+        .join(User, User.id == UserTopic.user_id)
+        .where(User.specialty == specialty)
+        .group_by(UserTopic.topic_id)
+    )).all()
+
+    return ORIGEM_SOCIAL, {topic_id: round(quantos / colegas, 2) for topic_id, quantos in linhas}
+

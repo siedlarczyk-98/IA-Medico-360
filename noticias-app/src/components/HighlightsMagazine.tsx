@@ -59,6 +59,8 @@ interface HighlightItem {
   journal: JournalMeta | null;
   /** Temas do usuario que casaram — o "por que estou vendo isto?" do card. */
   temas: { slug: string; nome: string }[];
+  /** Palavras-chave do usuario que casaram com o TEXTO. Eixo separado dos temas. */
+  palavras: string[];
   /**
    * Entrou so para a tela nao ficar vazia (tema adjacente a especialidade).
    * Precisa ser exibido COMO TAL: e a diferenca entre o usuario confiar e nao
@@ -80,6 +82,7 @@ function paraItem(h: Highlight): HighlightItem {
     publishedAt: new Date(h.visible_at ?? h.published_date ?? Date.now()),
     journal: journalBySlug(h.journal_slug),
     temas: h.temas.map((t) => ({ slug: t.slug, nome: t.nome_pt })),
+    palavras: h.palavras,
     preenchimento: h.preenchimento,
   };
 }
@@ -329,13 +332,26 @@ function Temas({ item, sobreEscuro = false }: { item: HighlightItem; sobreEscuro
   if (item.preenchimento) {
     return <span style={styles.tagPreenchimento}>fora dos seus temas</span>;
   }
-  if (!item.temas.length) return null;
+  // Palavra-chave e tema sao EIXOS diferentes e por isso aparecem diferentes: o
+  // primeiro e um termo que a pessoa escolheu a dedo e casa com o texto do
+  // artigo; o segundo veio do tagger. Misturar os dois numa etiqueta so
+  // esconderia justamente a informacao que responde "por que estou vendo isto?".
+  if (!item.temas.length && !item.palavras.length) return null;
   return (
-    // O hero tem fundo em degrade escuro; a cor padrao da etiqueta (azul
-    // petroleo) fica ilegivel ali. Uma variante clara, e nao uma cor unica de
-    // compromisso que ficaria fraca nos dois lugares.
-    <span style={sobreEscuro ? styles.tagTemasClaro : styles.tagTemas}>
-      {item.temas.slice(0, 3).map((t) => t.nome).join(" · ")}
+    <span style={styles.linhaEtiquetas}>
+      {item.palavras.map((p) => (
+        <span key={p} style={styles.tagPalavra}>
+          {p} · sua palavra-chave
+        </span>
+      ))}
+      {item.temas.length > 0 && (
+        // O hero tem fundo em degrade escuro; a cor padrao da etiqueta (azul
+        // petroleo) fica ilegivel ali. Uma variante clara, e nao uma cor unica
+        // de compromisso que ficaria fraca nos dois lugares.
+        <span style={sobreEscuro ? styles.tagTemasClaro : styles.tagTemas}>
+          {item.temas.slice(0, 3).map((t) => t.nome).join(" · ")}
+        </span>
+      )}
     </span>
   );
 }
@@ -616,6 +632,18 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#014751",
     opacity: 0.8,
+  },
+  linhaEtiquetas: { display: "flex", flexWrap: "wrap" as const, gap: 6, alignItems: "center" },
+  tagPalavra: {
+    display: "inline-block",
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+    color: "#4b2f96",
+    background: "#e3dbfa",
+    padding: "2px 9px",
+    borderRadius: 999,
   },
   tagTemasClaro: {
     display: "block",

@@ -27,6 +27,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -36,7 +37,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -96,6 +97,27 @@ class Article(Base):
     # --- Conteúdo gerado (redator) ---
     rewritten_title: Mapped[str | None] = mapped_column(Text, nullable=True)
     rewritten_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Índice de busca das palavras-chave do médico, mantido pelo próprio
+    # Postgres a partir do título e do corpo.
+    #
+    # `Computed` e não uma coluna comum: sem ele o SQLAlchemy incluiria a coluna
+    # em todo INSERT e o banco recusaria a escrita numa coluna gerada. Também é
+    # o que faz o `create_all` dos testes criar a mesma coluna que a migration
+    # cria em produção, em vez de duas formas divergentes.
+    #
+    # Pesos 'A' no título e 'B' no corpo: é o que separa "artigo SOBRE
+    # amiloidose" de "artigo que a menciona uma vez". Ver a migration
+    # 006_news_palavras_chave.
+    busca_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('portuguese', coalesce(rewritten_title, '')), 'A') || "
+            "setweight(to_tsvector('portuguese', coalesce(rewritten_body,  '')), 'B')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     # --- Publicação ---
     # Quando o item passou a ser visível no feed. Distinto de `published_date`,
@@ -291,3 +313,32 @@ class DigestSend(Base):
     data_ref: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     article_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     enviado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserKeyword(Base):
+    """
+    Palavra-chave que o médico cadastrou para acompanhar.
+
+    EIXO SEPARADO DOS TEMAS, de propósito. Um tema é atribuído pelo tagger a
+    partir de um vocabulário fechado; uma palavra-chave casa contra o TEXTO do
+    artigo (`Article.busca_tsv`). Se palavra-chave fosse "um tema novo", o
+    tagger nunca a atribuiria a nada e o médico receberia zero destaques para
+    sempre — sem erro aparecer em lugar nenhum.
+
+    `termo` é gravado normalizado (trim + lower) pelo serviço; a unicidade por
+    usuário depende disso.
+    """
+
+    __tablename__ = "user_keywords"
+    __table_args__ = (
+        UniqueConstraint("user_id", "termo", name="uq_user_keywords_user_termo"),
+        Index("ix_user_keywords_termo", "termo"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    termo: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

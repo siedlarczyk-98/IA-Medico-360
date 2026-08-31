@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     # numero do dia; digest 1h depois, para o pipeline ter terminado.
     news_run_hour: int = 11
     news_digest_hour: int = 12
+    # Modelo do redator. CONFIGURAVEL, e nao constante no codigo: o repo antigo
+    # tinha essa variavel e producao a usava para rodar sonnet-5 em vez do
+    # padrao. Ao portar, o valor virou constante e teria REBAIXADO o redator
+    # sem ninguem perceber — justamente a peca que nao era para mudar.
+    news_writer_model: str = "claude-sonnet-5"
 
     # DOIS LIMIARES, DE PROPOSITO: navegar e barato, interromper e caro. O mesmo
     # score que justifica aparecer na lista nao justifica um e-mail. Ambos vivem
@@ -150,6 +155,23 @@ class Settings(BaseSettings):
     news_feed_minimo_itens: int = 5
     news_feed_janela_dias: int = 30
     news_digest_janela_dias: int = 2
+
+    # --- Palavras-chave do medico ---
+    # Teto por usuario. Sem limite, alguem cola 200 termos, tudo casa, e o filtro
+    # morre — que e o problema original de volta.
+    news_max_keywords: int = 10
+    # "IC" e "PA" trariam lixo; abaixo disto o termo e recusado na entrada.
+    news_keyword_min_chars: int = 4
+    # Piso de ts_rank. Com peso 'A' no titulo e 'B' no corpo, o artigo que FALA do
+    # termo fica muito acima do que o menciona de passagem; este numero corta o
+    # segundo. Nasce chute e vai precisar de calibragem com dado real.
+    news_keyword_rank_minimo: float = 0.05
+
+    # --- Sugestao social de temas ---
+    # Usuarios de uma especialidade que ja escolheram temas, a partir do qual a
+    # tela troca "Selecionamos para quem e de X" por "O que os colegas de X mais
+    # acompanham". Abaixo disso a frase social seria estatistica inventada.
+    news_min_amostra_social: int = 20
 
     @property
     def is_production(self) -> bool:

@@ -100,6 +100,13 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/news/favorites"): AUTENTICADA,
     ("POST", "/api/v1/news/favorites/toggle"): AUTENTICADA,
     ("POST", "/api/v1/news/feedback/nao-interessa"): AUTENTICADA,
+    # Palavras-chave: são a lista de interesses da pessoa, tão pessoal quanto os
+    # temas. O preview também exige token — sem isso, viraria um endpoint aberto
+    # de busca sobre todo o acervo, chamável em rajada por qualquer um.
+    ("GET", "/api/v1/news/me/keywords"): AUTENTICADA,
+    ("POST", "/api/v1/news/me/keywords"): AUTENTICADA,
+    ("DELETE", "/api/v1/news/me/keywords/{termo}"): AUTENTICADA,
+    ("GET", "/api/v1/news/keywords/preview"): AUTENTICADA,
     # Dispara coleta, tagging e redação — ou seja, gasta Anthropic e OpenAI.
     ("POST", "/api/v1/news/admin/pipeline"): ADMIN,
     # Uploads e uso

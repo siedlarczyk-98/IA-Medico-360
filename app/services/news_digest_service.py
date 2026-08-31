@@ -9,9 +9,10 @@ REGRAS QUE NÃO SÃO NEGOCIÁVEIS
 
 2. Item de PREENCHIMENTO nunca entra. O feed completa a tela com temas adjacentes
    para não deixá-la vazia (ver `news_feed_service`), mas aquilo é cortesia de
-   navegação, não motivo de interrupção. Aqui só conta o que casou com os temas
-   que o usuário escolheu — por isso este módulo NÃO reusa `montar_feed`, e sim
-   consulta os temas do usuário direto.
+   navegação, não motivo de interrupção. Aqui só conta o que a pessoa PEDIU:
+   temas que ela marcou e palavras-chave que ela cadastrou. Por isso este módulo
+   NÃO reusa `montar_feed` — ele consulta as duas fontes direto, sem passar
+   perto do preenchimento.
 
 3. Limiar mais alto que o do feed (`news_digest_score_minimo`). Navegar é barato,
    interromper é caro.
@@ -36,7 +37,7 @@ from app.models.news import (
     DigestSend,
     UserTopic,
 )
-from app.services import email_service
+from app.services import email_service, news_keyword_service
 from app.services.vigilancia_service import ACAO_DIGEST_NOTICIAS
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,26 @@ def quer_digest(prefs: UserPreference | None) -> bool:
     return bool(prefs.notification_prefs.get("news", {}).get("email"))
 
 
-async def _artigos_do_usuario(db: AsyncSession, user_id, desde: datetime) -> list[Article]:
-    """Artigos que casam com os temas ESCOLHIDOS pelo usuário, acima do limiar do digest."""
+async def _artigos_do_usuario(
+    db: AsyncSession, user_id, desde: datetime
+) -> list[tuple[Article, str | None]]:
+    """
+    O que o usuário PEDIU e apareceu na janela. Retorna (artigo, motivo).
+
+    Duas fontes, ambas legítimas para interromper alguém:
+
+      - temas escolhidos, acima do limiar do DIGEST (mais alto que o do feed);
+      - palavras-chave cadastradas — pedido explícito e deliberado, sinal ainda
+        mais forte que um tema pré-marcado.
+
+    O que NÃO entra é o item de preenchimento: aquilo é cortesia para a tela não
+    ficar vazia, e a pessoa nunca pediu por ele. É por isso que esta função não
+    reusa `montar_feed` — ela consulta as duas fontes direto, sem passar perto
+    do preenchimento.
+
+    `motivo` é o nome da palavra-chave quando o artigo veio por ela, e `None`
+    quando veio por tema. O e-mail usa isso para dizer o porquê.
+    """
     settings = get_settings()
 
     meus_temas = select(UserTopic.topic_id).where(UserTopic.user_id == user_id).scalar_subquery()
@@ -77,7 +96,19 @@ async def _artigos_do_usuario(db: AsyncSession, user_id, desde: datetime) -> lis
         .order_by(func.max(ArticleTopic.score).desc(), Article.visible_at.desc())
         .limit(MAX_ARTIGOS_POR_DIGEST)
     )
-    return list((await db.execute(stmt)).scalars())
+    achados: list[tuple[Article, str | None]] = [
+        (a, None) for a in (await db.execute(stmt)).scalars()
+    ]
+
+    termos = [k.termo for k in await news_keyword_service.listar(db, user_id)]
+    if termos:
+        vistos = {a.id for a, _ in achados}
+        por_palavra = await news_keyword_service.artigos_por_palavras(
+            db, termos, desde, limite=MAX_ARTIGOS_POR_DIGEST, excluir_ids=vistos
+        )
+        achados += [(a, palavras[0]) for a, palavras in por_palavra]
+
+    return achados[:MAX_ARTIGOS_POR_DIGEST]
 
 
 async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dict:
@@ -126,7 +157,7 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
         db.add(DigestSend(
             user_id=user.id,
             data_ref=data_ref,
-            article_ids=[a.id for a in artigos],
+            article_ids=[a.id for a, _ in artigos],
         ))
         try:
             await db.flush()

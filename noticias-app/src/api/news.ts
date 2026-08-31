@@ -21,6 +21,24 @@ export interface Tema {
   nome_pt: string;
 }
 
+export interface TemaSugerido extends Tema {
+  /** Titulos reais que o tema traria, mostrados no hover da linha. */
+  amostra: string[];
+  /** Fracao de colegas da especialidade que acompanham. So vem no modo social. */
+  percentual: number | null;
+}
+
+/**
+ * De onde vem a sugestao de temas.
+ *
+ * `curadoria` -> "Selecionamos para quem e de Cardiologia"
+ * `social`    -> "O que os colegas de Cardiologia mais acompanham"
+ *
+ * A troca e automatica quando ha colegas suficientes da especialidade. Enquanto
+ * nao ha, afirmar o que os colegas acompanham seria estatistica inventada.
+ */
+export type OrigemSugestao = 'curadoria' | 'social';
+
 export interface Highlight {
   id: number;
   journal_slug: string;
@@ -32,6 +50,8 @@ export interface Highlight {
   visible_at: string | null;
   /** Temas do usuário que casaram — o "por que estou vendo isto?" do card. */
   temas: TemaCasado[];
+  /** Palavras-chave do usuario que casaram com o TEXTO deste artigo. */
+  palavras: string[];
   /**
    * Item que entrou só para a tela não ficar vazia, vindo de temas adjacentes
    * à especialidade. Precisa ser exibido COMO TAL: é a diferença entre o
@@ -63,8 +83,22 @@ export interface ArticleDetail {
 export interface MeusTemas {
   ja_escolheu: boolean;
   selecionados: Tema[];
-  sugeridos: Tema[];
+  sugeridos: TemaSugerido[];
   disponiveis: Tema[];
+  origem_sugestao: OrigemSugestao;
+  especialidade: string | null;
+  /**
+   * Primeiro nome, para a tela cumprimentar a pessoa. Pode ser null: o SSO de
+   * embed cria o usuario so com e-mail, e o nome so existe para quem passou
+   * pelo onboarding do app principal.
+   */
+  primeiro_nome: string | null;
+}
+
+export interface PalavraChave {
+  termo: string;
+  /** Quantos destaques o termo traz hoje. Zero fica VISIVEL, nao silencioso. */
+  destaques: number;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -139,5 +173,36 @@ export function autenticarEmbed(email: string): Promise<{ access_token: string }
   return request<{ access_token: string }>('/auth/embed/token', {
     method: 'POST',
     body: JSON.stringify({ email }),
+  });
+}
+
+// ── Palavras-chave ──────────────────────────────────────────────────────────
+
+export function buscarPalavras(): Promise<PalavraChave[]> {
+  return request<PalavraChave[]>('/news/me/keywords');
+}
+
+/**
+ * Quantos destaques o termo traria, ANTES de salvar.
+ *
+ * E o que impede a palavra-chave de ser um ato de fe: quem digita "IC" ve zero
+ * na hora e corrige, em vez de descobrir em duas semanas que nunca chegou nada.
+ */
+export function preverPalavra(termo: string): Promise<{ termo: string; destaques: number }> {
+  return request<{ termo: string; destaques: number }>(
+    `/news/keywords/preview?termo=${encodeURIComponent(termo)}`
+  );
+}
+
+export function adicionarPalavra(termo: string): Promise<PalavraChave[]> {
+  return request<PalavraChave[]>('/news/me/keywords', {
+    method: 'POST',
+    body: JSON.stringify({ termo }),
+  });
+}
+
+export function removerPalavra(termo: string): Promise<PalavraChave[]> {
+  return request<PalavraChave[]>(`/news/me/keywords/${encodeURIComponent(termo)}`, {
+    method: 'DELETE',
   });
 }

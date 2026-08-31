@@ -287,7 +287,9 @@ def enviados(monkeypatch) -> list:
     capturados = []
 
     async def _fake(to_email, nome, artigos):
-        capturados.append((to_email, [a.id for a in artigos]))
+        # `artigos` e uma lista de (Article, motivo) desde que a palavra-chave
+        # entrou como segunda fonte do digest.
+        capturados.append((to_email, [a.id for a, _motivo in artigos]))
 
     monkeypatch.setattr(email_service, "send_news_digest", _fake)
     monkeypatch.setattr(news_digest_service.email_service, "send_news_digest", _fake)
@@ -420,3 +422,89 @@ async def test_sem_sendgrid_nao_estoura(db, user, monkeypatch):
     assert resumo["enviados"] == 1
     assert resumo["falhas"] == 0
     assert art.id is not None
+
+
+# ── Amostra de conteúdo e frase social (tela de escolha) ─────────────────────
+
+async def test_amostra_traz_titulos_reais_do_tema(db):
+    """
+    A amostra é o que transforma a tela de escolha de uma lista de rótulos
+    abstratos em evidência: o médico vê o que ganha antes de marcar.
+    """
+    ic = await _tema(db, "insuficiencia-cardiaca", [(CARDIO, CORE)])
+    await _publicado(db, "Novo inibidor de SGLT2 em ICFEp", [(ic, 0.95)])
+
+    amostras = await news_feed_service.amostra_por_tema(db, [ic.id])
+
+    assert amostras[ic.id] == ["Novo inibidor de SGLT2 em ICFEp"]
+
+
+async def test_tema_quieto_devolve_amostra_vazia(db):
+    """
+    Vazio NÃO é falha: quer dizer que o tema não teve destaque na janela. A tela
+    diz isso em vez de deixar a pessoa marcar e esperar por nada.
+    """
+    ic = await _tema(db, "insuficiencia-cardiaca", [(CARDIO, CORE)])
+
+    amostras = await news_feed_service.amostra_por_tema(db, [ic.id])
+
+    assert amostras.get(ic.id, []) == []
+
+
+async def test_amostra_respeita_a_janela(db):
+    ic = await _tema(db, "insuficiencia-cardiaca", [(CARDIO, CORE)])
+    art = await _publicado(db, "Destaque antigo demais", [(ic, 0.95)])
+    art.visible_at = datetime.now(UTC) - timedelta(days=400)
+    await db.flush()
+
+    amostras = await news_feed_service.amostra_por_tema(db, [ic.id])
+
+    assert amostras.get(ic.id, []) == []
+
+
+async def test_sem_colegas_a_frase_e_de_curadoria(db):
+    """
+    O pedido original era "os colegas de X costumam buscar". No lançamento não
+    existe esse dado — afirmar comportamento de colegas ali seria apresentar
+    invenção como fato, para médicos.
+    """
+    origem, percentuais = await news_feed_service.sugestao_social(db, CARDIO)
+
+    assert origem == news_feed_service.ORIGEM_CURADORIA
+    assert percentuais == {}
+
+
+async def test_com_colegas_suficientes_a_frase_vira_social(db, user_factory):
+    """
+    A mesma tela troca de texto sozinha quando o dado passa a existir — sem
+    deploy. É o que permite prometer o tom social sem mentir no dia 1.
+    """
+    ic = await _tema(db, "insuficiencia-cardiaca", [(CARDIO, CORE)])
+    limiar = news_feed_service.get_settings().news_min_amostra_social
+
+    for i in range(limiar):
+        colega = await user_factory(email=f"colega{i}@x.com")
+        colega.specialty = CARDIO
+        await db.flush()
+        await _escolhe(db, colega, [ic])
+
+    origem, percentuais = await news_feed_service.sugestao_social(db, CARDIO)
+
+    assert origem == news_feed_service.ORIGEM_SOCIAL
+    assert percentuais[ic.id] == 1.0
+
+
+async def test_um_colega_a_menos_ainda_e_curadoria(db, user_factory):
+    """Limiar é limiar: com 19 de 20, a estatística ainda seria frágil demais."""
+    ic = await _tema(db, "insuficiencia-cardiaca", [(CARDIO, CORE)])
+    limiar = news_feed_service.get_settings().news_min_amostra_social
+
+    for i in range(limiar - 1):
+        colega = await user_factory(email=f"quase{i}@x.com")
+        colega.specialty = CARDIO
+        await db.flush()
+        await _escolhe(db, colega, [ic])
+
+    origem, _ = await news_feed_service.sugestao_social(db, CARDIO)
+
+    assert origem == news_feed_service.ORIGEM_CURADORIA

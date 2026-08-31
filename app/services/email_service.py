@@ -58,7 +58,12 @@ async def send_invite(to_email: str, invite_url: str) -> None:
 
 async def send_news_digest(to_email: str, nome: str | None, artigos: list) -> None:
     """
-    Digest diário dos destaques que casaram com os temas do usuário.
+    Digest diário dos destaques que o usuário pediu.
+
+    `artigos` é uma lista de `(Article, motivo)`, onde `motivo` é o nome da
+    palavra-chave que trouxe o item, ou `None` se ele veio por tema. Dizer o
+    porquê dentro do e-mail não é enfeite: é o que permite à pessoa saber
+    exatamente o que desligar, se aquilo estiver incomodando.
 
     Só é chamado quando há pelo menos um artigo: "nada para você hoje" seria
     justamente o ruído que o módulo de notícias existe para eliminar. Ver
@@ -69,7 +74,12 @@ async def send_news_digest(to_email: str, nome: str | None, artigos: list) -> No
 
     saudacao = f"Olá, {nome.split()[0]}!" if nome else "Olá!"
     plural = "s" if len(artigos) > 1 else ""
-    itens = "\n\n".join(f"- {a.rewritten_title}\n  {base}/artigo/{a.id}" for a in artigos)
+    itens = "\n\n".join(
+        f"- {a.rewritten_title}"
+        + (f'\n  (porque você acompanha "{motivo}")' if motivo else "")
+        + f"\n  {base}/artigo/{a.id}"
+        for a, motivo in artigos
+    )
 
     corpo = (
         f"{saudacao}\n\n"

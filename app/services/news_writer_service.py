@@ -41,7 +41,6 @@ from app.news.journals import JOURNALS_BY_SLUG
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODELO = "claude-sonnet-4-5"
 MAX_TOKENS = 1500
 
 SYSTEM_PROMPT = """\
@@ -113,7 +112,7 @@ async def redigir(article: Article, journal: str, timeout: int = 60) -> tuple[st
     prompt = _prompt_usuario(article, journal)
 
     payload = {
-        "model": MODELO,
+        "model": settings.news_writer_model,
         "max_tokens": MAX_TOKENS,
         "system": SYSTEM_PROMPT,
         "tools": [TOOL_SCHEMA],
@@ -128,7 +127,7 @@ async def redigir(article: Article, journal: str, timeout: int = 60) -> tuple[st
         "content-type": "application/json",
     }
 
-    async with async_llm_span("anthropic", MODELO, prompt):
+    async with async_llm_span("anthropic", settings.news_writer_model, prompt):
         resp = await client.post(ANTHROPIC_URL, headers=headers, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()

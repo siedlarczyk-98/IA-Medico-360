@@ -14,6 +14,20 @@ class TemaOut(BaseModel):
     nome_pt: str
 
 
+class TemaSugeridoOut(BaseModel):
+    """Tema sugerido, com uma amostra do que ele traria (usada no hover)."""
+
+    id: UUID
+    slug: str
+    nome_pt: str
+    # Títulos reais que o tema traria, para o hover na tela de escolha. Vazio
+    # NÃO é falha: quer dizer que o tema não teve destaque na janela.
+    amostra: list[str] = Field(default_factory=list)
+    # Fração de colegas da especialidade que acompanham este tema. Só vem
+    # preenchido quando há amostra suficiente — ver `sugestao_social`.
+    percentual: float | None = None
+
+
 class TemaCasadoOut(BaseModel):
     """Tema do usuário que casou com o artigo — o 'por que estou vendo isto?'."""
 
@@ -39,6 +53,9 @@ class HighlightOut(BaseModel):
     published_date: datetime | None
     visible_at: datetime | None
     temas: list[TemaCasadoOut] = Field(default_factory=list)
+    # Palavras-chave do usuário que casaram com o texto deste artigo. Eixo
+    # separado dos temas — o card mostra as duas coisas de formas distintas.
+    palavras: list[str] = Field(default_factory=list)
     # A flag que o digest lê para NUNCA interromper alguém por um item que só
     # estava ali para a tela não ficar vazia. Ver `news_feed_service`.
     preenchimento: bool = False
@@ -77,8 +94,17 @@ class MeusTemasOut(BaseModel):
 
     ja_escolheu: bool
     selecionados: list[TemaOut]
-    sugeridos: list[TemaOut]
+    sugeridos: list[TemaSugeridoOut]
     disponiveis: list[TemaOut]
+    # "curadoria" ou "social". Decide a frase de abertura da tela: enquanto não
+    # há colegas suficientes da especialidade, afirmar o que eles acompanham
+    # seria estatística inventada. Ver `news_feed_service.sugestao_social`.
+    origem_sugestao: str
+    especialidade: str | None = None
+    # Primeiro nome, para a tela cumprimentar a pessoa. Pode ser None: o SSO de
+    # embed cria o usuário só com e-mail, e o nome só existe para quem passou
+    # pelo onboarding do app principal. A tela precisa funcionar sem ele.
+    primeiro_nome: str | None = None
 
 
 class MeusTemasIn(BaseModel):
@@ -104,3 +130,20 @@ class FavoritoToggleIn(BaseModel):
 class NaoInteressaIn(BaseModel):
     article_id: int
     topic_slug: str | None = None
+
+
+class PalavraChaveOut(BaseModel):
+    termo: str
+    # Quantos destaques o termo traz na janela atual. É o que impede a palavra-
+    # chave de ser um ato de fé: um termo que não casa com nada fica visível
+    # como tal, em vez de o usuário concluir dias depois que o produto quebrou.
+    destaques: int
+
+
+class PalavraChaveIn(BaseModel):
+    termo: str
+
+
+class PreviaPalavraChaveOut(BaseModel):
+    termo: str
+    destaques: int

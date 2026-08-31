@@ -39,12 +39,16 @@ from app.schemas.news import (
     MeusTemasIn,
     MeusTemasOut,
     NaoInteressaIn,
+    PalavraChaveIn,
+    PalavraChaveOut,
     PreferenciasNoticiasIn,
     PreferenciasNoticiasOut,
+    PreviaPalavraChaveOut,
     TemaCasadoOut,
     TemaOut,
+    TemaSugeridoOut,
 )
-from app.services import news_feed_service
+from app.services import news_feed_service, news_keyword_service
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +115,7 @@ async def listar_highlights(
                 published_date=i.article.published_date,
                 visible_at=i.article.visible_at,
                 temas=[TemaCasadoOut(slug=s, nome_pt=n) for s, n in i.temas],
+                palavras=i.palavras,
                 preenchimento=i.preenchimento,
             )
             for i in itens
@@ -158,14 +163,35 @@ async def meus_temas(
     ))
     sugeridos = await news_feed_service.temas_sugeridos_para(db, user.specialty)
 
+    # A amostra é o que faz a tela de escolha mostrar CONTEÚDO, e não só
+    # rótulos. Uma query para todos os temas, não uma por tema.
+    amostras = await news_feed_service.amostra_por_tema(db, [t.id for t in sugeridos])
+    origem, percentuais = await news_feed_service.sugestao_social(db, user.specialty)
+
+    # Com dado social, a ordem passa a ser a dos colegas; sem ele, alfabética.
+    if origem == news_feed_service.ORIGEM_SOCIAL:
+        sugeridos = sorted(sugeridos, key=lambda t: percentuais.get(t.id, 0), reverse=True)
+
     prefs = await _preferencias(db, user)
     ja_escolheu = bool((prefs.ui_settings or {}).get("news_topics_escolhidos"))
 
     return MeusTemasOut(
         ja_escolheu=ja_escolheu,
         selecionados=[TemaOut.model_validate(t) for t in selecionados],
-        sugeridos=[TemaOut.model_validate(t) for t in sugeridos],
+        sugeridos=[
+            TemaSugeridoOut(
+                id=t.id,
+                slug=t.slug,
+                nome_pt=t.nome_pt,
+                amostra=amostras.get(t.id, []),
+                percentual=percentuais.get(t.id),
+            )
+            for t in sugeridos
+        ],
         disponiveis=[TemaOut.model_validate(t) for t in disponiveis],
+        origem_sugestao=origem,
+        especialidade=user.specialty,
+        primeiro_nome=user.name.split()[0] if user.name else None,
     )
 
 
@@ -297,6 +323,80 @@ async def nao_interessa(
     except IntegrityError:
         # Já havia reclamado deste artigo. Reclamar duas vezes não é erro.
         await db.rollback()
+
+
+# ── Palavras-chave ───────────────────────────────────────────────────────────
+
+@router.get("/me/keywords", response_model=list[PalavraChaveOut])
+async def listar_palavras(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PalavraChaveOut]:
+    """
+    Os termos que a pessoa acompanha, cada um com quantos destaques traz HOJE.
+
+    A contagem vem junto de propósito: um termo que parou de casar com qualquer
+    coisa fica visível como tal na tela, em vez de silenciosamente não entregar
+    nada. Sem isso, palavra-chave é um ato de fé.
+    """
+    termos = await news_keyword_service.listar(db, user.id)
+    return [
+        PalavraChaveOut(
+            termo=k.termo,
+            destaques=await news_keyword_service.contar_destaques(db, k.termo),
+        )
+        for k in termos
+    ]
+
+
+@router.get("/keywords/preview", response_model=PreviaPalavraChaveOut)
+async def prever_palavra(
+    termo: str = Query(min_length=1, max_length=80),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PreviaPalavraChaveOut:
+    """
+    Quantos destaques o termo traria, ANTES de salvar.
+
+    É a peça que mata a falha silenciosa no nascimento: quem digita "IC" vê zero
+    na hora e corrige para "insuficiência cardíaca", em vez de descobrir em duas
+    semanas que nunca chegou nada e concluir que o produto não presta.
+    """
+    try:
+        limpo = news_keyword_service.validar(termo)
+    except news_keyword_service.TermoInvalido as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    return PreviaPalavraChaveOut(
+        termo=limpo,
+        destaques=await news_keyword_service.contar_destaques(db, limpo),
+    )
+
+
+@router.post("/me/keywords", response_model=list[PalavraChaveOut], status_code=status.HTTP_201_CREATED)
+async def adicionar_palavra(
+    body: PalavraChaveIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PalavraChaveOut]:
+    try:
+        await news_keyword_service.adicionar(db, user.id, body.termo)
+    except news_keyword_service.TermoInvalido as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    await db.commit()
+    return await listar_palavras(user=user, db=db)
+
+
+@router.delete("/me/keywords/{termo}", response_model=list[PalavraChaveOut])
+async def remover_palavra(
+    termo: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PalavraChaveOut]:
+    await news_keyword_service.remover(db, user.id, termo)
+    await db.commit()
+    return await listar_palavras(user=user, db=db)
 
 
 # ── Administração do pipeline ────────────────────────────────────────────────
