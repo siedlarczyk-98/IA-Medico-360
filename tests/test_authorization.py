@@ -86,6 +86,22 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # Exceção entre as LPs: esta é o formulário exibido DENTRO do produto,
     # e declara Depends(get_current_user).
     ("POST", "/api/v1/landing-pages/calculators/submit"): AUTENTICADA,
+    # Notícias. TUDO autenticado, sem exceção: o feed é personalizado, e a
+    # versão anterior deste módulo identificava o leitor por `?email=` na query
+    # string — forjável, e portanto suficiente para ler e alterar os temas de
+    # outra pessoa. A leitura só parecia inofensiva enquanto o conteúdo era o
+    # mesmo para todos.
+    ("GET", "/api/v1/news/highlights"): AUTENTICADA,
+    ("GET", "/api/v1/news/articles/{article_id}"): AUTENTICADA,
+    ("GET", "/api/v1/news/me/topics"): AUTENTICADA,
+    ("PUT", "/api/v1/news/me/topics"): AUTENTICADA,
+    ("GET", "/api/v1/news/me/preferences"): AUTENTICADA,
+    ("PUT", "/api/v1/news/me/preferences"): AUTENTICADA,
+    ("GET", "/api/v1/news/favorites"): AUTENTICADA,
+    ("POST", "/api/v1/news/favorites/toggle"): AUTENTICADA,
+    ("POST", "/api/v1/news/feedback/nao-interessa"): AUTENTICADA,
+    # Dispara coleta, tagging e redação — ou seja, gasta Anthropic e OpenAI.
+    ("POST", "/api/v1/news/admin/pipeline"): ADMIN,
     # Uploads e uso
     ("POST", "/api/v1/uploads/extract"): AUTENTICADA,
     ("GET", "/api/v1/users/usage"): AUTENTICADA,

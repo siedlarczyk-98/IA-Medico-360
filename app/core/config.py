@@ -127,6 +127,30 @@ class Settings(BaseSettings):
     calculator_extraction_max_concurrency: int = 8
     calculator_extraction_timeout_seconds: int = 15
 
+    # --- Notícias ---
+    # Frontend do modulo (noticias-app), usado nos links do digest por e-mail.
+    noticias_url: str = "http://localhost:5176"
+    news_enabled: bool = True
+    # A NCBI pede que ferramentas automatizadas se identifiquem; sem isso um pico
+    # de trafego nosso vira bloqueio por IP sem que ninguem consiga nos avisar.
+    ncbi_contact_email: str = ""
+    # Horarios em UTC. 11h UTC = 8h BRT, depois que os journals ja publicaram o
+    # numero do dia; digest 1h depois, para o pipeline ter terminado.
+    news_run_hour: int = 11
+    news_digest_hour: int = 12
+
+    # DOIS LIMIARES, DE PROPOSITO: navegar e barato, interromper e caro. O mesmo
+    # score que justifica aparecer na lista nao justifica um e-mail. Ambos vivem
+    # em configuracao porque nascem como chute e vao precisar de calibragem com
+    # dado real — e calibrar nao pode exigir deploy.
+    news_feed_score_minimo: float = 0.3
+    news_digest_score_minimo: float = 0.6
+    # Abaixo disto o feed completa com temas adjacentes, marcados como
+    # preenchimento. Ver `news_feed_service.montar_feed`.
+    news_feed_minimo_itens: int = 5
+    news_feed_janela_dias: int = 30
+    news_digest_janela_dias: int = 2
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

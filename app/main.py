@@ -31,7 +31,7 @@ from app.core.error_tracking import setup_sentry
 from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.telemetry import setup_phoenix
 from app.middleware import ner
-from app.services import expurgo_agendado, vigilancia_agendada
+from app.services import expurgo_agendado, news_agendado, vigilancia_agendada
 
 settings = get_settings()
 
@@ -69,8 +69,13 @@ async def lifespan(app: FastAPI):
     # rodando). O cache semantico ficou meses desligado porque o dado existia
     # e ninguem consultava. Ver app/services/vigilancia_agendada.py.
     tarefa_vigilancia = vigilancia_agendada.iniciar()
+    # Pipeline de noticias no processo, e nao num Cron Job do painel: o modulo
+    # veio de um repo onde ele era exatamente isso, e este projeto ja perdeu 39
+    # dias de expurgo com um agendador que parou sem avisar.
+    tarefa_noticias = news_agendado.iniciar()
     yield
     # Shutdown
+    await news_agendado.parar(tarefa_noticias)
     await vigilancia_agendada.parar(tarefa_vigilancia)
     await expurgo_agendado.parar(tarefa_expurgo)
     await http_client.shutdown()

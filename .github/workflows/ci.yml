@@ -116,6 +116,26 @@ jobs:
       - run: npx tsc -b --noEmit
       - run: npm run build
 
+  noticias-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: noticias-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          # O lockfile precisa ser gerado em Linux: o npm no Windows nao registra
+          # as dependencias opcionais de plataforma, e `npm ci` recusa o lock como
+          # incompleto. Mesma armadilha que ja derrubou o CI do repo de origem.
+          cache-dependency-path: noticias-app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b --noEmit
+      - run: npm run build
+
   # E2E depende de Postgres + backend rodando + usuário/calculadoras seedados
   # (ver calculadoras-app/e2e/helpers/auth.ts). Toda essa infra está automatizada
   # nos steps abaixo, então o job é bloqueante como os outros três.

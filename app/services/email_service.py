@@ -54,3 +54,44 @@ async def send_invite(to_email: str, invite_url: str) -> None:
         ),
     )
     await asyncio.to_thread(sg.send, message)
+
+
+async def send_news_digest(to_email: str, nome: str | None, artigos: list) -> None:
+    """
+    Digest diário dos destaques que casaram com os temas do usuário.
+
+    Só é chamado quando há pelo menos um artigo: "nada para você hoje" seria
+    justamente o ruído que o módulo de notícias existe para eliminar. Ver
+    `app/services/news_digest_service.py`.
+    """
+    settings = get_settings()
+    base = settings.noticias_url.rstrip("/")
+
+    saudacao = f"Olá, {nome.split()[0]}!" if nome else "Olá!"
+    plural = "s" if len(artigos) > 1 else ""
+    itens = "\n\n".join(f"- {a.rewritten_title}\n  {base}/artigo/{a.id}" for a in artigos)
+
+    corpo = (
+        f"{saudacao}\n\n"
+        f"{len(artigos)} novo{plural} destaque{plural} dos seus temas:\n\n"
+        f"{itens}\n\n"
+        f"Ver tudo: {base}\n\n"
+        f"Para não receber mais estes e-mails, ajuste suas preferências em {base}/preferencias"
+    )
+
+    if not settings.sendgrid_api_key:
+        # Só ocorre sem SendGrid configurado (ambiente local); em produção a chave existe.
+        logger.warning("[DEV] Digest de notícias para %s:\n%s", to_email, corpo)
+        return
+
+    import sendgrid
+    from sendgrid.helpers.mail import Mail
+
+    sg = sendgrid.SendGridAPIClient(api_key=settings.sendgrid_api_key)
+    message = Mail(
+        from_email=settings.sendgrid_from_email,
+        to_emails=to_email,
+        subject=f"{len(artigos)} destaque{plural} dos seus temas — Médico 360",
+        plain_text_content=corpo,
+    )
+    await asyncio.to_thread(sg.send, message)

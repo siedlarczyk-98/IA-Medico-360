@@ -37,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AuditLog, Interaction, SemanticCache
+from app.models.news import Article, ArticleTopic
 from app.services.orquestrador_modes import MODOS_CACHEAVEIS
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,30 @@ ATRASO_TOLERADO_EXPURGO_DIAS = 2
 # que permite responder "quando o expurgo rodou pela última vez?" olhando o
 # banco, e não a memória de quem estava de plantão.
 ACAO_EXPURGO = "expurgo.rodada"
+
+# Ação gravada a cada rodada de digest de notícias. Heartbeat, não estatística:
+# "zero e-mails enviados" é o comportamento correto num dia sem match, e sem
+# este rastro seria indistinguível de "a tarefa parou".
+ACAO_DIGEST_NOTICIAS = "noticias.digest.rodada"
+
+# --- Notícias -------------------------------------------------------------
+
+# Fração de artigos publicados na janela SEM nenhum tema atribuído a partir da
+# qual se conclui que o tagger quebrou. Metade é grosseiro de propósito: um
+# artigo ocasional que a taxonomia não cobre é normal e esperado; metade do
+# acervo sem tema é defeito.
+FRACAO_SEM_TEMA_ALARME = 0.5
+
+# Artigos publicados mínimos antes de afirmar qualquer coisa sobre o tagger.
+# Com menos, "todos sem tema" é indistinguível de "publicamos dois esta semana".
+MIN_AMOSTRA_NOTICIAS = 5
+
+# Dias sem publicar destaque nenhum antes de alarmar. A coleta roda de segunda a
+# sexta, então 4 dias cobre um fim de semana prolongado sem falso positivo.
+DIAS_SEM_PUBLICAR_ALARME = 4
+
+# Mesma tolerância do expurgo, e pelo mesmo motivo: um dia é ruído de deploy.
+ATRASO_TOLERADO_DIGEST_DIAS = 2
 
 
 def _desde(dias: int) -> datetime:
@@ -178,12 +203,67 @@ async def medir_ultimo_expurgo(db: AsyncSession) -> dict:
     }
 
 
+async def medir_noticias(db: AsyncSession, janela_dias: int = JANELA_DIAS) -> dict:
+    """
+    O feed personalizado ainda funciona? Só leitura.
+
+    A FALHA QUE ISTO EXISTE PARA PEGAR
+    Se o tagger parar (mudança de modelo, resposta fora do vocabulário, timeout
+    silencioso), os artigos entram sem tema. Tema nenhum casa com usuário nenhum,
+    e o feed de todos esvazia devagar — enquanto coleta, redação e publicação
+    continuam reportando sucesso. É a assinatura exata do cache semântico, que
+    ficou meses desligado porque nada apontava.
+
+    Mede quatro coisas porque uma só não distingue os casos:
+      - `publicados`: destaques que foram ao ar na janela.
+      - `sem_tema`: quantos deles não receberam nenhum tema.
+      - `dias_sem_publicar`: o pipeline inteiro pode ter parado antes do tagger.
+      - `digest_*`: heartbeat da tarefa de e-mail, que num dia sem match não
+        deixa nenhum outro rastro.
+    """
+    desde = _desde(janela_dias)
+
+    publicados = (await db.execute(
+        select(func.count())
+        .select_from(Article)
+        .where(Article.status == "published", Article.visible_at >= desde)
+    )).scalar_one()
+
+    sem_tema = (await db.execute(
+        select(func.count())
+        .select_from(Article)
+        .where(
+            Article.status == "published",
+            Article.visible_at >= desde,
+            ~select(ArticleTopic.id)
+            .where(ArticleTopic.article_id == Article.id)
+            .exists(),
+        )
+    )).scalar_one()
+
+    ultimo = (await db.execute(select(func.max(Article.visible_at)))).scalar_one()
+    ultimo_digest = (await db.execute(
+        select(func.max(AuditLog.created_at)).where(AuditLog.action == ACAO_DIGEST_NOTICIAS)
+    )).scalar_one()
+
+    return {
+        "janela_dias": janela_dias,
+        "publicados": publicados,
+        "sem_tema": sem_tema,
+        "fracao_sem_tema": round(sem_tema / publicados, 4) if publicados else 0.0,
+        "dias_sem_publicar": (datetime.now(UTC) - ultimo).days if ultimo else None,
+        "digest_nunca_rodou": ultimo_digest is None,
+        "dias_desde_digest": (datetime.now(UTC) - ultimo_digest).days if ultimo_digest else None,
+    }
+
+
 async def medir_tudo(db: AsyncSession) -> dict:
-    """As três medições numa leitura só, para o laço e para o script de diagnóstico."""
+    """Todas as medições numa leitura só, para o laço e para o script de diagnóstico."""
     return {
         "cache": await medir_cache_semantico(db),
         "custo": await medir_custo(db),
         "expurgo": await medir_ultimo_expurgo(db),
+        "noticias": await medir_noticias(db),
     }
 
 
@@ -242,6 +322,65 @@ def avaliar(medicoes: dict) -> list[dict]:
                 f"(último em {expurgo['ultimo_em']})."
             ),
             "contexto": expurgo,
+        })
+
+    alarmes += _avaliar_noticias(medicoes.get("noticias"))
+
+    return alarmes
+
+
+def _avaliar_noticias(noticias: dict | None) -> list[dict]:
+    """
+    Alarmes do módulo de notícias. Separado de `avaliar` só por tamanho — a
+    função continua pura e testável sem banco.
+    """
+    if not noticias:
+        return []
+
+    alarmes: list[dict] = []
+
+    if (
+        noticias["publicados"] >= MIN_AMOSTRA_NOTICIAS
+        and noticias["fracao_sem_tema"] >= FRACAO_SEM_TEMA_ALARME
+    ):
+        alarmes.append({
+            "tag": "noticias_tagger_sem_tema",
+            "mensagem": (
+                f"{noticias['sem_tema']} de {noticias['publicados']} destaques publicados nos "
+                f"últimos {noticias['janela_dias']} dias ficaram sem nenhum tema "
+                f"({noticias['fracao_sem_tema']:.0%}). O tagger provavelmente parou — sem tema, "
+                "o artigo não casa com nenhum usuário e o feed de todos esvazia em silêncio."
+            ),
+            "contexto": noticias,
+        })
+
+    dias = noticias["dias_sem_publicar"]
+    if dias is not None and dias > DIAS_SEM_PUBLICAR_ALARME:
+        alarmes.append({
+            "tag": "noticias_pipeline_parado",
+            "mensagem": (
+                f"Nenhum destaque publicado há {dias} dias. Coleta, tagger ou redator pararam."
+            ),
+            "contexto": noticias,
+        })
+
+    if noticias["digest_nunca_rodou"]:
+        alarmes.append({
+            "tag": "noticias_digest_sem_rastro",
+            "mensagem": (
+                "Nenhuma rodada de digest de notícias registrada em audit_logs. "
+                "A tarefa agendada pode não estar rodando."
+            ),
+            "contexto": noticias,
+        })
+    elif noticias["dias_desde_digest"] > ATRASO_TOLERADO_DIGEST_DIAS:
+        alarmes.append({
+            "tag": "noticias_digest_parado",
+            "mensagem": (
+                f"Digest de notícias não roda há {noticias['dias_desde_digest']} dias. "
+                "Zero e-mails num dia sem match é esperado; a tarefa não rodar, não."
+            ),
+            "contexto": noticias,
         })
 
     return alarmes
