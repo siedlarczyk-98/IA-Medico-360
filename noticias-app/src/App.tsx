@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { autenticarEmbed, buscarMeusTemas } from './api/news';
-import { clearToken, isAuthenticated, isTokenExpired, setToken, tokenEhDeOutroEmail } from './lib/auth';
+import { clearToken, isAuthenticated, isTokenExpired, setToken, tokenPertenceA } from './lib/auth';
 
 type Estado =
   | { fase: 'carregando' }
@@ -37,7 +37,7 @@ export default function App() {
         // abrir o LMS no mesmo navegador herdaria a sessão do primeiro e veria
         // o feed, os temas e os favoritos dele até o token vencer.
         const precisaAutenticar =
-          !isAuthenticated() || isTokenExpired() || (!!email && tokenEhDeOutroEmail(email));
+          !isAuthenticated() || isTokenExpired() || (!!email && !tokenPertenceA(email));
 
         if (precisaAutenticar) {
           if (!email) {

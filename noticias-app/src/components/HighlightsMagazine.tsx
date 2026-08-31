@@ -1,18 +1,19 @@
 /**
- * HighlightsMagazine — Opção B (magazine hero)
+ * HighlightsMagazine — a revista de destaques.
  * ---------------------------------------------------------------------------
- * Layout escolhido após comparação visual: o highlight de HOJE vira um "hero"
- * editorial grande no topo; os demais aparecem como uma lista compacta
- * abaixo, com chips de dia da semana como filtro rápido e busca por texto.
+ * O destaque de HOJE vira um "hero" editorial no topo; os demais aparecem como
+ * lista compacta, com chips de journal como filtro rapido e busca por texto.
  *
- * Fontes de dados:
- *   - Conteúdo dos posts: API pública do WordPress (wp-json/wp/v2/posts)
- *   - Favoritos e o `article_id` interno: API própria (app/server.py no Railway)
+ * FONTE DE DADOS: a API do proprio Medico 360 (`/api/v1/news/*`). O WordPress
+ * saiu — o texto sempre esteve no nosso Postgres, e um CMS que serve a mesma
+ * pagina para todos nao consegue entregar um feed personalizado por usuario.
  *
- * Identificação do usuário: e-mail vem da query string (?email=...), passado
- * pelo LMS ao montar a URL do iframe. Sem esse parâmetro, a página funciona
- * normalmente mas o botão de favoritar fica desabilitado (não há como
- * persistir sem um identificador).
+ * IDENTIDADE: JWT, obtido pelo SSO de embed em App.tsx. O `?email=` da URL e
+ * apenas a semente dessa troca, nao a identidade em si.
+ *
+ * O HERO NUNCA E UM ITEM DE PREENCHIMENTO: dar destaque de capa a um item que
+ * so entrou para a tela nao ficar vazia seria vende-lo como relevante quando
+ * ele nao e.
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import DOMPurify from "dompurify";
@@ -283,13 +284,16 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
  * Responde "por que estou vendo isto?" — o que torna o filtro confiavel e o que
  * permite depurar a taxonomia com base em reclamacao real.
  */
-function Temas({ item }: { item: HighlightItem }) {
+function Temas({ item, sobreEscuro = false }: { item: HighlightItem; sobreEscuro?: boolean }) {
   if (item.preenchimento) {
     return <span style={styles.tagPreenchimento}>fora dos seus temas</span>;
   }
   if (!item.temas.length) return null;
   return (
-    <span style={styles.tagTemas}>
+    // O hero tem fundo em degrade escuro; a cor padrao da etiqueta (azul
+    // petroleo) fica ilegivel ali. Uma variante clara, e nao uma cor unica de
+    // compromisso que ficaria fraca nos dois lugares.
+    <span style={sobreEscuro ? styles.tagTemasClaro : styles.tagTemas}>
       {item.temas.slice(0, 3).map((t) => t.nome).join(" · ")}
     </span>
   );
@@ -314,7 +318,7 @@ function Hero({
       <span style={styles.heroEyebrow}>Destaque de hoje{item.journal ? ` · ${item.journal.displayName}` : ""}</span>
       <h1 style={styles.heroTitle}>{item.title}</h1>
       <p style={styles.heroExcerpt}>{item.resumo ?? ""}</p>
-      <Temas item={item} />
+      <Temas item={item} sobreEscuro />
       <div style={styles.heroActions}>
         <button type="button" onClick={onOpen} style={styles.heroCta}>
           Ler o destaque completo →
@@ -538,6 +542,13 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#014751",
     opacity: 0.8,
+  },
+  tagTemasClaro: {
+    display: "block",
+    marginBottom: 16,
+    fontSize: 12,
+    letterSpacing: "0.02em",
+    color: "#aef6c6",
   },
   tagPreenchimento: {
     display: "inline-block",

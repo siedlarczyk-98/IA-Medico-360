@@ -20,16 +20,22 @@ export function clearToken(): void {
 }
 
 /**
- * O token guardado é de outra pessoa?
+ * O token guardado é COMPROVADAMENTE desta pessoa?
  *
  * Importa porque o feed é PERSONALIZADO. Num navegador compartilhado — uma
  * estação de clínica, um plantão — o segundo usuário a abrir o LMS herdaria a
  * sessão do primeiro e veria o feed dele, incluindo favoritos e temas, até o
  * token expirar. Enquanto o conteúdo era o mesmo para todos, isso não aparecia.
+ *
+ * Dono desconhecido conta como NÃO comprovado, e portanto reautentica. A
+ * primeira versão desta função perguntava "é de outra pessoa?" e respondia
+ * `false` quando não havia dono registrado — o que fazia todo token criado
+ * antes deste controle sobreviver a uma troca de usuário. Reautenticar é uma
+ * requisição; herdar a sessão de outra pessoa não tem conserto barato.
  */
-export function tokenEhDeOutroEmail(email: string): boolean {
+export function tokenPertenceA(email: string): boolean {
   const guardado = localStorage.getItem(EMAIL_KEY);
-  return guardado !== null && guardado !== email.trim().toLowerCase();
+  return guardado !== null && guardado === email.trim().toLowerCase();
 }
 
 export function isAuthenticated(): boolean {
