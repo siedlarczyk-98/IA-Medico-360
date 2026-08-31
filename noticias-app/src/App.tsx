@@ -82,6 +82,8 @@ export default function App() {
       <TemasPage
         primeiraVez={estado.primeiraVez}
         aoConcluir={() => setEstado({ fase: 'feed' })}
+        // Sair sem salvar so faz sentido para quem ja tem um feed para voltar.
+        aoCancelar={estado.primeiraVez ? undefined : () => setEstado({ fase: 'feed' })}
       />
     );
   }

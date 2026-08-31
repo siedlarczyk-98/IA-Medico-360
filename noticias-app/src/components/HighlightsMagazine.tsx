@@ -207,6 +207,8 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
 
   return (
     <div style={styles.page}>
+      <TopBar verTudo={verTudo} onVerTudo={setVerTudo} aoEditarTemas={aoEditarTemas} />
+
       {aviso && !loading && (
         <div style={styles.avisoVazio}>
           <strong style={{ display: "block", marginBottom: 4 }}>{aviso.titulo}</strong>
@@ -234,17 +236,6 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
         onSearchChange={setSearchQuery}
         todayJournalSlug={todayJournalSlug}
       />
-
-      <div style={styles.barraModo}>
-        <button type="button" onClick={aoEditarTemas} style={styles.botaoSecundario}>
-          Meus temas
-        </button>
-        {/* A valvula de escape. Sem ela o filtro vira caixa-preta e a primeira
-            reclamacao e "sumiu conteudo", sem como o usuario verificar. */}
-        <button type="button" onClick={() => setVerTudo((v) => !v)} style={styles.botaoSecundario}>
-          {verTudo ? "Ver so os meus temas" : "Ver tudo"}
-        </button>
-      </div>
 
       <div style={styles.list}>
         {loading && <StatusMessage text="Carregando destaques..." />}
@@ -274,6 +265,56 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
       </div>
 
       {selectedItem && <DetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />}
+    </div>
+  );
+}
+
+/**
+ * Barra de escopo do feed.
+ *
+ * "Para voce" e "Tudo" sao o MESMO eixo — o que a lista esta mostrando — entao
+ * viram um seletor segmentado, e nao dois botoes soltos: um controle so, com
+ * uma metade acesa, deixa obvio que sao alternativas excludentes.
+ *
+ * "Editar temas" e outro eixo (configuracao, nao filtragem) e por isso fica
+ * separado, do outro lado. A versao anterior empilhava os tres como pilulas
+ * iguais numa fileira propria, o que sugeria que eram tres filtros irmaos dos
+ * chips de journal logo acima.
+ *
+ * "Tudo" e a valvula de escape do filtro: sem ela, a primeira reclamacao e
+ * "sumiu conteudo" e o usuario nao tem como verificar.
+ */
+function TopBar({
+  verTudo,
+  onVerTudo,
+  aoEditarTemas,
+}: {
+  verTudo: boolean;
+  onVerTudo: (v: boolean) => void;
+  aoEditarTemas: () => void;
+}) {
+  return (
+    <div style={styles.topBar}>
+      <div style={styles.segmentado} role="tablist" aria-label="Escopo do feed">
+        {[
+          { rotulo: "Para voce", ativo: !verTudo, valor: false },
+          { rotulo: "Tudo", ativo: verTudo, valor: true },
+        ].map((op) => (
+          <button
+            key={op.rotulo}
+            type="button"
+            role="tab"
+            aria-selected={op.ativo}
+            onClick={() => onVerTudo(op.valor)}
+            style={{ ...styles.segItem, ...(op.ativo ? styles.segItemAtivo : {}) }}
+          >
+            {op.rotulo}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={aoEditarTemas} style={styles.acaoTemas}>
+        Editar meus temas
+      </button>
     </div>
   );
 }
@@ -526,15 +567,48 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     textDecoration: "underline",
   },
-  barraModo: { display: "flex", gap: 8, margin: "0 0 16px" },
-  botaoSecundario: {
-    padding: "6px 12px",
+  topBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    padding: "14px 40px",
+    borderBottom: `1px solid ${COLORS.verdeMenta}`,
+  },
+  segmentado: {
+    display: "inline-flex",
+    padding: 3,
+    gap: 2,
     borderRadius: 999,
-    border: "1px solid #cbd8d5",
+    backgroundColor: "rgba(174,246,198,0.35)",
+  },
+  segItem: {
+    padding: "6px 18px",
+    borderRadius: 999,
+    border: "none",
     background: "transparent",
-    color: "#014751",
-    fontSize: 13,
+    color: COLORS.azulPetroleo,
+    fontSize: 12,
+    fontWeight: 700,
     cursor: "pointer",
+    fontFamily: FONT_STACK,
+    transition: "background-color .12s, color .12s",
+  },
+  segItemAtivo: {
+    backgroundColor: COLORS.azulProfundo,
+    color: COLORS.algodao,
+  },
+  acaoTemas: {
+    padding: "6px 14px",
+    borderRadius: 999,
+    border: `1px solid ${COLORS.verdeMenta}`,
+    background: "transparent",
+    color: COLORS.azulPetroleo,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: FONT_STACK,
   },
   tagTemas: {
     display: "inline-block",
