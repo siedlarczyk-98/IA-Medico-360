@@ -83,6 +83,30 @@ async def test_sugestao_vem_da_especialidade(db, user):
     assert [t.id for t in sugeridos] == [ic.id]
 
 
+async def test_usuario_sem_especialidade_recebe_sugestao(db, user):
+    """
+    O SSO de embed cria o usuario a partir do e-mail do LMS, SEM especialidade, e
+    ele pode abrir o app de noticias antes de completar o onboarding do app
+    principal. Sem piso, encara 51 caixas em branco — o oposto do que a
+    pre-selecao existe para fazer. Descoberto rodando o app, nao lendo o codigo.
+    """
+    await _tema(db, "dor-cronica", [(news_feed_service.ESPECIALIDADE_PISO, RELEVANTE)])
+    user.specialty = None
+    await db.flush()
+
+    sugeridos = await news_feed_service.temas_sugeridos_para(db, user.specialty)
+
+    assert sugeridos, "Usuario sem especialidade ficou sem nenhuma sugestao"
+
+
+async def test_especialidade_fora_da_taxonomia_cai_no_piso(db):
+    await _tema(db, "dor-cronica", [(news_feed_service.ESPECIALIDADE_PISO, RELEVANTE)])
+
+    sugeridos = await news_feed_service.temas_sugeridos_para(db, "Homeopatia")
+
+    assert [t.slug for t in sugeridos] == ["dor-cronica"]
+
+
 async def test_tema_transversal_e_sugerido_para_ambas(db):
     """
     Obesidade é `core` de endócrino e `relevante` de cardio — e por isso aparece

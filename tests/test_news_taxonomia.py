@@ -123,3 +123,23 @@ def test_infecto_e_cardio_nao_compartilham_temas_core():
         }
 
     assert not (cores("Cardiologia") & cores("Infectologia"))
+
+
+def test_piso_generalista_nao_fica_vazio():
+    """
+    `news_feed_service.ESPECIALIDADE_PISO` e o que sugere temas a quem ainda nao
+    tem especialidade (usuario recem-criado pelo SSO de embed). Se ninguem citar
+    essa especialidade na taxonomia, esse usuario recebe lista vazia — e o
+    defeito e silencioso, porque nenhuma outra coisa quebra.
+    """
+    from app.services.news_feed_service import ESPECIALIDADE_PISO
+
+    ligados = [
+        t["slug"]
+        for t in TAXONOMIA
+        if any(esp == ESPECIALIDADE_PISO for esp, _ in t["especialidades"])
+    ]
+    assert len(ligados) >= 10, (
+        f"Apenas {len(ligados)} tema(s) ligados a '{ESPECIALIDADE_PISO}'. "
+        "Quem nao tem especialidade cairia numa lista quase vazia."
+    )

@@ -32,7 +32,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.models import User
 from app.models.news import (
-    PESO_CORE,
     Article,
     ArticleStatus,
     ArticleTopic,
@@ -57,13 +56,25 @@ class ItemFeed:
     preenchimento: bool
 
 
+# Piso de sugestão para quem não tem especialidade registrada. Precisa existir:
+# o SSO de embed cria o usuário a partir do e-mail do LMS, sem especialidade, e
+# ele pode abrir o app de notícias antes de completar o onboarding do app
+# principal. Sem piso, esse usuário encara uma lista de 51 caixas em branco —
+# exatamente o que a pré-seleção existe para evitar.
+ESPECIALIDADE_PISO = "Clínica Médica"
+
+
 async def temas_sugeridos_para(db: AsyncSession, specialty: str | None) -> list[Topic]:
     """
-    Temas `core` + `relevante` da especialidade, para pré-marcar no onboarding.
+    Temas `core` + `relevante` da especialidade, para pré-marcar na escolha.
 
-    Sem especialidade (ou especialidade que a taxonomia não cobre), devolve os
-    temas `core` de Clínica Geral como piso — o usuário nunca encara uma lista
-    vazia e sem pista do que escolher.
+    Sem especialidade — ou com uma que a taxonomia ainda não cobre — devolve os
+    temas de Clínica Médica, que é o conjunto generalista.
+
+    O piso NÃO filtra por peso: nenhum tema é `core` de Clínica Médica (ela é a
+    especialidade que tangencia tudo e não é dona de nada), então exigir `core`
+    aqui devolveria lista vazia. Isso foi descoberto rodando o app: um usuário
+    recém-criado pelo embed recebia zero sugestões.
     """
     if specialty:
         rows = list(await db.scalars(
@@ -78,11 +89,7 @@ async def temas_sugeridos_para(db: AsyncSession, specialty: str | None) -> list[
     return list(await db.scalars(
         select(Topic)
         .join(TopicSpecialty, TopicSpecialty.topic_id == Topic.id)
-        .where(
-            TopicSpecialty.specialty == "Clínica Médica",
-            TopicSpecialty.peso == PESO_CORE,
-            Topic.ativo.is_(True),
-        )
+        .where(TopicSpecialty.specialty == ESPECIALIDADE_PISO, Topic.ativo.is_(True))
         .order_by(Topic.nome_pt)
     ))
 
