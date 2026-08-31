@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Card, CardHeader, Separator, SubHeading, Button, ToggleGroup, Label, InputField, CheckItem } from '../ui';
 import { IconTarget, IconChevronRight, IconChevronLeft } from '../icons';
 import { usePreventCalculator } from '../../../hooks/usePreventCalculator';
-import type { PreventAviso, PreventCalculateResponse } from '../../../api/prevent';
+import { AvisosPrevent, PainelPrevent } from '../../prevent/PreventResultPanel';
+import { paraExibicao, paraMgdl, rotuloUnidade, type UnidadeLipides } from '../../prevent/preventUnits';
 import type { RiskLevel } from '../riskTypes';
 import type { WizardStepProps } from './types';
 
@@ -13,165 +14,11 @@ import type { WizardStepProps } from './types';
  * (`POST /prevent/calculate`, backend `app/calculators/formulas/cardiologia/
  * prevent.py`) — sem persistir execução/audit log, só para obter o número. O
  * branching a partir do score é idêntico ao da referência.
+ *
+ * A entrada e a apresentação do escore são compartilhadas com a calculadora
+ * PREVENT avulsa (`calculators/prevent/`); o que é exclusivo daqui é o
+ * branching SBC a partir do ASCVD de 10 anos, logo abaixo.
  */
-
-/**
- * O MDCalc abre o PREVENT em mmol/L com alternador de unidade. Aqui o canônico
- * é mg/dL (o que o backend recebe e o que o laboratório brasileiro reporta); a
- * unidade é só de exibição. Constante idêntica à `mmol_conversion` da AHA.
- */
-const MMOL_POR_MGDL = 0.02586;
-
-type UnidadeLipides = 'mgdl' | 'mmoll';
-
-const rotuloUnidade = (u: UnidadeLipides) => (u === 'mgdl' ? 'mg/dL' : 'mmol/L');
-
-/** mg/dL guardado no estado -> string exibida na unidade escolhida. */
-const paraExibicao = (mgdl: string, unidade: UnidadeLipides): string => {
-  const n = parseFloat(mgdl);
-  if (isNaN(n)) return '';
-  return unidade === 'mmoll' ? (n * MMOL_POR_MGDL).toFixed(2) : String(n);
-};
-
-/** String digitada na unidade escolhida -> mg/dL para o estado. */
-const paraMgdl = (digitado: string, unidade: UnidadeLipides): string => {
-  if (unidade === 'mgdl') return digitado;
-  const n = parseFloat(digitado.replace(',', '.'));
-  if (isNaN(n)) return '';
-  return (n / MMOL_POR_MGDL).toFixed(1);
-};
-
-/**
- * Os cinco desfechos do modelo base. É um superconjunto do MDCalc, que exibe
- * DCV total, ASCVD, coronariana e AVC mas omite insuficiência cardíaca.
- * `—` onde o backend devolveu `null`: a AHA invalida desfecho a desfecho, então
- * é normal a tabela vir parcial (idade > 59 zera a coluna de 30 anos; IMC fora
- * de 18,5–39,9 zera a linha de insuficiência cardíaca).
- */
-type CampoPrevent = keyof Omit<PreventCalculateResponse, 'avisos'>;
-
-/**
- * Hierarquia espelhada no MDCalc: o DCV total é o número grande de cada
- * horizonte, os demais desfechos vêm desdobrados abaixo. A diferença é que aqui
- * o ASCVD leva marcação — no MDCalc nenhum número decide nada, enquanto nesta
- * tela é o ASCVD de 10 anos que define a classificação SBC 2025, e o médico
- * precisa saber qual dos cinco puxou a conduta.
- */
-const HORIZONTES = [
-  {
-    rotulo: '10 anos',
-    principal: 'cvd_10a' as CampoPrevent,
-    linhas: [
-      { rotulo: 'Aterosclerótica (ASCVD)', campo: 'ascvd_10a' as CampoPrevent, classifica: true },
-      { rotulo: 'Insuficiência cardíaca', campo: 'hf_10a' as CampoPrevent, classifica: false },
-      { rotulo: 'Doença coronariana', campo: 'chd_10a' as CampoPrevent, classifica: false },
-      { rotulo: 'AVC', campo: 'stroke_10a' as CampoPrevent, classifica: false },
-    ],
-  },
-  {
-    rotulo: '30 anos',
-    principal: 'cvd_30a' as CampoPrevent,
-    linhas: [
-      { rotulo: 'Aterosclerótica (ASCVD)', campo: 'ascvd_30a' as CampoPrevent, classifica: false },
-      { rotulo: 'Insuficiência cardíaca', campo: 'hf_30a' as CampoPrevent, classifica: false },
-      { rotulo: 'Doença coronariana', campo: 'chd_30a' as CampoPrevent, classifica: false },
-      { rotulo: 'AVC', campo: 'stroke_30a' as CampoPrevent, classifica: false },
-    ],
-  },
-] as const;
-
-const formata = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
-
-function BlocoHorizonte({
-  dados,
-  horizonte,
-}: {
-  dados: PreventCalculateResponse;
-  horizonte: (typeof HORIZONTES)[number];
-}) {
-  const { rotulo, principal, linhas } = horizonte;
-  // Horizonte inteiro fora de faixa (idade > 59 zera os 30 anos): esconde o
-  // bloco e deixa o aviso explicar, em vez de empilhar cinco travessões.
-  const vazio = dados[principal] == null && linhas.every(l => dados[l.campo] == null);
-  if (vazio) return null;
-
-  return (
-    <div style={{ textAlign: 'left' }}>
-      <p style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        Risco de DCV total em {rotulo}
-      </p>
-      <p id={`prevent-${principal}`} style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.01em', margin: '2px 0 10px' }}>
-        {formata(dados[principal])}
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {linhas.map(({ rotulo: nome, campo, classifica }) => (
-          <div
-            key={campo}
-            style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12,
-              padding: '5px 8px', borderRadius: 6,
-              background: classifica ? 'var(--fill1, rgba(0,0,0,0.03))' : 'transparent',
-            }}
-          >
-            <span style={{ fontSize: 12.5, color: 'var(--pen2)' }}>
-              {nome}
-              {classifica && (
-                <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--petrol)', fontWeight: 600 }}>
-                  define a classificação SBC
-                </span>
-              )}
-            </span>
-            <span
-              id={`prevent-${campo}`}
-              style={{ fontSize: 13.5, fontWeight: classifica ? 700 : 500, color: 'var(--ink)', whiteSpace: 'nowrap' }}
-            >
-              {formata(dados[campo])}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PainelPrevent({ dados }: { dados: PreventCalculateResponse }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {HORIZONTES.map(h => (
-        <BlocoHorizonte key={h.rotulo} dados={dados} horizonte={h} />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Toda célula vazia na tabela precisa vir com o motivo — sem isso o médico não
- * distingue "fora da faixa de validação" de defeito do sistema. As mensagens
- * vêm do backend, da mesma tabela de regras que decide o que não calcular
- * (`app/calculators/formulas/cardiologia/prevent.py`), para as duas não
- * divergirem com o tempo.
- */
-function AvisosPrevent({ avisos }: { avisos: PreventAviso[] }) {
-  if (avisos.length === 0) return null;
-  return (
-    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}>
-      {avisos.map(aviso => (
-        <p
-          key={aviso.codigo}
-          style={{
-            fontSize: 12.5,
-            color: 'var(--pen2)',
-            lineHeight: 1.45,
-            paddingLeft: 10,
-            borderLeft: '2px solid var(--line)',
-          }}
-        >
-          {aviso.mensagem}
-        </p>
-      ))}
-    </div>
-  );
-}
 
 interface Step4Props extends Omit<WizardStepProps, 'onResult'> {
   onResult: (level: RiskLevel, goToAggravants: boolean) => void;
@@ -365,7 +212,7 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
               <>
                 {data ? (
                   <>
-                    <PainelPrevent dados={data} />
+                    <PainelPrevent dados={data} destacarAscvd />
                     <AvisosPrevent avisos={data.avisos} />
                   </>
                 ) : (

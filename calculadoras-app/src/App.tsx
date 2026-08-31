@@ -11,6 +11,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m
 const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
 const CalculatorsListPage = lazy(() => import('./pages/CalculatorsListPage').then(m => ({ default: m.CalculatorsListPage })));
 const RiscoCvSbc2025Page = lazy(() => import('./pages/RiscoCvSbc2025Page').then(m => ({ default: m.RiscoCvSbc2025Page })));
+const PreventPage = lazy(() => import('./pages/PreventPage').then(m => ({ default: m.PreventPage })));
 const GenericCalculatorPage = lazy(() => import('./pages/GenericCalculatorPage').then(m => ({ default: m.GenericCalculatorPage })));
 
 function LoadingScreen() {
@@ -52,6 +53,7 @@ function App() {
         <Route path="/embed-auth" element={<EmbedAuthPage />} />
         <Route path="/" element={<RequireAuth><CalculatorsListPage /></RequireAuth>} />
         <Route path="/calculadoras/risco-cv-sbc2025" element={<RequireAuth><RiscoCvSbc2025Page /></RequireAuth>} />
+        <Route path="/calculadoras/prevent" element={<RequireAuth><PreventPage /></RequireAuth>} />
         <Route path="/calculadoras/:slug" element={<RequireAuth><GenericCalculatorPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

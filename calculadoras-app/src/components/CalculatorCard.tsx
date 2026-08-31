@@ -4,6 +4,7 @@ import { getSpecialtyStyle } from '../lib/specialtyStyles';
 
 const SLUG_TO_PATH: Record<string, string> = {
   risco_cv_sbc2025: '/calculadoras/risco-cv-sbc2025',
+  prevent_aha2024: '/calculadoras/prevent',
 };
 
 interface Props {
