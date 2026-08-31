@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { autenticarEmbed, buscarMeusTemas } from './api/news';
-import { isAuthenticated, isTokenExpired, setToken } from './lib/auth';
+import { clearToken, isAuthenticated, isTokenExpired, setToken, tokenEhDeOutroEmail } from './lib/auth';
 
 type Estado =
   | { fase: 'carregando' }
@@ -30,15 +30,24 @@ export default function App() {
 
     async function iniciar() {
       try {
-        if (!isAuthenticated() || isTokenExpired()) {
-          const email = new URLSearchParams(window.location.search).get('email');
+        const email = new URLSearchParams(window.location.search).get('email');
+
+        // Reautentica também quando o e-mail da URL é OUTRO — não só quando
+        // falta token ou ele expirou. Sem essa condição, o segundo usuário a
+        // abrir o LMS no mesmo navegador herdaria a sessão do primeiro e veria
+        // o feed, os temas e os favoritos dele até o token vencer.
+        const precisaAutenticar =
+          !isAuthenticated() || isTokenExpired() || (!!email && tokenEhDeOutroEmail(email));
+
+        if (precisaAutenticar) {
           if (!email) {
             throw new Error(
               'Sessão não identificada. Abra o módulo de notícias a partir do portal.'
             );
           }
+          clearToken();
           const { access_token } = await autenticarEmbed(email);
-          setToken(access_token);
+          setToken(access_token, email);
         }
 
         // A tela de escolha só aparece a quem nunca escolheu. Quem decidiu não
