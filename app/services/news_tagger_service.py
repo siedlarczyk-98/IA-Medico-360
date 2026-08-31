@@ -46,8 +46,9 @@ PROMPT = """Você classifica artigos científicos médicos por tema, para um fee
 personalizado de médicos brasileiros.
 
 Escolha APENAS temas da lista abaixo. Nunca invente um tema que não esteja nela.
+No JSON, use o identificador que vem ANTES do sinal de igual — nunca o nome por extenso.
 
-TEMAS VÁLIDOS:
+TEMAS VÁLIDOS (identificador = nome):
 {temas}
 
 Regras:
@@ -124,18 +125,41 @@ async def _classificar(titulo: str, abstract: str, mesh: list[dict] | None, tema
         return []
 
     validos: list[dict] = []
+    descartados: list[str] = []
     for item in itens:
         slug = str(item.get("slug", "")).strip()
+        # Tolerância a resposta com o rótulo colado ("slug = nome" ou "slug: nome").
+        # O prompt já pede só o identificador; isto é defesa em profundidade,
+        # porque o modo de falha é uma classificação certa virar lista vazia.
         if slug not in temas:
-            # Não é erro do modelo apenas: pode ser tema que a taxonomia ainda
-            # não cobre. Vale log para virar candidato a entrar na lista.
-            logger.info("Tagger devolveu slug fora do vocabulário: %r", slug)
+            for separador in (" = ", ":", "="):
+                if separador in slug and slug.split(separador)[0].strip() in temas:
+                    slug = slug.split(separador)[0].strip()
+                    break
+        if slug not in temas:
+            # Pode ser assunto que a taxonomia ainda não cobre — candidato a tema
+            # novo. WARNING e não INFO: quando isto acontece com TODOS os itens, o
+            # artigo fica sem tema nenhum e o sintoma é indistinguível de
+            # "nada se aplica". Foi assim que um defeito de prompt passou batido.
+            descartados.append(slug)
             continue
         try:
             score = max(0.0, min(1.0, float(item.get("score", 0))))
         except (TypeError, ValueError):
             continue
+        # Score zero é o modelo dizendo "não é sobre isto". Medido em produção:
+        # ele preenche a lista até 5 itens com zeros — um carcinoma hepatocelular
+        # voltou com "Câncer de mama 0.00" e "Neoplasias hematológicas 0.00".
+        # Guardar isso é sujar `article_topics` com linhas que nenhuma query usa.
+        if score <= 0:
+            continue
         validos.append({"slug": slug, "score": score})
+
+    if descartados:
+        logger.warning(
+            "Tagger descartou %d slug(s) fora do vocabulário em %r: %s",
+            len(descartados), titulo[:60], descartados,
+        )
 
     return validos
 
