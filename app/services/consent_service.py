@@ -102,6 +102,19 @@ async def historico(db: AsyncSession, user_id) -> list[ConsentLog]:
     return list(resultado.scalars().all())
 
 
+async def aceitou_termos(db: AsyncSession, user_id) -> bool:
+    """Se existe aceite vigente dos Termos — a pendência `aceite_termos` do perfil.
+
+    Deliberadamente NÃO exige `versao_atual`: uma revisão dos documentos passaria
+    a base inteira para "pendente" e jogaria todo mundo de volta no onboarding.
+    Exigir novo aceite a cada versão é uma decisão jurídica de produto, não um
+    efeito colateral de bumpar `VERSAO_DOCUMENTOS` — quando for tomada, é aqui
+    que muda, num lugar só.
+    """
+    situacao = await situacao_atual(db, user_id)
+    return bool(situacao.get(TERMOS_E_PRIVACIDADE, {}).get("aceito"))
+
+
 async def situacao_atual(db: AsyncSession, user_id) -> dict[str, dict]:
     """
     Estado vigente por tipo: o registro mais recente de cada um vence.

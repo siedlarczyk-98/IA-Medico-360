@@ -89,7 +89,29 @@ class User(Base):
     crm_state: Mapped[str | None] = mapped_column(String(2))
     role: Mapped[str] = mapped_column(String(50), default="beta_user")
     med_status: Mapped[str | None] = mapped_column(String(50))
+    # `specialty` é o RÓTULO (casa por string com `news.topic_specialties.specialty`);
+    # `specialty_slug` é a CHAVE. Escrita SEMPRE por `app.medicina.identidade`.
     specialty: Mapped[str | None] = mapped_column(String(100))
+    specialty_slug: Mapped[str | None] = mapped_column(String(80), index=True)
+    # Todas as especialidades (duas residências é comum: Clínica Médica é
+    # pré-requisito). FEED e ACESSO consultam esta lista; `specialty_slug` é só
+    # a principal, para exibição e para o prompt.
+    specialties: Mapped[list | None] = mapped_column(JSONB)
+    # De onde veio a especialidade — `declarado` > `cfm` > `cadastro` > `waid_grupo`.
+    # Sem esta coluna a reconciliação automática sobrescreveria a correção manual
+    # do médico no login seguinte.
+    specialty_source: Mapped[str | None] = mapped_column(String(20))
+    specialty_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    specialty_rqe: Mapped[str | None] = mapped_column(String(20))
+    # Categoria profissional (médico/enfermeiro/...). NÃO é `med_status`, que é
+    # estágio de carreira (graduando/generalista/residente/especialista).
+    profissao: Mapped[str | None] = mapped_column(String(40))
+    crm_status: Mapped[str | None] = mapped_column(String(30))
+    crm_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Id do registro no banco da página intermediária: é o que torna o webhook
+    # de cadastro idempotente.
+    cadastro_externo_id: Mapped[str | None] = mapped_column(String(64))
+    cfm_payload: Mapped[dict | None] = mapped_column(JSONB)
     enrollment_date: Mapped[date | None] = mapped_column(Date)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -33,8 +33,15 @@ class CurseducaNotConfigured(Exception):
     """Validação habilitada mas a integração respondeu erro de configuração/indisponibilidade."""
 
 
-async def _fetch_member_status(email: str, api_base: str, api_key: str, access_token: str) -> bool:
-    """Consulta a API da Curseduca e retorna True se `email` é membro. Fail-closed em erro."""
+async def _fetch_member(email: str, api_base: str, api_key: str, access_token: str) -> dict | None:
+    """Consulta a API e devolve o membro, ou `None` se não existir. Fail-closed em erro.
+
+    Devolve o objeto INTEIRO, não um booleano: o payload já traz `groups`, e é
+    de lá que sai a especialidade do médico (grupos `[CFM] <especialidade>`,
+    criados automaticamente pela página de cadastro). Antes esta função baixava
+    tudo isso e descartava — a reconciliação de especialidade sai de graça, sem
+    uma requisição a mais.
+    """
     url = f"{api_base.rstrip('/')}/api/v1/members/by"
     headers = {"api_key": api_key, "accept": "application/json"}
     if access_token:
@@ -58,24 +65,29 @@ async def _fetch_member_status(email: str, api_base: str, api_key: str, access_t
     if resp.status_code == 200:
         data = resp.json()
         # Membro encontrado quando a resposta traz o e-mail do próprio membro.
-        return bool(isinstance(data, dict) and data.get("email"))
+        return data if isinstance(data, dict) and data.get("email") else None
     if resp.status_code == 404:
-        return False  # e-mail não corresponde a nenhum membro
+        return None  # e-mail não corresponde a nenhum membro
     # 400 (query), 401 (api_key), 403 (token), 5xx -> não dá para confirmar => fail-closed.
     raise CurseducaNotConfigured(
         f"Curseduca respondeu {resp.status_code} ao validar membro: {resp.text[:200]}"
     )
 
 
-async def verify_active_member(email: str) -> None:
+async def verify_active_member(email: str) -> dict | None:
     """Levanta 403 se o e-mail não for membro; no-op quando a validação está desligada.
 
     Fail-closed: se a validação está ligada mas a integração não está pronta/configurada
     ou a API não respondeu OK, levanta 503 em vez de deixar passar.
+
+    Devolve o payload do membro (para a reconciliação de especialidade) ou `None`
+    quando a validação está desligada — nesse caso não houve consulta e não há o
+    que reconciliar. Em produção isso não acontece: `_validate_production_secrets`
+    derruba o startup se a validação estiver desligada.
     """
     settings = get_settings()
     if not settings.curseduca_validation_enabled:
-        return
+        return None
 
     if not settings.curseduca_api_base or not settings.curseduca_api_key:
         raise HTTPException(
@@ -84,7 +96,7 @@ async def verify_active_member(email: str) -> None:
         )
 
     try:
-        is_member = await _fetch_member_status(
+        membro = await _fetch_member(
             email,
             settings.curseduca_api_base,
             settings.curseduca_api_key,
@@ -96,5 +108,22 @@ async def verify_active_member(email: str) -> None:
             "Não foi possível validar o membro na Curseduca no momento.",
         ) from exc
 
-    if not is_member:
+    if membro is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "E-mail não corresponde a um membro ativo.")
+    return membro
+
+
+def nomes_de_grupos(membro: dict | None) -> list[str]:
+    """Extrai os nomes dos grupos do payload, tolerando formato inesperado.
+
+    Defensivo de propósito: é payload de terceiro num caminho de LOGIN. Um
+    `groups` ausente, nulo ou com formato diferente não pode derrubar a
+    autenticação de ninguém — no pior caso o médico entra sem especialidade,
+    que é exatamente o estado em que ele já estava.
+    """
+    if not isinstance(membro, dict):
+        return []
+    grupos = membro.get("groups")
+    if not isinstance(grupos, list):
+        return []
+    return [g["name"] for g in grupos if isinstance(g, dict) and isinstance(g.get("name"), str)]

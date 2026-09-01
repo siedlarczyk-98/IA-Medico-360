@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.medicina import identidade
 from app.models.models import User, UserPreference
 from app.models.news import (
     Article,
@@ -161,7 +162,11 @@ async def meus_temas(
     disponiveis = list(await db.scalars(
         select(Topic).where(Topic.ativo.is_(True)).order_by(Topic.nome_pt)
     ))
-    sugeridos = await news_feed_service.temas_sugeridos_para(db, user.specialty)
+    # Todas as especialidades: quem tem duas residências recebe a união dos dois
+    # conjuntos de temas, não a de uma delas.
+    sugeridos = await news_feed_service.temas_sugeridos_para(
+        db, identidade.rotulos_de_especialidade(user)
+    )
 
     # A amostra é o que faz a tela de escolha mostrar CONTEÚDO, e não só
     # rótulos. Uma query para todos os temas, não uma por tema.

@@ -6,6 +6,7 @@ from app.api.v1.endpoints.conversations import router as conversations_router
 from app.api.v1.endpoints.folders import router as folders_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.landing_pages import router as landing_pages_router
+from app.api.v1.endpoints.meta import router as meta_router
 from app.api.v1.endpoints.news import router as news_router
 from app.api.v1.endpoints.orquestrador import router as orquestrador_router
 from app.api.v1.endpoints.uploads import router as uploads_router
@@ -22,6 +23,7 @@ api_v1_router.include_router(calculators_router)
 api_v1_router.include_router(prevent_router)
 api_v1_router.include_router(health_router)
 api_v1_router.include_router(landing_pages_router)
+api_v1_router.include_router(meta_router)
 api_v1_router.include_router(news_router)
 api_v1_router.include_router(orquestrador_router)
 api_v1_router.include_router(uploads_router)

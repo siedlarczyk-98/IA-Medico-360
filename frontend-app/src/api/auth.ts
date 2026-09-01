@@ -19,6 +19,16 @@ export interface UserResponse {
   med_status: string | null;
   onboarding_complete: boolean;
   intercom_user_hash?: string | null;
+  // Identidade profissional. `specialty_source` diz de onde veio
+  // (`cadastro` | `waid_grupo` | `cfm` | `declarado` | `admin`) e
+  // `specialty_editavel` é FALSO quando veio de fonte automática — aí o campo
+  // reflete o que foi contratado e verificado, não uma preferência.
+  specialty?: string | null;
+  specialty_slug?: string | null;
+  specialty_source?: string | null;
+  profissao?: string | null;
+  specialty_editavel?: boolean;
+  onboarding_pendencias?: string[];
 }
 
 export interface OnboardingData {
@@ -124,8 +134,22 @@ export function getMe(): Promise<UserResponse> {
   return get<UserResponse>('/auth/me');
 }
 
-export function updateProfile(data: { name?: string; email?: string }): Promise<TokenResponse> {
+export function updateProfile(
+  data: { name?: string; email?: string; specialty_slug?: string },
+): Promise<TokenResponse> {
+  // `specialty_slug` só é aceito enquanto `specialty_editavel` for true; caso
+  // contrário o servidor responde 409. A tela usa o flag para nem oferecer.
   return patch<TokenResponse>('/auth/me', data);
+}
+
+export interface Especialidade {
+  slug: string;
+  nome: string;
+}
+
+/** Lista canônica servida pelo backend — não mais hardcoded em componente algum. */
+export function listarEspecialidades(): Promise<Especialidade[]> {
+  return fetch(`${BASE}/api/v1/meta/especialidades`).then(r => r.json());
 }
 
 export function deleteAccount(confirmName: string): Promise<void> {

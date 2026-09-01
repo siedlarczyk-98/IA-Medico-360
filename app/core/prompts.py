@@ -33,14 +33,39 @@ RESTRIÇÕES:
 - NÃO inclua disclaimers, avisos legais ou lembretes de responsabilidade médica no final da resposta. A plataforma já exibe esse aviso ao usuário.
 """
 
+# Quem é o usuário quando NÃO há especialidade registrada.
+#
+# Antes, sem especialidade o contexto era string vazia — e o generalista era o
+# único perfil que o produto tratava como anônimo, junto com o graduando. Só que
+# "sou generalista" calibra a resposta tanto quanto "sou cardiologista": muda a
+# profundidade, o vocabulário e o que vale a pena detalhar. E o graduando é o
+# caso em que calibrar importa mais.
+_QUEM_SEM_ESPECIALIDADE = {
+    "graduando": "um estudante de medicina",
+    "generalista": "um médico generalista, que atende casos de todas as áreas",
+    "residente": "um médico residente",
+    "especialista": "um médico especialista",
+}
+
+
 def _user_context_suffix(specialty: str | None, med_status: str | None) -> str:
-    if not specialty:
-        return ""
-    ctx = f"\n\n[Contexto do usuário] Você está respondendo a um médico especialista em {specialty}"
-    if med_status == "residente":
-        ctx += " (em residência médica)"
-    ctx += ". Calibre a profundidade técnica e o vocabulário conforme esse perfil."
-    return ctx
+    if specialty:
+        # Residente com especialidade está EM formação nela — dizer
+        # "especialista em X (em residência)" é contraditório.
+        quem = (
+            f"um médico residente em {specialty}"
+            if med_status == "residente"
+            else f"um médico especialista em {specialty}"
+        )
+    else:
+        quem = _QUEM_SEM_ESPECIALIDADE.get(med_status or "", "")
+        if not quem:
+            return ""  # nada sabido sobre o usuário: melhor calar do que supor
+
+    return (
+        f"\n\n[Contexto do usuário] Você está respondendo a {quem}. "
+        "Calibre a profundidade técnica e o vocabulário conforme esse perfil."
+    )
 
 
 def build_agregador_prompt(specialty: str | None, med_status: str | None = None) -> str:

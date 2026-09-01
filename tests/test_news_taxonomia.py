@@ -8,28 +8,28 @@ o que faz o tema simplesmente nunca aparecer para ninguém, em silêncio.
 """
 
 import re
-from pathlib import Path
 
 import pytest
 
 from app.news.taxonomia import CORE, RELEVANTE, TAXONOMIA, especialidades_citadas, slugs
 
-ONBOARDING_TSX = Path(__file__).resolve().parents[1] / "frontend-app/src/pages/OnboardingPage.tsx"
-
 
 def _especialidades_do_onboarding() -> set[str]:
     """
-    Lê a lista de especialidades da tela de onboarding.
+    Os nomes canônicos de especialidade, contra os quais a taxonomia tem que bater.
 
-    Ler do TSX em vez de duplicar a lista aqui é o ponto do teste: `users.specialty`
-    guarda exatamente o texto que aquela tela oferece, então é contra ELA que a
-    taxonomia precisa bater. Uma cópia neste arquivo envelheceria em silêncio e o
-    teste passaria a garantir nada.
+    Antes esta função LIA `frontend-app/src/pages/OnboardingPage.tsx` com regex,
+    porque a lista só existia lá — era o front que definia o vocabulário do
+    backend inteiro. Agora ela vive em `app/medicina/especialidades.py`, e a tela
+    a consome por `GET /meta/especialidades`.
+
+    O teste não enfraqueceu: `users.specialty` continua guardando exatamente
+    estes rótulos, então continua sendo contra eles que a taxonomia precisa
+    bater. Só deixou de depender de parsing de TSX para descobri-los.
     """
-    fonte = ONBOARDING_TSX.read_text(encoding="utf-8")
-    bloco = re.search(r"const ESPECIALIDADES = \[(.*?)\];", fonte, re.S)
-    assert bloco, "Não encontrei ESPECIALIDADES em OnboardingPage.tsx"
-    return set(re.findall(r"'([^']+)'", bloco.group(1)))
+    from app.medicina.especialidades import nomes_canonicos
+
+    return nomes_canonicos()
 
 
 def test_slugs_sao_unicos():

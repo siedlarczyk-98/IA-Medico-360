@@ -9,7 +9,11 @@ import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import type { Effort, OrchestratorMode, Attachment } from './components/InputBar';
 import { streamQuery, queryOrquestrador, type Message, type StreamEvent, type PubmedValidation } from './api/orquestrador';
-import { isAuthenticated, isTokenExpired } from './lib/auth';
+import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
+import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth';
+
+// Mesma convenção dos módulos de `api/`: o backend por env, sem barra final.
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
 
@@ -422,7 +426,19 @@ function App() {
         <Route path="/embed-auth" element={<EmbedAuthPage />} />
         <Route path="/" element={
           <RequireAuth>
-            <MainApp />
+            {/*
+              O gate lê `onboarding_pendencias` do servidor — nenhum app decide
+              o que falta. Fica AQUI, e não só no /login, porque antes a decisão
+              acontecia apenas no momento do login: bastava navegar direto para
+              "/" para pular o onboarding inteiro.
+            */}
+            <OnboardingGate
+              apiBase={API_BASE}
+              token={getToken()}
+              aoConcluir={t => { setToken(t); window.location.reload(); }}
+            >
+              <MainApp />
+            </OnboardingGate>
           </RequireAuth>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />

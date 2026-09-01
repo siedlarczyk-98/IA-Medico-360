@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -9,9 +10,12 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.medicina import especialidades, identidade
 from app.models.models import InviteToken, OtpCode, User
 from app.repositories import auth_repository as repo
-from app.services import email_service
+from app.services import curseduca_service, email_service
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -149,6 +153,72 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
         user = await repo.get_user_by_email(db, email, active_only=True)
         assert user is not None, "IntegrityError implica que o usuário já existe"
         return user, False
+
+
+async def reconciliar_especialidade_do_embed(
+    db: AsyncSession, user: "User", membro: dict | None
+) -> bool:
+    """Preenche a especialidade a partir dos grupos `[CFM]` da Curseduca.
+
+    Roda a CADA login de embed, não só na criação do usuário. É de propósito:
+    quem entrou antes de existir cadastro novo já está na base sem
+    especialidade, e só volta a passar por aqui logando. Como
+    `aplicar_especialidade` é idempotente e respeita precedência, repetir é
+    inofensivo — e é o que faz a base antiga se preencher sozinha.
+
+    Fonte `waid_grupo`, o posto mais baixo entre as automáticas: o nome do grupo
+    é artefato de controle de acesso e pode ser renomeado no painel. Ele nunca
+    desfaz o que veio do cadastro, do CFM ou do suporte.
+
+    Nunca levanta exceção: isto acontece dentro do LOGIN. Falhar aqui deixaria o
+    médico de fora por causa de um enriquecimento de perfil.
+    """
+    try:
+        nomes = curseduca_service.nomes_de_grupos(membro)
+        if not nomes:
+            return False
+
+        resultado = especialidades.interpretar_grupos(nomes)
+
+        if not resultado.slugs and not resultado.generalista and not user.specialty_slug:
+            # Nenhum grupo `[CFM]`, nem sequer o `[CFM] GENERALISTA` — ou seja,
+            # não dá para dizer nem que o CFM foi consultado. Registrar os nomes
+            # revela a convenção real do cadastro sem precisar adivinhá-la.
+            #
+            # A condição se auto-limita: some conforme a base for sendo
+            # preenchida, em vez de virar ruído permanente no log.
+            logger.info(
+                "Sem especialidade após reconciliar user=%s. Grupos vistos: %s",
+                user.id,
+                ", ".join(nomes) or "(nenhum)",
+            )
+
+        if resultado.desconhecidos:
+            # O modo de falha que este trabalho veio eliminar: grupo criado
+            # automaticamente com nome fora das 55 (tipicamente uma ÁREA DE
+            # ATUAÇÃO do CFM, como Hepatologia). Sem este log, o médico ficaria
+            # sem especialidade e ninguém saberia. O rótulo vai no log porque é
+            # o insumo para virar alias em `app/medicina/especialidades.py`.
+            logger.warning(
+                "Grupo [CFM] não reconhecido para user=%s: %s. "
+                "Provável área de atuação — avaliar alias em app/medicina/especialidades.py",
+                user.id,
+                ", ".join(resultado.desconhecidos),
+            )
+
+        if not resultado.slugs:
+            return False
+
+        mudou = identidade.aplicar_especialidade(
+            user, slugs=list(resultado.slugs), fonte=identidade.FONTE_WAID_GRUPO
+        )
+        if mudou:
+            await db.commit()
+        return mudou
+    except Exception:
+        logger.exception("Falha ao reconciliar especialidade do embed para user=%s", user.id)
+        await db.rollback()
+        return False
 
 
 async def request_otp(db: AsyncSession, email: str) -> None:

@@ -30,6 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.medicina import identidade
 from app.models.models import User
 from app.models.news import (
     Article,
@@ -68,9 +69,14 @@ class ItemFeed:
 ESPECIALIDADE_PISO = "Clínica Médica"
 
 
-async def temas_sugeridos_para(db: AsyncSession, specialty: str | None) -> list[Topic]:
+async def temas_sugeridos_para(db: AsyncSession, specialties: list[str] | str | None) -> list[Topic]:
     """
-    Temas `core` + `relevante` da especialidade, para pré-marcar na escolha.
+    Temas `core` + `relevante` das especialidades, para pré-marcar na escolha.
+
+    Aceita VÁRIAS: duas residências é o caso comum (Clínica Médica é
+    pré-requisito de quase toda residência clínica), e um cardiologista que
+    também tem Clínica Médica deve receber a união dos dois conjuntos, não a
+    de uma delas. `distinct` porque os conjuntos se sobrepõem.
 
     Sem especialidade — ou com uma que a taxonomia ainda não cobre — devolve os
     temas de Clínica Médica, que é o conjunto generalista.
@@ -80,15 +86,26 @@ async def temas_sugeridos_para(db: AsyncSession, specialty: str | None) -> list[
     aqui devolveria lista vazia. Isso foi descoberto rodando o app: um usuário
     recém-criado pelo embed recebia zero sugestões.
     """
-    if specialty:
+    # Aceita string solta para não quebrar chamadas antigas nem os testes que
+    # passam uma especialidade só.
+    lista = [specialties] if isinstance(specialties, str) else list(specialties or [])
+    if lista:
         rows = list(await db.scalars(
             select(Topic)
+            .distinct()
             .join(TopicSpecialty, TopicSpecialty.topic_id == Topic.id)
-            .where(TopicSpecialty.specialty == specialty, Topic.ativo.is_(True))
+            .where(TopicSpecialty.specialty.in_(lista), Topic.ativo.is_(True))
             .order_by(Topic.nome_pt)
         ))
         if rows:
             return rows
+
+    # Cair no piso é o sinal de que a identidade não chegou — por webhook, por
+    # grupo `[CFM]` ou por onboarding. A CONTAGEM DISTO É A MÉTRICA DE SUCESSO
+    # de todo o trabalho de identidade profissional: se ela não cai com o tempo,
+    # nada daquilo está funcionando. Antes o piso agia em silêncio e não havia
+    # como saber quantos dependiam dele.
+    logger.info("news.piso_especialidade origem=%s", "sem_match" if lista else "sem_especialidade")
 
     return list(await db.scalars(
         select(Topic)
@@ -207,9 +224,13 @@ async def montar_feed(
 
     # --- Preenchimento ---------------------------------------------------
     if len(itens) < settings.news_feed_minimo_itens:
+        # TODAS as especialidades do médico, não só a principal: quem tem duas
+        # residências deve ser completado com o conjunto das duas.
+        rotulos = identidade.rotulos_de_especialidade(user)
         adjacentes = list(await db.scalars(
-            select(TopicSpecialty.topic_id).where(TopicSpecialty.specialty == user.specialty)
-        )) if user.specialty else []
+            select(TopicSpecialty.topic_id).distinct()
+            .where(TopicSpecialty.specialty.in_(rotulos))
+        )) if rotulos else []
 
         # Só faz sentido completar com o que o usuário NÃO escolheu; o que ele
         # escolheu já foi buscado acima.

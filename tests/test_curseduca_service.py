@@ -43,19 +43,21 @@ def test_membro_valido_passa(monkeypatch):
     monkeypatch.setattr(curseduca_service, "get_settings", _settings)
 
     async def fake_fetch(*a, **k):
-        return True
+        return {"email": "membro@x.com", "groups": [{"name": "[CFM] Cardiologia"}]}
 
-    monkeypatch.setattr(curseduca_service, "_fetch_member_status", fake_fetch)
-    _run(curseduca_service.verify_active_member("membro@x.com"))  # sem exceção
+    monkeypatch.setattr(curseduca_service, "_fetch_member", fake_fetch)
+    # Devolve o payload, e não um booleano: é dele que sai a especialidade.
+    membro = _run(curseduca_service.verify_active_member("membro@x.com"))
+    assert membro["email"] == "membro@x.com"
 
 
 def test_nao_membro_403(monkeypatch):
     monkeypatch.setattr(curseduca_service, "get_settings", _settings)
 
     async def fake_fetch(*a, **k):
-        return False
+        return None
 
-    monkeypatch.setattr(curseduca_service, "_fetch_member_status", fake_fetch)
+    monkeypatch.setattr(curseduca_service, "_fetch_member", fake_fetch)
     with pytest.raises(HTTPException) as exc:
         _run(curseduca_service.verify_active_member("estranho@x.com"))
     assert exc.value.status_code == 403
@@ -67,7 +69,20 @@ def test_erro_integracao_falha_fechado_503(monkeypatch):
     async def fake_fetch(*a, **k):
         raise curseduca_service.CurseducaNotConfigured("api fora do ar")
 
-    monkeypatch.setattr(curseduca_service, "_fetch_member_status", fake_fetch)
+    monkeypatch.setattr(curseduca_service, "_fetch_member", fake_fetch)
     with pytest.raises(HTTPException) as exc:
         _run(curseduca_service.verify_active_member("a@x.com"))
     assert exc.value.status_code == 503
+
+
+def test_nomes_de_grupos_tolera_payload_estranho():
+    """Payload de terceiro num caminho de LOGIN: nada aqui pode explodir."""
+    assert curseduca_service.nomes_de_grupos(None) == []
+    assert curseduca_service.nomes_de_grupos({}) == []
+    assert curseduca_service.nomes_de_grupos({"groups": None}) == []
+    assert curseduca_service.nomes_de_grupos({"groups": "nao-e-lista"}) == []
+    assert curseduca_service.nomes_de_grupos({"groups": [{"sem": "nome"}]}) == []
+    assert curseduca_service.nomes_de_grupos({"groups": [{"name": 123}]}) == []
+    assert curseduca_service.nomes_de_grupos(
+        {"groups": [{"name": "Turma"}, {"name": "[CFM] Cardiologia"}]}
+    ) == ["Turma", "[CFM] Cardiologia"]

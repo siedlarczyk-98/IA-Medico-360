@@ -14,7 +14,8 @@ import { useEffect, useState } from 'react';
 import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { autenticarEmbed, buscarMeusTemas } from './api/news';
-import { clearToken, isAuthenticated, isTokenExpired, setToken, tokenPertenceA } from './lib/auth';
+import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
+import { clearToken, getToken, isAuthenticated, isTokenExpired, setToken, tokenPertenceA } from './lib/auth';
 
 type Estado =
   | { fase: 'carregando' }
@@ -77,19 +78,34 @@ export default function App() {
     return <div style={{ ...aviso, color: '#a13a12' }}>{estado.mensagem}</div>;
   }
 
-  if (estado.fase === 'temas') {
-    return (
+  const conteudo = estado.fase === 'temas'
+    ? (
       <TemasPage
         primeiraVez={estado.primeiraVez}
         aoConcluir={() => setEstado({ fase: 'feed' })}
         // Sair sem salvar so faz sentido para quem ja tem um feed para voltar.
         aoCancelar={estado.primeiraVez ? undefined : () => setEstado({ fase: 'feed' })}
       />
-    );
-  }
+    )
+    : <HighlightsMagazine aoEditarTemas={() => setEstado({ fase: 'temas', primeiraVez: false })} />;
 
-  return <HighlightsMagazine aoEditarTemas={() => setEstado({ fase: 'temas', primeiraVez: false })} />;
+  // O gate vem ANTES da escolha de temas, de proposito: a TemasPage pre-marca
+  // os temas a partir da especialidade, e sem ela cai num fallback generico.
+  // Completar o perfil primeiro e o que faz aquela tela chegar ja preenchida.
+  // Mesma tela dos outros dois apps, importada de `shared/` — o medico preenche
+  // uma vez, em qualquer porta de entrada, e serve para todos.
+  return (
+    <OnboardingGate
+      apiBase={API_BASE}
+      token={getToken()}
+      aoConcluir={t => { setToken(t); window.location.reload(); }}
+    >
+      {conteudo}
+    </OnboardingGate>
+  );
 }
+
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
 const aviso: React.CSSProperties = {
   padding: 48,

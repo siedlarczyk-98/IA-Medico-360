@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
-import { getMe, updateProfile, deleteAccount } from '../api/auth';
+import { getMe, updateProfile, deleteAccount, listarEspecialidades, type Especialidade } from '../api/auth';
 import { setToken, logout } from '../lib/auth';
 import { useIsMobile } from '../hooks/useIsMobile';
+
+// De onde veio a especialidade, em português, para explicar por que o campo
+// está travado. Sem esta frase o médico vê um texto cinza e não sabe se é bug.
+const ORIGEM_LEGIVEL: Record<string, string> = {
+  cadastro: 'Veio do seu cadastro.',
+  waid_grupo: 'Veio do seu cadastro.',
+  cfm: 'Verificada no Conselho Federal de Medicina.',
+  admin: 'Ajustada pelo suporte.',
+};
 
 interface Props {
   onClose: () => void;
@@ -12,6 +21,14 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
   const isMobile = useIsMobile();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [crmLabel, setCrmLabel] = useState('');
+  const [especialidade, setEspecialidade] = useState('');
+  // O rótulo vem pronto do servidor; sem ele, o campo travado mostraria o slug
+  // ("ortopedia-e-traumatologia") porque a lista só é buscada quando editável.
+  const [especialidadeNome, setEspecialidadeNome] = useState('');
+  const [origemEspecialidade, setOrigemEspecialidade] = useState<string | null>(null);
+  const [especialidadeEditavel, setEspecialidadeEditavel] = useState(false);
+  const [especialidades, setEspecialidades] = useState<Especialidade[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +38,21 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
 
   useEffect(() => {
     getMe()
-      .then(user => { setName(user.name ?? ''); setEmail(user.email); })
+      .then(user => {
+        setName(user.name ?? '');
+        setEmail(user.email);
+        setCrmLabel(user.crm && user.crm_state ? `CRM/${user.crm_state} ${user.crm}` : '');
+        setEspecialidade(user.specialty_slug ?? '');
+        setEspecialidadeNome(user.specialty ?? '');
+        setOrigemEspecialidade(user.specialty_source ?? null);
+        // O servidor decide se o campo é editável — a regra mora em
+        // `identidade.usuario_pode_editar`, não aqui. A tela só obedece.
+        const editavel = user.specialty_editavel ?? true;
+        setEspecialidadeEditavel(editavel);
+        if (editavel) {
+          listarEspecialidades().then(setEspecialidades).catch(() => setEspecialidades([]));
+        }
+      })
       .catch(() => setError('Não foi possível carregar os dados do perfil.'))
       .finally(() => setLoading(false));
   }, []);
@@ -30,7 +61,11 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await updateProfile({ name: name.trim(), email: email.trim() });
+      const res = await updateProfile({
+        name: name.trim(),
+        email: email.trim(),
+        ...(especialidadeEditavel && especialidade ? { specialty_slug: especialidade } : {}),
+      });
       setToken(res.access_token);
       onSuccess();
       onClose();
@@ -103,6 +138,43 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
                   placeholder="seu@email.com"
                 />
               </Field>
+              {crmLabel && (
+                <Field label="Registro">
+                  {/* Somente leitura: trocar de CRM invalida a verificação e é
+                      caminho de suporte, não de auto-serviço. */}
+                  <div style={{ ...inputStyle, background: 'var(--fill)', color: 'var(--pen)' }}>
+                    {crmLabel}
+                  </div>
+                </Field>
+              )}
+
+              <Field label="Especialidade">
+                {especialidadeEditavel ? (
+                  <select
+                    value={especialidade}
+                    onChange={e => setEspecialidade(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="">Não informada</option>
+                    {especialidades.map(esp => (
+                      <option key={esp.slug} value={esp.slug}>{esp.nome}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                    <div style={{ ...inputStyle, background: 'var(--fill)', color: 'var(--pen)' }}>
+                      {especialidadeNome || '—'}
+                    </div>
+                    {/* Explicar POR QUE está travado. Campo cinza sem motivo
+                        parece defeito; com motivo, parece o que é. */}
+                    <p style={{ fontSize: 11, color: 'var(--pen3)', margin: '5px 0 0', lineHeight: 1.4 }}>
+                      {ORIGEM_LEGIVEL[origemEspecialidade ?? ''] ?? 'Definida pelo seu cadastro.'}{' '}
+                      Se estiver incorreta, fale com o suporte.
+                    </p>
+                  </>
+                )}
+              </Field>
+
               {error && <p style={{ fontSize: 12, color: '#ef4444', margin: '8px 0 0' }}>{error}</p>}
               <button
                 onClick={handleSave}

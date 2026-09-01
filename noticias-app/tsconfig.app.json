@@ -16,11 +16,23 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* `shared/` na raiz do monorepo: o onboarding vive la, escrito uma vez. */
+    "paths": {
+      "@shared/*": ["../shared/*"],
+      /* `shared/` fica fora deste pacote, entao a resolucao de modulos dele nao
+         acha o React: sobe de ../shared/ e nao encontra node_modules. Apontar
+         explicitamente e o que permite o codigo compartilhado compilar aqui. */
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    },
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "../shared"]
 }

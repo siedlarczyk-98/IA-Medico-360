@@ -174,13 +174,13 @@ async def test_curseduca_traduz_circuito_aberto_para_fail_closed():
     Circuito aberto na Curseduca precisa virar `CurseducaNotConfigured`, que o
     endpoint converte em 503 — nunca em "membro válido".
     """
-    from app.services.curseduca_service import CurseducaNotConfigured, _fetch_member_status
+    from app.services.curseduca_service import CurseducaNotConfigured, _fetch_member
 
     circuit_breaker.curseduca._estado = Estado.ABERTO
     circuit_breaker.curseduca._aberto_em = __import__("time").monotonic()
 
     with pytest.raises(CurseducaNotConfigured):
-        await _fetch_member_status("alguem@example.com", "https://api.exemplo", "chave", "token")
+        await _fetch_member("alguem@example.com", "https://api.exemplo", "chave", "token")
 
 
 def test_estado_geral_lista_as_integracoes():

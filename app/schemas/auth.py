@@ -49,13 +49,28 @@ class OTPVerify(BaseModel):
 
 
 class OnboardingRequest(BaseModel):
-    name: str
-    phone_number: str
+    """O que o médico ainda precisa informar — só isso.
+
+    Quase tudo passou a chegar sozinho: nome e especialidade vêm do cadastro
+    (webhook) ou dos grupos `[CFM]` da Curseduca. Sobrou o que nenhuma fonte
+    automática tem: o estágio de carreira (o grupo não distingue residente de
+    especialista) e o aceite dos Termos, que ninguém pode dar pelo titular.
+
+    Por isso os campos são quase todos opcionais, e a validação de "está
+    completo?" NÃO mora mais aqui: mora em `identidade.pendencias()`, avaliada
+    no endpoint depois de aplicar o que veio. Manter a regra no schema exigiria
+    que ele conhecesse o estado atual do usuário — e faria o formulário pedir de
+    novo o que já está preenchido.
+    """
+
     med_status: str
+    terms_accepted: bool
+    name: str | None = None
     crm: str | None = None
     crm_state: str | None = None
     enrollment_year: int | None = None
     specialty: str | None = None
+    phone_number: str | None = None
     # Sem default: o aceite tem que vir explicito do cliente. Default True
     # gravaria consentimento que ninguem manifestou; default False deixaria o
     # front esquecer de enviar e o onboarding passar sem registro - que era
@@ -100,6 +115,24 @@ class OnboardingRequest(BaseModel):
             raise ValueError("CRM deve conter apenas números")
         return v
 
+    @field_validator("specialty")
+    @classmethod
+    def validate_specialty(cls, v: str | None) -> str | None:
+        """Aceita o RÓTULO que o front manda e devolve o SLUG canônico.
+
+        Antes disto o servidor gravava qualquer string: o front oferecia uma
+        lista fechada, mas o endpoint é público e não se pode assumir que o
+        cliente é a nossa tela. Era a origem real da divergência de vocabulário.
+        """
+        if v is None or not v.strip():
+            return None
+        from app.medicina import especialidades
+
+        slug = especialidades.normalizar(v)
+        if slug is None:
+            raise ValueError(f"Especialidade desconhecida: {v}")
+        return slug
+
     @field_validator("enrollment_year")
     @classmethod
     def validate_enrollment_year(cls, v: int | None) -> int | None:
@@ -111,21 +144,49 @@ class OnboardingRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_conditional_fields(self) -> "OnboardingRequest":
-        if self.med_status == "graduando":
-            if not self.enrollment_year:
-                raise ValueError("Ano de ingresso é obrigatório para alunos de graduação")
-        else:
-            if not self.crm or not self.crm_state:
-                raise ValueError("CRM e UF são obrigatórios para médicos formados")
-            if self.med_status in ("residente", "especialista") and not self.specialty:
-                raise ValueError("Especialidade é obrigatória para residentes e especialistas")
+    def crm_e_uf_andam_juntos(self) -> "OnboardingRequest":
+        """Um sem o outro produziria um registro que não existe.
+
+        Esta é a única regra condicional que sobrou no schema, porque não
+        depende do estado do usuário. "Falta CRM", "falta especialidade" e
+        "falta aceite" são decididos por `identidade.pendencias()` no endpoint —
+        lá o servidor sabe o que já está preenchido e não pede duas vezes.
+        """
+        if (self.crm is None) != (self.crm_state is None):
+            raise ValueError("Envie CRM e UF juntos")
         return self
 
 
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
     email: str | None = None
+    # Correção do próprio médico. Grava com fonte `declarado`, que ganha de
+    # todas as automáticas — ver `app/medicina/identidade.py`.
+    specialty_slug: str | None = None
+    crm: str | None = None
+    crm_state: str | None = None
+
+    _validar_crm = field_validator("crm")(OnboardingRequest.validate_crm.__func__)
+    _validar_uf = field_validator("crm_state")(OnboardingRequest.validate_crm_state.__func__)
+
+    @field_validator("specialty_slug")
+    @classmethod
+    def validate_specialty_slug(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        from app.medicina import especialidades
+
+        slug = especialidades.normalizar(v)
+        if slug is None:
+            raise ValueError(f"Especialidade desconhecida: {v}")
+        return slug
+
+    @model_validator(mode="after")
+    def crm_e_uf_andam_juntos(self) -> "UpdateProfileRequest":
+        """Trocar só um dos dois produziria um registro que não existe."""
+        if (self.crm is None) != (self.crm_state is None):
+            raise ValueError("Para alterar o registro, envie CRM e UF juntos")
+        return self
 
 
 class DeleteAccountRequest(BaseModel):
@@ -136,6 +197,9 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     onboarding_complete: bool
+    # O que ainda falta, para a tela continuar de onde parou sem uma chamada a
+    # mais. Vazio = completo. Aditivo: quem não conhece o campo ignora.
+    onboarding_pendencias: list[str] = []
 
 
 class UserResponse(BaseModel):
@@ -152,3 +216,24 @@ class UserResponse(BaseModel):
     onboarding_complete: bool
     # HMAC para o Messenger Security do Intercom (gerado sob demanda, não persistido)
     intercom_user_hash: str | None = None
+
+    # ── Identidade profissional (aditivo: nada acima mudou de forma) ──────
+    # A forma antiga é preservada de propósito. Os três apps consomem este
+    # schema hoje; reestruturar em um objeto `perfil` aninhado seria mais limpo
+    # e quebraria os três de uma vez. Dá para limpar depois que todos migrarem.
+    specialty: str | None = None
+    specialty_slug: str | None = None
+    specialty_source: str | None = None
+    specialty_rqe: str | None = None
+    profissao: str | None = None
+    # Se o próprio médico pode trocar a especialidade nesta tela. Tranca quando
+    # o valor veio de fonte automática (cadastro/WAID/CFM) — o campo é
+    # identidade profissional, não preferência. O front lê daqui em vez de
+    # reimplementar a regra.
+    specialty_editavel: bool = True
+
+    # O QUE FALTA NO PERFIL, decidido pelo SERVIDOR.
+    # Os apps não calculam pendência — renderizam esta lista. É o que evita
+    # reimplementar (e divergir) a regra de onboarding em cada frontend.
+    # Valores: aceite_termos | nome | crm | especialidade.
+    onboarding_pendencias: list[str] = []

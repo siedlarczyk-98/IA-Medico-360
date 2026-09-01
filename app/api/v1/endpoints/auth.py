@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete as sql_delete
@@ -8,6 +10,7 @@ from app.api.deps import COOKIE_NAME, get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
+from app.medicina import especialidades, identidade
 from app.models.models import (
     AuditLog,
     Conversation,
@@ -148,9 +151,14 @@ async def embed_token(
 
     # Validação server-to-server (fail-closed quando habilitada): confirma que o e-mail
     # é de um membro ativo antes de emitir token. No-op enquanto não configurada.
-    await curseduca_service.verify_active_member(body.email)
+    membro = await curseduca_service.verify_active_member(body.email)
 
     user, _ = await auth_service.get_or_create_embed_user(body.email, db)
+    # O payload já está em mãos: os grupos `[CFM] <especialidade>` preenchem a
+    # especialidade de quem entrou antes do cadastro novo existir, sem uma
+    # requisição a mais e sem tela nenhuma. Não levanta exceção — enriquecer
+    # perfil não pode barrar login.
+    await auth_service.reconciliar_especialidade_do_embed(db, user, membro)
     token = auth_service.create_access_token(user)
     _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
@@ -194,15 +202,34 @@ async def complete_onboarding(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Aplica o que o médico informou e deixa o SERVIDOR decidir se acabou.
+
+    Não exige um conjunto fixo de campos: nome e especialidade costumam chegar
+    sozinhos (webhook do cadastro, grupos `[CFM]` da Curseduca), e pedir de novo
+    o que já se sabe é o que tornava este formulário pesado. O cliente manda o
+    que a tela coletou; quem diz se o perfil está completo é
+    `identidade.pendencias()`, com o estado real do usuário na mão.
+    """
     from datetime import date as date_type
-    current_user.name = body.name
-    current_user.phone_number = f"+55{body.phone_number}"
+
+    if body.name is not None:
+        current_user.name = body.name
+    if body.phone_number is not None:
+        current_user.phone_number = f"+55{body.phone_number}"
     current_user.med_status = body.med_status
-    current_user.crm = body.crm
-    current_user.crm_state = body.crm_state
-    current_user.specialty = body.specialty
-    current_user.enrollment_date = date_type(body.enrollment_year, 1, 1) if body.enrollment_year else None
-    current_user.onboarding_complete = True
+    if body.crm is not None and body.crm_state is not None:
+        current_user.crm = body.crm
+        current_user.crm_state = body.crm_state
+    if body.specialty and identidade.usuario_pode_editar(current_user):
+        # Só entra como fallback: se o cadastro ou o grupo já preencheram, o que
+        # o médico digitou é ignorado — o campo é identidade profissional, e a
+        # precedência em `identidade.py` é quem decide.
+        identidade.aplicar_especialidade(
+            current_user, slug=body.specialty, fonte=identidade.FONTE_DECLARADO
+        )
+    if body.enrollment_year:
+        current_user.enrollment_date = date_type(body.enrollment_year, 1, 1)
+
     # Mesma transacao do onboarding, de proposito: se o consentimento nao for
     # gravado, o cadastro tambem nao se completa. Usuario ativo sem prova de
     # aceite e justamente o estado que isto veio corrigir.
@@ -213,17 +240,33 @@ async def complete_onboarding(
         aceito=body.terms_accepted,
         request=request,
     )
+
+    pendencias = identidade.pendencias(current_user, aceite_vigente=body.terms_accepted)
+    current_user.onboarding_complete = not pendencias
+
     await db.commit()
     await db.refresh(current_user)
     from app.services.auth_service import create_access_token
     token = create_access_token(current_user)
-    return TokenResponse(access_token=token, onboarding_complete=True)
+    return TokenResponse(
+        access_token=token,
+        onboarding_complete=current_user.onboarding_complete,
+        onboarding_pendencias=pendencias,
+    )
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     resp = UserResponse.model_validate(current_user)
     resp.intercom_user_hash = auth_service.intercom_user_hash(current_user)
+    resp.onboarding_pendencias = identidade.pendencias(
+        current_user,
+        aceite_vigente=await consent_service.aceitou_termos(db, current_user.id),
+    )
+    resp.specialty_editavel = identidade.usuario_pode_editar(current_user)
     return resp
 
 
@@ -242,11 +285,103 @@ async def update_me(
         current_user.email = body.email
     if body.name is not None:
         current_user.name = body.name
+
+    # Trocar de registro invalida a verificação anterior: o CRM novo não foi
+    # conferido em lugar nenhum ainda.
+    if body.crm is not None and body.crm_state is not None:
+        if (body.crm, body.crm_state) != (current_user.crm, current_user.crm_state):
+            current_user.crm = body.crm
+            current_user.crm_state = body.crm_state
+            current_user.crm_status = None
+            current_user.crm_verified_at = None
+
+    if body.specialty_slug is not None:
+        # A especialidade tranca assim que uma fonte automática a preenche: ela
+        # é identidade profissional e vai definir acesso a conteúdo pago, não
+        # preferência de leitura. Quem quer ajustar o que LÊ mexe nos temas
+        # (`news.user_topics`), que continuam livres.
+        if not identidade.usuario_pode_editar(current_user):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Sua especialidade veio do seu cadastro e não pode ser alterada por aqui. "
+                "Fale com o suporte se estiver incorreta.",
+            )
+        identidade.aplicar_especialidade(
+            current_user, slug=body.specialty_slug, fonte=identidade.FONTE_DECLARADO
+        )
+
     await db.commit()
     await db.refresh(current_user)
     from app.services.auth_service import create_access_token
     token = create_access_token(current_user)
     return TokenResponse(access_token=token, onboarding_complete=current_user.onboarding_complete)
+
+
+class CorrigirEspecialidadeRequest(BaseModel):
+    specialty_slug: str
+
+    @field_validator("specialty_slug")
+    @classmethod
+    def validar(cls, v: str) -> str:
+        slug = especialidades.normalizar(v)
+        if slug is None:
+            raise ValueError(f"Especialidade desconhecida: {v}")
+        return slug
+
+
+@router.patch("/admin/users/{user_id}/especialidade", response_model=UserResponse)
+@limiter.limit("30/minute")
+async def corrigir_especialidade(
+    request: Request,
+    user_id: uuid.UUID,
+    body: CorrigirEspecialidadeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Correção da especialidade pelo suporte.
+
+    É a válvula que torna a trava do campo defensável: o médico não edita a
+    própria especialidade (ela reflete o que foi contratado e vai definir
+    acesso), mas a LGPD art. 18, III garante ao titular o direito de corrigir
+    dado desatualizado. Sem este endpoint, o conserto seria UPDATE manual em
+    produção — sem trilha, sem revisão, sem limite.
+
+    Grava com fonte `admin`, o posto mais alto: uma correção de suporte não pode
+    ser desfeita pela reconciliação do próximo login.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Apenas admins podem corrigir especialidade")
+
+    alvo = await db.get(User, user_id)
+    if alvo is None or not alvo.status:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
+
+    anterior = {"slug": alvo.specialty_slug, "fonte": alvo.specialty_source}
+    identidade.aplicar_especialidade(
+        alvo, slug=body.specialty_slug, fonte=identidade.FONTE_ADMIN
+    )
+    # O campo passa a valer acesso: quem mudou, quando e a partir de quê tem
+    # que ficar registrado.
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action="user.especialidade.corrigir",
+            entity_type="user",
+            entity_id=alvo.id,
+            metadata_={"de": anterior, "para": alvo.specialty_slug},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
+    await db.commit()
+    await db.refresh(alvo)
+
+    resp = UserResponse.model_validate(alvo)
+    resp.onboarding_pendencias = identidade.pendencias(
+        alvo, aceite_vigente=await consent_service.aceitou_termos(db, alvo.id)
+    )
+    resp.specialty_editavel = identidade.usuario_pode_editar(alvo)
+    return resp
 
 
 @router.get("/me/consentimentos")

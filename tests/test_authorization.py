@@ -86,6 +86,13 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # Exceção entre as LPs: esta é o formulário exibido DENTRO do produto,
     # e declara Depends(get_current_user).
     ("POST", "/api/v1/landing-pages/calculators/submit"): AUTENTICADA,
+    # Vocabulário de especialidades: constante pública, sem dado de usuário. A
+    # tela de cadastro precisa dela ANTES de existir sessão — exigir token aqui
+    # devolveria a lista para dentro do TSX, que é o que este trabalho desfez.
+    ("GET", "/api/v1/meta/especialidades"): PUBLICA,
+    # Correção de especialidade pelo suporte: a válvula que torna defensável
+    # travar o campo para o próprio médico (LGPD art. 18, III).
+    ("PATCH", "/api/v1/auth/admin/users/{user_id}/especialidade"): ADMIN,
     # Notícias. TUDO autenticado, sem exceção: o feed é personalizado, e a
     # versão anterior deste módulo identificava o leitor por `?email=` na query
     # string — forjável, e portanto suficiente para ler e alterar os temas de
