@@ -205,6 +205,14 @@ async def reconciliar_especialidade_do_embed(
 
         resultado = especialidades.interpretar_grupos(nomes)
 
+        # Existir QUALQUER grupo `[CFM]` — inclusive o GENERALISTA — prova que a
+        # página de cadastro consultou o Conselho a partir de um CRM. É o que
+        # permite parar de oferecer "aluno de graduação" a quem tem registro.
+        # Só marca uma vez: reconciliação não é nova verificação.
+        if (resultado.slugs or resultado.generalista) and not user.crm_verified_at:
+            user.crm_verified_at = _utcnow()
+            mudou = True
+
         if not resultado.slugs and not resultado.generalista and not user.specialty_slug:
             # Nenhum grupo `[CFM]`, nem sequer o `[CFM] GENERALISTA` — ou seja,
             # não dá para dizer nem que o CFM foi consultado. Registrar os nomes

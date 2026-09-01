@@ -267,6 +267,7 @@ async def get_me(
         aceite_vigente=await consent_service.aceitou_termos(db, current_user.id),
     )
     resp.specialty_editavel = identidade.usuario_pode_editar(current_user)
+    resp.med_status_opcoes = identidade.med_status_possiveis(current_user)
     return resp
 
 
@@ -381,6 +382,7 @@ async def corrigir_especialidade(
         alvo, aceite_vigente=await consent_service.aceitou_termos(db, alvo.id)
     )
     resp.specialty_editavel = identidade.usuario_pode_editar(alvo)
+    resp.med_status_opcoes = identidade.med_status_possiveis(alvo)
     return resp
 
 

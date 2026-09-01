@@ -180,6 +180,44 @@ def rotulos_de_especialidade(user) -> list[str]:
     return [unico] if unico else []
 
 
+MED_STATUS_TODOS = ("graduando", "generalista", "residente", "especialista")
+
+# Fontes que só existem porque alguém consultou o CFM a partir de um CRM.
+_FONTES_COM_CRM = frozenset({FONTE_WAID_GRUPO, FONTE_CADASTRO, FONTE_CFM})
+
+
+def med_status_possiveis(user) -> list[str]:
+    """Os estágios de carreira compatíveis com o que já sabemos.
+
+    Estar num grupo `[CFM]` PROVA que o Conselho foi consultado a partir de um
+    CRM — e isso elimina opções:
+
+      especialidade registrada  -> não é graduando (não teria CRM) nem
+                                   generalista (não teria especialidade)
+      CRM verificado, sem espec. -> não é graduando, nem especialista (não tem RQE)
+
+    Mostrar as quatro opções para quem está em `[CFM] Cardiologia` é pedir que
+    ele responda algo que o registro dele já respondeu — e abre espaço para uma
+    resposta que contradiz o Conselho.
+
+    Não DECIDE o `med_status`: nenhuma fonte distingue residente de especialista
+    (o R1 aparece no CFM sem RQE, igual ao generalista). Reduzir a escolha é
+    honesto; adivinhá-la seria gravar dado errado em silêncio.
+    """
+    fonte = getattr(user, "specialty_source", None)
+
+    if getattr(user, "specialty_slug", None) and fonte in _FONTES_COM_CRM:
+        return ["residente", "especialista"]
+
+    # `crm_verified_at` é marcado quando um grupo `[CFM]` aparece — inclusive o
+    # `[CFM] GENERALISTA`, que é o Conselho dizendo "este CRM existe e não tem
+    # especialidade". Diferente de nunca termos consultado.
+    if getattr(user, "crm_verified_at", None):
+        return ["generalista", "residente"]
+
+    return list(MED_STATUS_TODOS)
+
+
 def usuario_pode_editar(user) -> bool:
     """Se o MÉDICO pode trocar a própria especialidade pelo app.
 

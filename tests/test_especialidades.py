@@ -274,6 +274,7 @@ class UsuarioFake:
         self.specialty_source = kw.get("specialty_source")
         self.specialty_rqe = kw.get("specialty_rqe")
         self.specialty_updated_at = kw.get("specialty_updated_at")
+        self.crm_verified_at = kw.get("crm_verified_at")
 
 
 def test_cadastro_sobrescreve_o_que_o_medico_digitou():
@@ -493,3 +494,36 @@ def test_aceite_e_pendencia_mesmo_com_perfil_cheio():
     )
     assert identidade.pendencias(user, aceite_vigente=False) == ["aceite_termos"]
     assert identidade.perfil_completo(user, aceite_vigente=True)
+
+
+# ── Opções de carreira derivadas ──────────────────────────────────────────
+
+def test_com_especialidade_registrada_nao_oferece_graduando_nem_generalista():
+    """A queixa do Rúben: por que ofereço 'aluno de graduação' a quem está em
+    `[CFM] Cardiologia`? Estar no grupo prova que há CRM e há RQE."""
+    user = UsuarioFake(
+        specialty_slug="cardiologia", specialty_source=identidade.FONTE_WAID_GRUPO
+    )
+    assert identidade.med_status_possiveis(user) == ["residente", "especialista"]
+
+
+def test_crm_verificado_sem_especialidade_sobra_generalista_ou_residente():
+    """`[CFM] GENERALISTA`: o Conselho tem o CRM e nenhuma especialidade.
+
+    Não é graduando (tem registro) nem especialista (não tem RQE). Mas pode ser
+    um R1, que ainda não tem RQE — por isso são duas opções, não uma.
+    """
+    user = UsuarioFake(crm_verified_at=datetime(2026, 1, 1, tzinfo=UTC))
+    assert identidade.med_status_possiveis(user) == ["generalista", "residente"]
+
+
+def test_sem_nada_verificado_oferece_os_quatro():
+    assert identidade.med_status_possiveis(UsuarioFake()) == list(identidade.MED_STATUS_TODOS)
+
+
+def test_especialidade_declarada_nao_restringe():
+    """Só fonte que passou pelo CFM prova CRM. O que o médico digitou, não."""
+    user = UsuarioFake(
+        specialty_slug="cardiologia", specialty_source=identidade.FONTE_DECLARADO
+    )
+    assert identidade.med_status_possiveis(user) == list(identidade.MED_STATUS_TODOS)

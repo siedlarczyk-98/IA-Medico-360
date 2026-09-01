@@ -10,6 +10,8 @@ O invariante mais importante daqui é o de que NADA nesta rotina pode barrar o
 login. Enriquecer perfil é acessório; autenticar não é.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 
 from app.medicina import identidade
@@ -48,6 +50,7 @@ class UserFake:
         self.specialty_source = kw.get("specialty_source")
         self.specialty_rqe = kw.get("specialty_rqe")
         self.specialty_updated_at = None
+        self.crm_verified_at = kw.get("crm_verified_at")
 
 
 @pytest.mark.asyncio
@@ -137,6 +140,9 @@ async def test_nao_desfaz_o_que_veio_do_cadastro():
         specialty_slug="nefrologia",
         specialty="Nefrologia",
         specialty_source=identidade.FONTE_CADASTRO,
+        # Já verificado antes: assim o teste isola a precedência da
+        # especialidade, sem o efeito colateral de marcar a verificação.
+        crm_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     mudou = await auth_service.reconciliar_especialidade_do_embed(
@@ -202,13 +208,44 @@ async def test_generalista_nao_vira_falso_alerta(caplog):
     db, user = DbFake(), UserFake()
 
     with caplog.at_level("WARNING"):
-        mudou = await auth_service.reconciliar_especialidade_do_embed(
+        await auth_service.reconciliar_especialidade_do_embed(
             db, user, _membro("[CFM] GENERALISTA")
         )
 
-    assert mudou is False
     assert user.specialty_slug is None  # a verdade: ele não tem especialidade
     assert "área de atuação" not in caplog.text
+    # Mas o CRM fica marcado como verificado: é o que elimina "aluno de
+    # graduação" das opções de carreira dele.
+    assert user.crm_verified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_grupo_cfm_marca_o_crm_como_verificado():
+    """Estar num grupo `[CFM]` prova que a página de cadastro consultou o
+    Conselho a partir de um CRM. É daí que sai a redução das opções de carreira.
+    """
+    db, user = DbFake(), UserFake()
+
+    await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("[CFM] CARDIOLOGIA")
+    )
+
+    assert user.crm_verified_at is not None
+    assert identidade.med_status_possiveis(user) == ["residente", "especialista"]
+
+
+@pytest.mark.asyncio
+async def test_verificacao_nao_e_remarcada_a_cada_login():
+    """Reconciliar não é nova verificação — a data original tem que sobreviver."""
+    antes = datetime(2026, 1, 1, tzinfo=UTC)
+    db = DbFake()
+    user = UserFake(crm_verified_at=antes)
+
+    await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("[CFM] CARDIOLOGIA")
+    )
+
+    assert user.crm_verified_at == antes
 
 
 @pytest.mark.asyncio

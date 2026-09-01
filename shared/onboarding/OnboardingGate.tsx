@@ -168,6 +168,17 @@ function Formulario({
 
   const precisa = (p: Pendencia) => pendencias.includes(p);
   const graduando = medStatus === 'graduando';
+
+  // Quem está num grupo `[CFM]` tem CRM, logo não é aluno de graduação; quem
+  // tem especialidade registrada também não é generalista. Perguntar mesmo
+  // assim é pedir que ele responda o que o registro dele já respondeu — e abre
+  // espaço para uma resposta que contradiz o Conselho.
+  //
+  // Lista vazia = servidor antigo, que não opinava: mostra as quatro.
+  const permitidos = perfil.med_status_opcoes ?? [];
+  const opcoesCarreira = permitidos.length
+    ? MED_STATUS_OPCOES.filter(o => permitidos.includes(o.valor))
+    : MED_STATUS_OPCOES;
   // O `med_status` escolhido agora pode revelar campos que o servidor ainda não
   // sabia serem necessários: quem não tinha estágio de carreira definido não
   // recebeu `crm` na lista de pendências, porque não dava para saber se era
@@ -258,7 +269,7 @@ function Formulario({
         <div style={{ marginBottom: 17 }}>
           <span style={s.rotulo}>Momento da carreira</span>
           <div style={{ display: 'grid', gap: 7 }} role="radiogroup" aria-label="Momento da carreira">
-            {MED_STATUS_OPCOES.map(o => {
+            {opcoesCarreira.map(o => {
               const ativa = medStatus === o.valor;
               return (
                 <button

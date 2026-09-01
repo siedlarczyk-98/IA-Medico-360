@@ -30,6 +30,14 @@ export interface Perfil {
   specialty_editavel: boolean;
   onboarding_complete: boolean;
   onboarding_pendencias: Pendencia[];
+  /**
+   * Estágios de carreira compatíveis com o que o servidor já sabe. Estar num
+   * grupo `[CFM]` prova que existe CRM, então "aluno de graduação" sai da lista;
+   * ter especialidade registrada elimina também "generalista".
+   *
+   * Vazio = o servidor não opinou (contrato antigo): a tela mostra os quatro.
+   */
+  med_status_opcoes?: string[];
 }
 
 export interface Especialidade {

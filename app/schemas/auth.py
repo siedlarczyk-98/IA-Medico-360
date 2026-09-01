@@ -231,6 +231,10 @@ class UserResponse(BaseModel):
     # identidade profissional, não preferência. O front lê daqui em vez de
     # reimplementar a regra.
     specialty_editavel: bool = True
+    # Estágios de carreira compatíveis com o que já sabemos. Estar num grupo
+    # `[CFM]` prova que há CRM, então "aluno de graduação" deixa de fazer
+    # sentido. O front renderiza só estes — não a lista fixa de quatro.
+    med_status_opcoes: list[str] = []
 
     # O QUE FALTA NO PERFIL, decidido pelo SERVIDOR.
     # Os apps não calculam pendência — renderizam esta lista. É o que evita
