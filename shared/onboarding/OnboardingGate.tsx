@@ -110,25 +110,30 @@ function FaixaAviso({ onAbrir }: { onAbrir: () => void }) {
   return (
     <div
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        flexWrap: 'wrap',
         padding: '10px 16px',
-        background: s.CORES.fill,
-        borderBottom: `1px solid ${s.CORES.line}`,
+        background: s.CORES.mint,
+        borderBottom: `1px solid ${s.CORES.line2}`,
         fontSize: 13,
-        color: s.CORES.ink,
-        fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+        color: s.CORES.petrol,
+        fontFamily: s.FONTE,
       }}
     >
       Complete seu perfil para receber conteúdo da sua especialidade.{' '}
       <button
         onClick={onAbrir}
         style={{
-          background: 'none',
+          background: s.CORES.petrol,
           border: 'none',
-          color: s.CORES.petrol,
-          textDecoration: 'underline',
+          borderRadius: 999,
+          color: '#fff',
           cursor: 'pointer',
           font: 'inherit',
-          padding: 0,
+          fontWeight: 700,
+          padding: '4px 12px',
         }}
       >
         Completar agora
@@ -220,48 +225,69 @@ function Formulario({
     }
   }
 
+  const primeiroNome = (perfil.name ?? '').trim().split(' ')[0];
+
   return (
     <div style={s.fundo}>
+      {/* Hover e foco não existem em style inline. */}
+      <style>{s.CSS_GLOBAL}</style>
+
       <form style={s.cartao} onSubmit={enviar}>
-        <h1 style={{ fontSize: 20, margin: '0 0 6px', fontWeight: 600 }}>Falta pouco</h1>
-        <p style={{ fontSize: 14, color: s.CORES.pen, margin: '0 0 24px' }}>
-          Só o que ainda não sabemos sobre você.
+        <h1 style={s.titulo}>
+          {primeiroNome ? `Falta pouco, ${primeiroNome}` : 'Falta pouco'}
+        </h1>
+        <p style={s.subtitulo}>
+          Só o que ainda não sabemos — leva menos de um minuto e vale para todo o Médico&nbsp;360.
         </p>
 
         {precisa('nome') && (
-          <div style={{ marginBottom: 18 }}>
-            <label style={s.rotulo} htmlFor="ob-nome">NOME COMPLETO</label>
+          <div style={{ marginBottom: 17 }}>
+            <label style={s.rotulo} htmlFor="ob-nome">Nome completo</label>
             <input
               id="ob-nome"
+              className="m360-ob-campo"
               style={s.campo}
               value={nome}
               onChange={e => setNome(e.target.value)}
               autoComplete="name"
+              placeholder="Como devemos te chamar"
             />
           </div>
         )}
 
-        <div style={{ marginBottom: 18 }}>
-          <span style={s.rotulo}>MOMENTO DA CARREIRA</span>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {MED_STATUS_OPCOES.map(o => (
-              <button
-                key={o.valor}
-                type="button"
-                style={s.opcao(medStatus === o.valor)}
-                onClick={() => setMedStatus(o.valor)}
-              >
-                {o.rotulo}
-              </button>
-            ))}
+        <div style={{ marginBottom: 17 }}>
+          <span style={s.rotulo}>Momento da carreira</span>
+          <div style={{ display: 'grid', gap: 7 }} role="radiogroup" aria-label="Momento da carreira">
+            {MED_STATUS_OPCOES.map(o => {
+              const ativa = medStatus === o.valor;
+              return (
+                <button
+                  key={o.valor}
+                  type="button"
+                  role="radio"
+                  aria-checked={ativa}
+                  className="m360-ob-opcao"
+                  style={s.opcao(ativa)}
+                  onClick={() => setMedStatus(o.valor)}
+                >
+                  {/* Sem o marcador, os cartões parecem campos desabilitados —
+                      era o defeito mais visível da primeira versão. */}
+                  <span style={s.marcador(ativa)}>
+                    {ativa && <span style={s.marcadorInterno} />}
+                  </span>
+                  {o.rotulo}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {graduando && (
-          <div style={{ marginBottom: 18 }}>
-            <label style={s.rotulo} htmlFor="ob-ano">ANO DE INGRESSO</label>
+          <div style={{ marginBottom: 17 }}>
+            <label style={s.rotulo} htmlFor="ob-ano">Ano de ingresso</label>
             <input
               id="ob-ano"
+              className="m360-ob-campo"
               style={s.campo}
               value={anoIngresso}
               onChange={e => setAnoIngresso(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -272,20 +298,28 @@ function Formulario({
         )}
 
         {pedirCrm && (
-          <div style={{ marginBottom: 18, display: 'flex', gap: 10 }}>
+          <div style={{ marginBottom: 17, display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>
               <label style={s.rotulo} htmlFor="ob-crm">CRM</label>
               <input
                 id="ob-crm"
+                className="m360-ob-campo"
                 style={s.campo}
                 value={crm}
                 onChange={e => setCrm(e.target.value.replace(/\D/g, ''))}
                 inputMode="numeric"
+                placeholder="000000"
               />
             </div>
-            <div style={{ width: 92 }}>
+            <div style={{ width: 96 }}>
               <label style={s.rotulo} htmlFor="ob-uf">UF</label>
-              <select id="ob-uf" style={s.campo} value={uf} onChange={e => setUf(e.target.value)}>
+              <select
+                id="ob-uf"
+                className="m360-ob-campo"
+                style={s.campo}
+                value={uf}
+                onChange={e => setUf(e.target.value)}
+              >
                 <option value="">—</option>
                 {UFS.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
@@ -294,15 +328,16 @@ function Formulario({
         )}
 
         {pedirEspecialidade && (
-          <div style={{ marginBottom: 18 }}>
-            <label style={s.rotulo} htmlFor="ob-esp">ESPECIALIDADE</label>
+          <div style={{ marginBottom: 17 }}>
+            <label style={s.rotulo} htmlFor="ob-esp">Especialidade</label>
             <select
               id="ob-esp"
+              className="m360-ob-campo"
               style={s.campo}
               value={especialidade}
               onChange={e => setEspecialidade(e.target.value)}
             >
-              <option value="">Selecione</option>
+              <option value="">Selecione sua especialidade</option>
               {especialidades.map(esp => (
                 <option key={esp.slug} value={esp.slug}>{esp.nome}</option>
               ))}
@@ -311,20 +346,30 @@ function Formulario({
         )}
 
         {precisa('aceite_termos') && (
-          <label style={{ display: 'flex', gap: 10, fontSize: 13, marginBottom: 20, cursor: 'pointer' }}>
-            <input type="checkbox" checked={aceite} onChange={e => setAceite(e.target.checked)} />
+          <label style={s.aceite}>
+            <input
+              type="checkbox"
+              className="m360-ob-check"
+              checked={aceite}
+              onChange={e => setAceite(e.target.checked)}
+            />
             <span>
-              Li e aceito os <a href="/termos" target="_blank" rel="noreferrer" style={{ color: s.CORES.petrol }}>Termos de Uso</a>
-              {' '}e a <a href="/privacidade" target="_blank" rel="noreferrer" style={{ color: s.CORES.petrol }}>Política de Privacidade</a>.
+              Li e aceito os{' '}
+              <a href="/termos" target="_blank" rel="noreferrer" style={s.link}>Termos de Uso</a>
+              {' '}e a{' '}
+              <a href="/privacidade" target="_blank" rel="noreferrer" style={s.link}>Política de Privacidade</a>.
             </span>
           </label>
         )}
 
-        {erro && (
-          <p role="alert" style={{ color: s.CORES.red, fontSize: 13, margin: '0 0 14px' }}>{erro}</p>
-        )}
+        {erro && <p role="alert" style={s.erro}>{erro}</p>}
 
-        <button type="submit" disabled={!podeEnviar || salvando} style={s.botao(podeEnviar && !salvando)}>
+        <button
+          type="submit"
+          className="m360-ob-botao"
+          disabled={!podeEnviar || salvando}
+          style={s.botao(podeEnviar && !salvando)}
+        >
           {salvando ? 'Salvando…' : 'Continuar'}
         </button>
       </form>

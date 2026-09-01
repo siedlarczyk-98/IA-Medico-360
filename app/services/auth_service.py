@@ -155,10 +155,18 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
         return user, False
 
 
+def _nome_do_membro(membro: dict | None) -> str | None:
+    """O `name` do payload da Curseduca, se houver algo utilizável."""
+    if not isinstance(membro, dict):
+        return None
+    nome = membro.get("name")
+    return nome.strip() if isinstance(nome, str) and nome.strip() else None
+
+
 async def reconciliar_especialidade_do_embed(
     db: AsyncSession, user: "User", membro: dict | None
 ) -> bool:
-    """Preenche a especialidade a partir dos grupos `[CFM]` da Curseduca.
+    """Preenche nome e especialidade a partir do payload da Curseduca.
 
     Roda a CADA login de embed, não só na criação do usuário. É de propósito:
     quem entrou antes de existir cadastro novo já está na base sem
@@ -174,9 +182,26 @@ async def reconciliar_especialidade_do_embed(
     médico de fora por causa de um enriquecimento de perfil.
     """
     try:
+        mudou = False
+
+        # O nome vem no MESMO payload e era descartado junto com os grupos:
+        # `get_or_create_embed_user` cria o usuário só com e-mail, então todo
+        # mundo que entra pelo LMS começava anônimo e tinha que digitar o
+        # próprio nome numa tela — sendo que a Curseduca já o conhece.
+        #
+        # Só preenche quando está vazio. Nome que o médico ajustou é dele: a
+        # Curseduca guarda o nome da matrícula, que pode estar abreviado ou com
+        # o nome de outra pessoa que pagou o curso.
+        nome_curseduca = _nome_do_membro(membro)
+        if nome_curseduca and not (user.name or "").strip():
+            user.name = nome_curseduca
+            mudou = True
+
         nomes = curseduca_service.nomes_de_grupos(membro)
         if not nomes:
-            return False
+            if mudou:
+                await db.commit()
+            return mudou
 
         resultado = especialidades.interpretar_grupos(nomes)
 
@@ -206,12 +231,11 @@ async def reconciliar_especialidade_do_embed(
                 ", ".join(resultado.desconhecidos),
             )
 
-        if not resultado.slugs:
-            return False
+        if resultado.slugs:
+            mudou = identidade.aplicar_especialidade(
+                user, slugs=list(resultado.slugs), fonte=identidade.FONTE_WAID_GRUPO
+            ) or mudou
 
-        mudou = identidade.aplicar_especialidade(
-            user, slugs=list(resultado.slugs), fonte=identidade.FONTE_WAID_GRUPO
-        )
         if mudou:
             await db.commit()
         return mudou
