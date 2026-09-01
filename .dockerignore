@@ -1,0 +1,37 @@
+# O contexto de build dos apps de frontend passou a ser a RAIZ do monorepo,
+# porque eles importam `shared/` (o onboarding, escrito uma vez para os três).
+# Sem este arquivo, cada build subiria o repositório inteiro — venv, dumps do
+# banco, node_modules dos três apps — e ficaria lento sem necessidade.
+
+# Python / backend
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node
+node_modules/
+*/node_modules/
+*/dist/
+
+# Dumps do banco: pesados e sensíveis. NUNCA devem entrar numa imagem.
+backups/
+
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Git e artefatos locais
+.git/
+.github/
+*.log
+.DS_Store
+
+# Design e material que não vai para runtime
+medico-360/
+docs/
