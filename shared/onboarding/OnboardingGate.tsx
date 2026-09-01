@@ -42,11 +42,29 @@ interface Props {
    *              cadastro completo).
    */
   modo?: 'bloquear' | 'avisar';
+  /**
+   * No modo `avisar`, só incomoda quando UMA DESTAS pendências existe.
+   *
+   * Serve para não prometer o que o app não entrega: as calculadoras não
+   * filtram por especialidade, então pedir o perfil ali com a promessa de
+   * "conteúdo da sua especialidade" é falso. O aceite dos Termos, esse sim,
+   * vale em qualquer app — é LGPD, não personalização.
+   *
+   * Omitido = avisa por qualquer pendência.
+   */
+  avisarSobre?: Pendencia[];
   /** Chamado com o token novo quando o onboarding conclui. */
   aoConcluir?: (token: string) => void;
 }
 
-export function OnboardingGate({ apiBase, token, children, modo = 'bloquear', aoConcluir }: Props) {
+export function OnboardingGate({
+  apiBase,
+  token,
+  children,
+  modo = 'bloquear',
+  avisarSobre,
+  aoConcluir,
+}: Props) {
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
@@ -87,9 +105,17 @@ export function OnboardingGate({ apiBase, token, children, modo = 'bloquear', ao
   if (pendencias.length === 0 || !mostrarFormulario) return <>{children}</>;
 
   if (modo === 'avisar') {
+    const relevantes = avisarSobre
+      ? pendencias.filter(p => avisarSobre.includes(p))
+      : pendencias;
+    // Nada que interesse a este app: não incomoda. Outro app cobra o resto.
+    if (relevantes.length === 0) return <>{children}</>;
     return (
       <>
-        <FaixaAviso onAbrir={() => setMostrarFormulario(true)} />
+        <FaixaAviso
+          pendencias={relevantes}
+          onAbrir={() => setMostrarFormulario(true)}
+        />
         {children}
       </>
     );
@@ -106,7 +132,23 @@ export function OnboardingGate({ apiBase, token, children, modo = 'bloquear', ao
   );
 }
 
-function FaixaAviso({ onAbrir }: { onAbrir: () => void }) {
+function FaixaAviso({
+  pendencias,
+  onAbrir,
+}: {
+  pendencias: Pendencia[];
+  onAbrir: () => void;
+}) {
+  // O texto vem da pendência real, não é fixo. O aviso anterior dizia "para
+  // receber conteúdo da sua especialidade" em TODOS os apps — falso nas
+  // calculadoras, que não filtram nada por especialidade. Prometer benefício
+  // que o app não entrega é pior do que não pedir.
+  const soAceite = pendencias.length === 1 && pendencias[0] === 'aceite_termos';
+  const texto = soAceite
+    ? 'Falta aceitar os Termos de Uso e a Política de Privacidade.'
+    : 'Complete seu perfil para receber conteúdo da sua especialidade.';
+  const acao = soAceite ? 'Ler e aceitar' : 'Completar agora';
+
   return (
     <div
       style={{
@@ -122,7 +164,7 @@ function FaixaAviso({ onAbrir }: { onAbrir: () => void }) {
         fontFamily: s.FONTE,
       }}
     >
-      Complete seu perfil para receber conteúdo da sua especialidade.{' '}
+      {texto}{' '}
       <button
         onClick={onAbrir}
         style={{
@@ -136,7 +178,7 @@ function FaixaAviso({ onAbrir }: { onAbrir: () => void }) {
           padding: '4px 12px',
         }}
       >
-        Completar agora
+        {acao}
       </button>
     </div>
   );

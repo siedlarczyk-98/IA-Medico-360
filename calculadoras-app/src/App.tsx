@@ -57,11 +57,18 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   // calculadora de creatinina porque falta CRM é hostil e não melhora o dado —
   // no app de notícias bloquear se justifica, porque lá o perfil é o que define
   // o que ele vai ler.
+  //
+  // E avisa SÓ sobre o aceite dos Termos: as calculadoras não filtram nada por
+  // especialidade (o `?specialty=` da lista é escolha do usuário, não vem do
+  // perfil), então cobrar o perfil aqui prometendo "conteúdo da sua
+  // especialidade" seria prometer o que este app não entrega. O aceite é outra
+  // coisa — é LGPD, e vale em qualquer tela.
   const conteudo = (
     <OnboardingGate
       apiBase={API_BASE}
       token={getToken()}
       modo="avisar"
+      avisarSobre={['aceite_termos']}
       aoConcluir={t => { setToken(t); window.location.reload(); }}
     >
       {children}
