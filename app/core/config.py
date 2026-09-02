@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     curseduca_api_key: str = ""
     curseduca_access_token: str = ""  # Bearer estático (o endpoint members/by exige, além da api_key)
 
+    # NOTA: a origem da área de membros da Waid (destino do `postMessage` e
+    # valor esperado em `event.origin`) NÃO fica aqui — é resolvida em tempo de
+    # build pelo Vite, em `VITE_WAID_ORIGIN`, porque quem faz o handshake é o
+    # browser. O backend não participa dessa etapa.
+
+    # Caminho legado do embed: `POST /auth/embed/token` com `{email}`.
+    #
+    # NÃO PROVA IDENTIDADE — quem souber o e-mail de um colega recebe a sessão
+    # dele. Existe só enquanto os três apps migram para o token verificável da
+    # Waid; cada uso sai em WARNING, e esse log é o critério para desligar.
+    #
+    # Fica `True` durante o piloto (só o frontend-app migrado) e vira `False`
+    # com guarda de startup em produção quando o último app migrar — o mesmo
+    # padrão de `curseduca_validation_enabled` logo abaixo.
+    embed_email_fallback_enabled: bool = True
+
     # --- Intercom (Identity Verification / Messenger Security) ---
     # Secret do Web SDK; usado para gerar o user_hash (HMAC) do Messenger.
     intercom_identity_secret: str = ""

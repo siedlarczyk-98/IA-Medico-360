@@ -156,6 +156,80 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
         return user, False
 
 
+async def get_or_create_por_identidade_waid(
+    db: AsyncSession, identidade: curseduca_service.IdentidadeWaid
+) -> tuple["User", bool]:
+    """Encontra (ou cria) o usuário a partir da identidade verificada pela Waid.
+
+    A ordem é o ponto: **uuid primeiro, e-mail depois**. A doc da Waid diz que o
+    uuid é estável e o e-mail não, e a busca por e-mail existe aqui só como
+    ponte — ela é o BACKFILL. Quem já tinha conta ganha o `waid_uuid` no primeiro
+    login pelo caminho novo, um por vez, sem script.
+
+    Depois do backfill, trocar de e-mail na Waid deixa de duplicar a conta.
+
+    Retorna `(user, criado)`.
+    """
+    from sqlalchemy import select
+
+    user = await db.scalar(select(User).where(User.waid_uuid == identidade.uuid))
+    if user is not None:
+        return user, False
+
+    user = await repo.get_user_by_email(db, identidade.email, active_only=True)
+    if user is not None:
+        user.waid_uuid = identidade.uuid
+        await db.commit()
+        logger.info("waid_uuid preenchido para user=%s no primeiro login por token", user.id)
+        return user, False
+
+    user = User(
+        email=identidade.email,
+        waid_uuid=identidade.uuid,
+        name=identidade.nome,
+        role="beta_user",
+        status=True,
+        onboarding_complete=False,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user, True
+
+
+async def sincronizar_email_da_waid(
+    db: AsyncSession, user: "User", identidade: curseduca_service.IdentidadeWaid
+) -> str | None:
+    """Atualiza `users.email` quando ele mudou na Waid. Devolve o e-mail antigo, se mudou.
+
+    A Waid é a fonte desse campo para quem entra por lá. Mas o e-mail também é
+    chave de login pelo OTP: mudá-lo altera COMO a pessoa entra pelo outro
+    caminho, então quem chama deve registrar em `AuditLog` — é por isso que esta
+    função devolve o valor antigo em vez de trocar em silêncio.
+
+    Nunca levanta: um conflito de unicidade aqui (o e-mail novo já pertence a
+    outra conta) é situação real, e barrar o login não a resolve.
+    """
+    if not identidade.email or identidade.email == user.email:
+        return None
+
+    from sqlalchemy import select
+
+    ocupado = await db.scalar(select(User.id).where(User.email == identidade.email))
+    if ocupado is not None:
+        logger.warning(
+            "E-mail da Waid (%s) já pertence a outra conta; user=%s segue com o antigo",
+            identidade.email,
+            user.id,
+        )
+        return None
+
+    anterior = user.email
+    user.email = identidade.email
+    await db.commit()
+    return anterior
+
+
 def _nome_do_membro(membro: dict | None) -> str | None:
     """O `name` do payload da Curseduca, se houver algo utilizável."""
     if not isinstance(membro, dict):

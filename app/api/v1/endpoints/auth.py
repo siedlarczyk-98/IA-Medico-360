@@ -1,7 +1,8 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,8 @@ from app.services import (
     data_subject_service,
 )
 from app.services.integracoes import curseduca_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -102,34 +105,79 @@ async def accept_invite(request: Request, response: Response, body: InviteAccept
 
 
 class EmbedTokenRequest(BaseModel):
-    email: str
+    """Um dos dois: `token` (Waid, verificável) ou `email` (legado, em migração).
+
+    O `email` não prova identidade — quem souber o e-mail de um colega recebe a
+    sessão dele. Ele só continua aceito enquanto os apps migram, e apenas com
+    `embed_email_fallback_enabled`.
+    """
+
+    token: str | None = None
+    email: str | None = None
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, v: str) -> str:
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         v = v.strip().lower()
         if "@" not in v or len(v) < 3:
             raise ValueError("Email inválido")
         return v
 
+    @model_validator(mode="after")
+    def exigir_um_dos_dois(self) -> "EmbedTokenRequest":
+        if bool(self.token) == bool(self.email):
+            raise ValueError("Envie `token` (recomendado) ou `email`, não os dois")
+        return self
+
+
+async def _auditar_embed(
+    db: AsyncSession, request: Request, user: User, via: str
+) -> None:
+    """Registra quem entrou por embed, e por qual caminho.
+
+    Existe porque não existia: até aqui, uma sessão emitida por embed não deixava
+    rastro nenhum. Sem isso, um acesso indevido pelo caminho por e-mail seria
+    indetectável mesmo depois de descoberto o método.
+    """
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="auth.embed",
+            entity_type="user",
+            entity_id=user.id,
+            metadata_={"via": via, "origin": request.headers.get("origin", "")},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
+    await db.commit()
+
 
 @router.post("/embed/token", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def embed_token(
     request: Request,
     response: Response,
     body: EmbedTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Autenticação para embeds externos (ex: Curseduca). Cria usuário se não existir.
+    """Autenticação para o embed no LMS. Dois caminhos, com garantias diferentes.
 
-    SEGURANÇA: o header Origin é definido pelo browser em requisições cross-site, mas
-    NÃO é prova de identidade — um cliente server-side (curl/script) pode forjá-lo. Por
-    isso o Origin é apenas defesa em profundidade. A prova real de que o e-mail pertence
-    a um membro matriculado vem da validação server-to-server na API da Curseduca
-    (ver `curseduca_service.verify_active_member`). Essa validação é obrigatória em
-    produção — `Settings._validate_production_secrets` derruba o startup se estiver
-    desligada, porque sem ela este endpoint emite token para qualquer e-mail informado.
+    **Por token (Waid)** — verificável. A página pede identidade por `postMessage`,
+    a Waid devolve um token opaco de uso único (5 min), e nós o trocamos pela
+    identidade numa chamada server-to-server. O e-mail é RESULTADO da verificação,
+    não entrada. Quem não está dentro do iframe, logado na Waid, não tem token.
+
+    **Por e-mail (legado)** — NÃO verificável, e é o motivo desta migração
+    existir: o header `Origin` é forjável server-side, e a validação de matrícula
+    prova que o e-mail é de um membro, não que o chamador é ele. Um `curl` com o
+    `Origin` certo e o e-mail de um colega devolve a sessão dele.
+
+    O caminho por e-mail só responde com `embed_email_fallback_enabled` e some na
+    Fase 4 do plano de migração. Cada uso sai em WARNING — é esse log que diz
+    quando é seguro cortar.
     """
     origin = request.headers.get("origin", "")
     settings = get_settings()
@@ -137,19 +185,75 @@ async def embed_token(
     if origin not in allowed_origins:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
 
-    # Validação server-to-server (fail-closed quando habilitada): confirma que o e-mail
-    # é de um membro ativo antes de emitir token. No-op enquanto não configurada.
-    membro = await curseduca_service.verify_active_member(body.email)
+    if body.token:
+        user, via = await _entrar_por_token_waid(db, body.token), "token"
+    else:
+        if not settings.embed_email_fallback_enabled:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Este app precisa ser atualizado: a identificação por e-mail foi descontinuada.",
+            )
+        user, via = await _entrar_por_email(db, body.email), "email"
 
-    user, _ = await auth_service.get_or_create_embed_user(body.email, db)
-    # O payload já está em mãos: os grupos `[CFM] <especialidade>` preenchem a
-    # especialidade de quem entrou antes do cadastro novo existir, sem uma
-    # requisição a mais e sem tela nenhuma. Não levanta exceção — enriquecer
-    # perfil não pode barrar login.
-    await auth_service.reconciliar_especialidade_do_embed(db, user, membro)
+    await _auditar_embed(db, request, user, via)
     token = auth_service.create_access_token(user)
     _set_session_cookie(response, token)
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
+
+
+async def _entrar_por_token_waid(db: AsyncSession, token_waid: str) -> User:
+    """Caminho verificável: troca o token pela identidade e resolve o usuário."""
+    try:
+        identidade = await curseduca_service.trocar_token_de_identidade(token_waid)
+    except curseduca_service.TokenDeIdentidadeInvalido as exc:
+        # 401 com código, e não 403: o cliente CONSEGUE se recuperar sozinho
+        # pedindo outro token pelo mesmo evento. Tratar como falha definitiva
+        # deixaria o médico numa tela de erro que um retry resolveria.
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            {"codigo": exc.codigo, "mensagem": "Token de identidade inválido ou expirado."},
+        ) from exc
+    except curseduca_service.CurseducaNotConfigured as exc:
+        # Credencial nossa, permissão ausente para o endpoint, ou a Waid fora do
+        # ar. Pedir outro token não resolve — insistir viraria laço.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Não foi possível confirmar sua identidade no momento.",
+        ) from exc
+
+    await _throttle_by_email("embed_token", identidade.uuid, limit=20, window_seconds=900)
+
+    user, _ = await auth_service.get_or_create_por_identidade_waid(db, identidade)
+
+    anterior = await auth_service.sincronizar_email_da_waid(db, user, identidade)
+    if anterior:
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.email_alterado_pela_waid",
+                entity_type="user",
+                entity_id=user.id,
+                metadata_={"de": anterior, "para": user.email},
+            )
+        )
+        await db.commit()
+
+    # Enriquecimento, não portão: o `validate` não devolve `groups`, então os
+    # grupos `[CFM]` ainda vêm da API de membros — agora fail-open e cacheada.
+    membro = await curseduca_service.buscar_membro_para_enriquecer(user.email)
+    await auth_service.reconciliar_especialidade_do_embed(db, user, membro)
+    return user
+
+
+async def _entrar_por_email(db: AsyncSession, email: str) -> User:
+    """Caminho legado. Fail-closed na matrícula, mas NÃO prova identidade."""
+    logger.warning(
+        "Embed autenticado por e-mail (caminho legado, não verificável): %s", email
+    )
+    membro = await curseduca_service.verify_active_member(email)
+    user, _ = await auth_service.get_or_create_embed_user(email, db)
+    await auth_service.reconciliar_especialidade_do_embed(db, user, membro)
+    return user
 
 
 async def _throttle_by_email(scope: str, email: str, limit: int, window_seconds: int) -> None:

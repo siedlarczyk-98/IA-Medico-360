@@ -1,7 +1,7 @@
 # Arquitetura Técnica — Médico 360
 
-> Levantamento estático do código em **2026-08-28** (commit `bbcc9a2`). Referências `arquivo:linha` apontam para a raiz do repositório.
-> Substitui a versão de 2026-08-20 — o que mudou desde então está no §1.
+> Levantamento estático do código em **2026-09-02** (commit `14496b0`). Referências `arquivo:linha` apontam para a raiz do repositório.
+> Substitui a versão de 2026-08-28 — o que mudou desde então está no §1.
 
 ## 0. Como ler este documento
 
@@ -9,9 +9,10 @@ Se você tem uma tarde para entender o sistema, leia nesta ordem:
 
 1. **§2 — topologia.** Quantos serviços existem de verdade e quem fala com quem.
 2. **§5 — pipeline do Orquestrador.** É o produto. Todo o resto do backend orbita este fluxo.
-3. **§6 — contexto e memória.** Histórico, orçamento de tokens e pastas-como-projeto. É a parte mais recente e a mais fácil de quebrar sem perceber.
-4. **§11 — banco.** O ER completo e as constraints que a aplicação assume.
-5. **§17 — pontos de atenção.** Onde estão as armadilhas conhecidas.
+3. **§3.4 — identidade profissional.** Como o médico é reconhecido e de onde vem a especialidade dele. É o trabalho mais recente e o que mais toca os três frontends.
+4. **§6 — contexto e memória.** Histórico, orçamento de tokens e pastas-como-projeto. É fácil de quebrar sem perceber.
+5. **§11 — banco.** O ER completo e as constraints que a aplicação assume.
+6. **§17 — pontos de atenção.** Onde estão as armadilhas conhecidas, e o mapa de dívidas com tamanho e risco.
 
 O resto é referência: tabelas de rotas, variáveis de ambiente, CI, scripts.
 
@@ -28,22 +29,22 @@ Documentos irmãos, que este aqui não duplica:
 
 ---
 
-## 1. O que mudou desde o levantamento anterior (20 → 28 de agosto)
+## 1. O que mudou desde o levantamento anterior (28 de agosto → 2 de setembro)
 
-Para quem já conhecia o sistema, as mudanças estruturais da última semana:
+Duas frentes: o módulo de notícias e a identidade profissional do médico.
 
-- **O Agregador saiu da interface.** O produto passou a ser o Orquestrador. A remoção é só de superfície: rotas `/agregador/*`, serviço, testes e conversas antigas continuam intactos (`frontend-app/src/lib/appModes.ts:15-27`).
-- **Histórico deixou de vir do cliente.** O campo `history` da API foi removido; o servidor lê o histórico do banco (`app/services/conversation_history.py`). Era um problema de segurança *e* de correção.
-- **Orçamento de contexto por tokens** substituiu o corte por caracteres (`app/services/context_budget.py`).
-- **Pastas viraram projetos**: conversas da mesma pasta servem de contexto umas às outras, por busca semântica (`app/services/folder_context_service.py`, tabela `message_embeddings`).
-- **Dois modos novos** no Orquestrador: `EXAM_REVIEW` (discussão de exame anexado, exige modelo com visão) e `OFF_TOPIC` (saudação, respondida por atalho local sem gastar chamada de modelo).
-- **Anexos múltiplos** (até 5 por mensagem) e vínculo anexo↔mensagem (`file_extractions.interaction_id`).
-- **O cache semântico estava desligado em silêncio** desde sempre — um defeito no normalizador fazia toda escrita ser pulada. Corrigido, e o índice trocado de ivfflat para HNSW (migration `003`).
-- **Expurgo de retenção LGPD passou para dentro do backend** (`app/services/expurgo_agendado.py`) — o cron do painel do Railway tinha parado sem avisar por 39 dias.
-- **Módulo de landing pages**: schema `landing_pages` no banco, rotas `/landing-pages/*`, e três apps React novos (`lp-financas`, `lp-contabilidade`, `lp-parceiros`).
-- **Endpoint PREVENT** (`/api/v1/prevent/calculate`) — escore AHA sem estado, consumido pelo wizard de risco CV.
-- **`frontend-app` ganhou suíte de testes** (Vitest + Testing Library), rodando no CI.
-- **Vigilância das garantias silenciosas** (`vigilancia_agendada.py`): o backend passou a se perguntar a cada 6h se o cache está gravando, se o custo escalou e se o expurgo roda — as duas falhas silenciosas acima foram descobertas por acaso, e essa era a lacuna. Ver §9.2.
+**Notícias (`noticias-app` + schema `news`)** — feed clínico por tema, alimentado por um pipeline PubMed → tagger → redator. O médico escolhe temas e palavras-chave; o feed casa artigos contra as duas coisas. Ver §7-A.
+
+**Identidade profissional** — reescrita de como o sistema sabe quem é o médico:
+
+- **A especialidade passou a ter dono e proveniência.** `users.specialty` era texto livre sem validação; agora existe um vocabulário canônico (`app/medicina/especialidades.py`, 55 especialidades do CFM) e uma regra de precedência entre as quatro fontes que podem escrevê-la (`app/medicina/identidade.py`).
+- **Ela chega sozinha, dos grupos de acesso da Curseduca.** A página de cadastro (outro sistema, outro time) consulta o CFM e cria um grupo `[CFM] <especialidade>`. O payload do membro já era baixado a cada login de embed e descartado; agora dele saem o nome e a especialidade.
+- **O onboarding virou uma tela só, compartilhada pelos três apps** (`shared/onboarding/`). O servidor calcula o que falta (`onboarding_pendencias`); os apps só renderizam. Antes existia em um app só, e os outros dois nem checavam.
+- **O CRM deixou de ser exigido.** A prova de registro vem do grupo `[CFM]`; um CRM digitado à mão não acrescentava prova. A coluna continua, e continua sendo gravada de fonte confiável.
+- **Os frontends passaram a buildar por Dockerfile**, com contexto na raiz do monorepo — o `shared/` fica fora da pasta de cada app e o Nixpacks não o enxergava. Ver §13.2.
+- **`services/` ganhou um subpacote `integracoes/`** com os seis clientes de sistemas externos, que estavam soltos entre os demais.
+- **Roteamento do Orquestrador unificado.** O bloco que decide qual agente atende era escrito duas vezes e já tinha divergido: na mesma situação de confiança baixa, `/query` e `/stream` diziam textos diferentes ao médico. Agora é `orquestrador_shared.decidir_rota`.
+- **A cascata de exclusão de conta saiu do endpoint** para `auth_repository`, e ganhou os primeiros testes — eram 25 linhas de SQL cru sem cobertura nenhuma, onde a ORDEM das exclusões é o que impede erro de chave estrangeira.
 
 ---
 
@@ -51,20 +52,25 @@ Para quem já conhecia o sistema, as mudanças estruturais da última semana:
 
 Não existem "3 instâncias" no sentido de serviços de backend independentes. A arquitetura é:
 
-- **1 backend único** (`app/`) — FastAPI monolítico que serve todos os domínios (Orquestrador/Agregador, Calculadoras, Landing Pages) no mesmo processo, mesmo banco, mesmo router raiz.
-- **5 frontends React**, cada um com deploy próprio no Railway:
+- **1 backend único** (`app/`) — FastAPI monolítico que serve todos os domínios (Orquestrador/Agregador, Calculadoras, Notícias, Landing Pages) no mesmo processo, mesmo banco, mesmo router raiz.
+- **6 frontends React**, cada um com deploy próprio no Railway:
 
 | App | Papel | Porta dev | Rotas de backend que consome |
 |---|---|---|---|
 | `frontend-app/` | Chat do Orquestrador, histórico, pastas, anexos | 5173 | `/auth`, `/orquestrador`, `/agregador`, `/conversations`, `/folders`, `/uploads`, `/users/usage` |
 | `calculadoras-app/` | Calculadoras clínicas | 5174 | `/auth`, `/calculators`, `/prevent`, `/landing-pages/calculators` |
+| `noticias-app/` | Feed clínico por tema | 5176 | `/auth`, `/news`, `/meta` |
 | `lp-financas/` | LP de captação — finanças | 5175 | `/landing-pages/finance` |
-| `lp-contabilidade/` | LP de captação — contabilidade | 5176 | `/landing-pages/accounting` |
+| `lp-contabilidade/` | LP de captação — contabilidade | 5178 | `/landing-pages/accounting` |
 | `lp-parceiros/` | LP de captação — parceiros | 5177 | `/landing-pages/partners` |
 
-Os frontends não conversam entre si. `frontend-app` e `calculadoras-app` compartilham sessão via cookie SSO (`medico360_session`, domínio comum em `COOKIE_DOMAIN`) mais um fluxo dedicado (`/auth/embed/token`) para embeds externos (portal Curseduca). As LPs são públicas — não autenticam, exceto `/landing-pages/calculators/submit`, que é chamada de dentro do módulo logado.
+Fora das pastas de app existe **`shared/`**, na raiz do monorepo: código que os três apps autenticados importam via alias `@shared`. Hoje contém só o onboarding (§3.4). Não é workspace npm — é alias de Vite + `paths` de TypeScript, e é o motivo de os três buildarem por Dockerfile com contexto na raiz (§13.2).
 
-Não há módulo "news" no repositório.
+Os frontends não conversam entre si, e **os três autenticados são embedados separadamente** como iframes no LMS (Curseduca) — cada um com seu próprio `EmbedAuthPage`. Compartilham sessão via cookie SSO (`medico360_session`, domínio comum em `COOKIE_DOMAIN`) mais o fluxo dedicado `/auth/embed/token`. O que eles de fato compartilham é o **banco**: uma linha em `users` serve aos três, e é por isso que o onboarding preenchido em qualquer um vale para todos.
+
+As LPs são públicas — não autenticam, exceto `/landing-pages/calculators/submit`, que é chamada de dentro do módulo logado.
+
+> **Atenção ao ler código antigo:** o `noticias-app` foi um repositório separado (`medico360-news`) antes de migrar para cá. O schema `news` no Postgres tem migrations próprias na cadeia principal desde a `004`.
 
 ```mermaid
 flowchart LR
@@ -142,7 +148,7 @@ app/
 │   └── v1/
 │       ├── router.py    agrega todos os sub-routers sob /api/v1
 │       └── endpoints/   auth, conversations, folders, agregador, orquestrador,
-│                        uploads, usage, health, landing_pages
+│                        uploads, usage, health, landing_pages, news, meta
 ├── calculators/         módulo self-contained das calculadoras
 │   ├── engine/           motor de execução (coerção de campos, validação)
 │   ├── formulas/         fórmulas por especialidade, auto-carregadas no boot
@@ -155,12 +161,26 @@ app/
 ├── core/                config (Settings), database, limiter, circuit_breaker,
 │                        http_client, logging_config, error_tracking, telemetry,
 │                        prompts, alarme (evento operacional no Sentry)
+├── medicina/            DOMINIO PURO — nao importa banco, HTTP nem config
+│   ├── especialidades.py  vocabulario canonico do CFM (55), normalizacao,
+│   │                      leitura dos grupos `[CFM]` da Curseduca
+│   └── identidade.py      precedencia de escrita da especialidade e calculo
+│                          das pendencias de perfil
+├── news/                DOMINIO PURO — taxonomia de temas e lista de periodicos
 ├── middleware/          dlp.py (mascaramento de PII antes do LLM), ner.py (spaCy pt)
-├── models/              models.py (public), calculators.py, landing_pages.py
+├── models/              models.py (public), calculators.py, landing_pages.py, news.py
 ├── repositories/        auth_repository.py
-├── schemas/             agregador, auth, conversations, usage, landing_pages
-└── services/            ver 3.3
+├── schemas/             agregador, auth, conversations, usage, landing_pages, news
+└── services/
+    ├── integracoes/     clientes de sistemas externos (ver 3.3)
+    └── ...              servicos de dominio
 ```
+
+**O padrão que emergiu, e que vale seguir em coisa nova:** `calculators/`, `news/` e
+`medicina/` são fatias verticais — trazem o próprio domínio e não dependem de
+infraestrutura. `app/services/` (32 arquivos, ~9.600 linhas) é o núcleo antigo,
+organizado horizontalmente. Não há projeto para reorganizá-lo; a orientação é
+**construir o novo como fatia e deixar o antigo encolher por atrito**.
 
 ### 3.3 Serviços — o que cada um faz
 
@@ -172,7 +192,6 @@ app/
 | `orquestrador_modes.py` | **Definição única** dos modos: enum, mapa modo→modelo, temperatura, cadeia de fallback, modos que exigem visão, teto de tokens por esforço |
 | `triage_service.py` | Classificação da pergunta em um modo; atalho local para saudações |
 | `agregador_service.py` | Consulta paralela a N modelos (produto legado, fora da UI) |
-| `ai_providers.py` | Providers Anthropic / OpenAI / Gemini / Perplexity + `DlpEnforcingProvider` |
 | `conversation_history.py` | Histórico lido do banco (nunca do cliente) |
 | `context_budget.py` | Corte do histórico por orçamento de tokens estimado |
 | `folder_context_service.py` | Contexto entre conversas da mesma pasta, por similaridade |
@@ -180,24 +199,110 @@ app/
 | `cache_service.py` | Wrapper de Redis (get/set/throttle) |
 | `file_extractor_service.py` | Validação, extração de texto e resolução de anexos |
 | `medication_extractor.py` | Extrai fármacos mencionados na interação |
-| `pharmadb_service.py` | Integração PharmaDB (bula, interação, receita, genérico) |
-| `pubmed_service.py` | Validação de citações e busca de diretrizes mais recentes |
+| `orquestrador_shared.py` (cont.) | `decidir_rota` — **as regras de roteamento vivem aqui**, não nos dois serviços |
 | `response_metadata.py` | Serializa fontes/PubMed em `InteractionResponse.extra_metadata` |
 | `specialty_detector.py` | Detecta especialidade/tópico da interação |
 | `usage_service.py` | Limite semanal de custo por usuário |
 | `pricing.py` | Preços por modelo, cache TTL 1h |
-| `auth_service.py` / `curseduca_service.py` | Login OTP/convite/embed; validação de membro |
+| `auth_service.py` | Login OTP/convite/embed + `reconciliar_especialidade_do_embed` (§3.4) |
+| `news_feed_service.py` | Monta o feed por temas + palavras-chave; piso de especialidade |
+| `news_tagger_service.py` / `news_writer_service.py` / `news_collector_service.py` | Pipeline PubMed → tema → texto em português |
+| `news_digest_service.py` / `news_keyword_service.py` | Digest diário e palavras-chave do médico |
 | `consent_service.py` / `data_subject_service.py` | Consentimento LGPD e exportação do titular |
 | `expurgo_agendado.py` | Expurgo de retenção rodando dentro do processo |
 | `vigilancia_service.py` | Mede cache, custo e última rodada de expurgo; `avaliar` decide o que vira alarme |
 | `vigilancia_agendada.py` | Laço de 6h que roda as medições e alarma no Sentry |
 | `email_service.py` | SendGrid |
 
-### 3.4 Autenticação
+**`services/integracoes/` — quem fala com o mundo de fora.** Separado porque todos
+compartilham a mesma forma: timeout explícito, disjuntor (`app/core/circuit_breaker.py`)
+e uma **decisão deliberada sobre o que fazer quando o outro lado não responde** — que
+é diferente em cada um.
 
-`get_current_user` (`app/api/deps.py:20-81`): aceita `Authorization: Bearer <jwt>` **ou** o cookie `medico360_session`; decodifica com `jwt_secret_key`/`jwt_algorithm`, valida `sub` como UUID e busca o `User` com `status=true`. O cookie é setado em `_set_session_cookie` (`auth.py:48`) com `httponly=True`, `secure=is_production`, `samesite=lax`, `domain=settings.cookie_domain`.
+| Módulo | Sistema externo | Política de falha |
+|---|---|---|
+| `ai_providers.py` | Anthropic / OpenAI / Gemini / Perplexity + `DlpEnforcingProvider` | cadeia de fallback entre modelos |
+| `curseduca_service.py` | API da Curseduca (validação de matrícula) | **fail-closed** — a dúvida é sobre direito de acesso |
+| `pharmadb_service.py` | PharmaDB (bula, interação, receita, genérico) | degrada com aviso |
+| `pubmed_service.py` / `pubmed_eutils.py` | PubMed (validação de citação, diretrizes) | degrada com aviso |
+| `news_pubmed.py` | PubMed (coleta do feed) | pula a rodada |
 
+### 3.4 Autenticação e identidade profissional
+
+**Sessão.** `get_current_user` (`app/api/deps.py`) aceita `Authorization: Bearer <jwt>`
+**ou** o cookie `medico360_session`; decodifica com `jwt_secret_key`, valida `sub` como
+UUID e busca o `User` com `status=true`. O cookie é setado em `_set_session_cookie`
+(`auth.py`) com `httponly`, `secure=is_production`, `samesite=lax`, `domain=COOKIE_DOMAIN`.
 Todas as rotas exigem autenticação, exceto as marcadas "não" nas tabelas do §4.
+
+**Como o médico entra.** Quatro caminhos: OTP por e-mail, convite, auto-cadastro
+(desligado por padrão) e — o que importa na prática — **embed do LMS**
+(`POST /auth/embed/token`). O LMS monta a URL do iframe com `?email=`; trocamos por um
+JWT. O `?email=` não é identidade: a prova vem da validação server-to-server na API da
+Curseduca, obrigatória em produção (o startup cai sem ela).
+
+#### De onde vem a especialidade
+
+A página de cadastro — **outro sistema, outro time** — coleta CRM e consulta o CFM, e
+cria na Curseduca um grupo de acesso chamado `[CFM] <especialidade>` (ou
+`[CFM] GENERALISTA`, quando o Conselho não devolve especialidade). O payload do membro
+que já era baixado para validar a matrícula traz `name` e `groups`; **os dois eram
+descartados**. Hoje `auth_service.reconciliar_especialidade_do_embed` os lê a cada login
+de embed.
+
+Quatro fontes podem escrever a especialidade, com precedência estrita
+(`app/medicina/identidade.py`):
+
+```
+admin  >  cadastro  >  cfm  >  waid_grupo  >  declarado
+```
+
+`declarado` — o que o médico digita — fica no **fundo**, e isso é deliberado:
+`users.specialty` não é preferência de leitura, é identidade profissional, e a intenção
+é que passe a definir acesso a conteúdo pago. Se fosse editável pelo app, trocar de
+especialidade alcançaria produto não contratado. O que o médico ajusta livremente é o que
+ele **lê** (`news.user_topics`), não quem ele é. Correção só por suporte
+(`PATCH /auth/admin/users/{id}/especialidade`, com `AuditLog`) — é o que sustenta a trava
+perante o direito de correção da LGPD (art. 18, III).
+
+Invariantes que o código protege, e que têm teste:
+
+- **`[CFM] GENERALISTA` não vira "Clínica Médica".** Clínica Médica é especialidade real,
+  com RQE; afirmá-la para quem o Conselho diz não ter nenhuma seria gravar registro falso.
+  O generalista fica com `specialty` NULL — e o conteúdo dele é resolvido noutra camada,
+  pelo `ESPECIALIDADE_PISO` do feed.
+- **Duas residências são guardadas** (`users.specialties`, JSONB). Clínica Médica é
+  pré-requisito de quase toda residência clínica; guardar só uma revogaria o acesso à
+  outra. `specialty_slug` é só a principal, para exibição e prompt.
+- **A reconciliação nunca derruba o login.** Enriquecer perfil é acessório; autenticar não.
+- **Ela só roda em `/auth/embed/token`.** Quem reaproveita sessão não é enriquecido até o
+  token expirar ou abrir outro app. É a explicação para "funcionou no segundo app e não no
+  primeiro".
+
+#### O onboarding
+
+Uma tela só, em **`shared/onboarding/`**, importada pelos três apps. O servidor calcula
+`onboarding_pendencias` (`identidade.pendencias`) e os apps **apenas renderizam** — nenhum
+deles decide o que falta. É o que permite acrescentar uma exigência no backend e os três
+herdarem; se cada um decidisse, uma regra nova viraria três divergências. Foi exatamente
+assim que o repo acabou com três listas de especialidade incompatíveis.
+
+Sobrou pouco a perguntar, porque quase tudo chega sozinho:
+
+| Pendência | Por que ainda é perguntada |
+|---|---|
+| `med_status` | Nenhuma fonte distingue residente de especialista — o R1 aparece no CFM sem RQE, igual ao generalista |
+| `aceite_termos` | Ninguém consente pelo titular. Fica aqui, e não na página de cadastro, porque a versão dos documentos (`consent_service.VERSAO_DOCUMENTOS`) é nossa |
+| `nome`, `especialidade` | Só quando não chegaram do LMS |
+
+**CRM não é pendência**, decisão de 2026-09-02: a prova de registro é o grupo `[CFM]`;
+um número digitado à mão não acrescenta prova. A coluna existe e continua sendo gravada
+de fonte confiável.
+
+Comportamento por app: `frontend-app` e `noticias-app` **bloqueiam** (no segundo, o perfil
+define o que ele vai ler); `calculadoras-app` só **avisa**, e só sobre o aceite — não
+filtra nada por especialidade, então cobrar o perfil ali prometendo "conteúdo da sua
+especialidade" seria prometer o que aquele app não entrega.
 
 ---
 
@@ -205,21 +310,34 @@ Todas as rotas exigem autenticação, exceto as marcadas "não" nas tabelas do �
 
 ### 4.1 `/auth` (`app/api/v1/endpoints/auth.py`)
 
-| Método | Path | Linha | Auth | Rate limit | Descrição |
-|---|---|---|---|---|---|
-| POST | /api/v1/auth/register | 62 | não | 5/min | Cadastro público (se `allow_public_registration`); envia convite por e-mail |
-| POST | /api/v1/auth/invite/generate | 72 | sim (admin) | 30/min | Gera token de convite; grava `AuditLog action=invite.generate` |
-| POST | /api/v1/auth/invite/accept | 105 | não | 10/min | Aceita convite por token+e-mail; seta cookie SSO |
-| POST | /api/v1/auth/embed/token | 125 | não | 5/min | SSO para embeds; valida `Origin` contra `embed_allowed_origins ∪ {calculadoras_url}` e o membro via Curseduca; cria usuário se necessário |
-| POST | /api/v1/auth/otp/request | 173 | não | 3/15min (+3/900s por e-mail) | Solicita OTP por e-mail |
-| POST | /api/v1/auth/otp/verify | 180 | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta cookie SSO |
-| POST | /api/v1/auth/onboarding | 189 | sim | 30/min | Onboarding + consentimento de termos na mesma transação |
-| GET | /api/v1/auth/me | 223 | sim | — | Usuário logado + hash HMAC para o Intercom |
-| PATCH | /api/v1/auth/me | 230 | sim | 30/min | Atualiza nome/e-mail (valida unicidade) |
-| GET | /api/v1/auth/me/consentimentos | 252 | sim | — | Situação dos consentimentos LGPD + versão vigente |
-| POST | /api/v1/auth/me/consentimentos/{tipo}/revogar | 269 | sim | 10/h | Revoga consentimento (exceto `termos_e_privacidade`) |
-| GET | /api/v1/auth/me/export | 302 | sim | 5/h | Portabilidade LGPD art. 18, V |
-| DELETE | /api/v1/auth/me | 318 | sim | 10/min | Exclusão de conta em cascata |
+| Método | Path | Auth | Rate limit | Descrição |
+|---|---|---|---|---|
+| POST | /api/v1/auth/register | não | 5/min | Cadastro público (se `allow_public_registration`); envia convite por e-mail |
+| POST | /api/v1/auth/invite/generate | sim (admin) | 30/min | Gera token de convite; grava `AuditLog action=invite.generate` |
+| POST | /api/v1/auth/invite/accept | não | 10/min | Aceita convite por token+e-mail; seta cookie SSO |
+| POST | /api/v1/auth/embed/token | não | 5/min | SSO para embeds; valida `Origin` e o membro via Curseduca; cria usuário se necessário; **reconcilia nome e especialidade** (§3.4) |
+| POST | /api/v1/auth/otp/request | não | 3/15min (+3/900s por e-mail) | Solicita OTP por e-mail |
+| POST | /api/v1/auth/otp/verify | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta cookie SSO |
+| POST | /api/v1/auth/onboarding | sim | 30/min | Aplica o que veio e o SERVIDOR decide se acabou; consentimento na mesma transação |
+| GET | /api/v1/auth/me | sim | — | Usuário logado + `onboarding_pendencias`, `med_status_opcoes`, `specialty_editavel` |
+| PATCH | /api/v1/auth/me | sim | 30/min | Nome, e-mail, CRM+UF e especialidade — esta última só se `specialty_editavel` (senão 409) |
+| PATCH | /api/v1/auth/admin/users/{id}/especialidade | sim (admin) | 30/min | Correção pelo suporte, com `AuditLog`. É o que sustenta a trava do §3.4 perante a LGPD |
+| GET | /api/v1/auth/me/consentimentos | sim | — | Situação dos consentimentos LGPD + versão vigente |
+| POST | /api/v1/auth/me/consentimentos/{tipo}/revogar | sim | 10/h | Revoga consentimento (exceto `termos_e_privacidade`) |
+| GET | /api/v1/auth/me/export | sim | 5/h | Portabilidade LGPD art. 18, V |
+| DELETE | /api/v1/auth/me | sim | 10/min | Exclusão de conta em cascata (a cascata vive em `auth_repository`) |
+
+> Os números de linha saíram desta tabela de propósito: envelheciam a cada edição do
+> arquivo e já apontavam para o lugar errado. O nome da função é âncora melhor.
+
+### 4.1-A `/meta` (`app/api/v1/endpoints/meta.py`)
+
+| Método | Path | Auth | Descrição |
+|---|---|---|---|
+| GET | /api/v1/meta/especialidades | **não** | As 55 especialidades canônicas (`{slug, nome}`), `Cache-Control: 1h` |
+
+Público porque a tela de cadastro precisa da lista **antes** de existir sessão. Exigir
+token aqui devolveria a lista para dentro do TSX, que é o que este trabalho desfez.
 
 ### 4.2 `/orquestrador` (`app/api/v1/endpoints/orquestrador.py`)
 
@@ -306,7 +424,11 @@ O PREVENT é um caso à parte de propósito: campos fora da faixa de validade vo
 
 O bloqueio por e-mail só se aplica quando o e-mail veio na URL (embed do fornecedor): sem e-mail não há como identificar reenvio, e a submissão segue permitida.
 
-### 4.8 `/users/usage` e `/health`
+### 4.8 `/news`
+
+Ver §7-A.4 — a tabela completa está lá, junto do contexto do módulo.
+
+### 4.9 `/users/usage` e `/health`
 
 | Método | Path | Arquivo:linha | Auth | Descrição |
 |---|---|---|---|---|
@@ -422,6 +544,70 @@ Módulo self-contained (`app/calculators/`), com contrato próprio em `docs/Calc
 - **Uma versão ativa por calculadora**, garantido por índice único parcial no banco (§11.3).
 - Fórmulas em Python hoje: CHA₂DS₂-VASc + HAS-BLED, Cockcroft-Gault, CURB-65, PREVENT.
 - O **Risco CV SBC 2025** é um caso especial: a fórmula em Python foi removida e o wizard passou a viver no frontend (`calculadoras-app/src/calculators/riscoCv/`), consumindo `/prevent/calculate` para a parte quantitativa. A definição continua no banco (seed `seed_risco_cv_sbc2025`) e o E2E cobre o fluxo.
+
+---
+
+## 7-A. Notícias
+
+Feed clínico por tema. Migrou de um repositório separado (`medico360-news`); o schema
+`news` entra na cadeia de migrations desde a `004`.
+
+### 7-A.1 O pipeline
+
+```
+PubMed  →  collector  →  tagger  →  writer  →  published
+           (coleta)      (temas)   (reescreve em pt)
+```
+
+`app/services/news_collector_service.py` busca por ISSN dos periódicos listados em
+`app/news/journals.py`; `news_tagger_service.py` classifica cada artigo contra o
+**vocabulário fechado** de `app/news/taxonomia.py` (51 temas) — slug fora da lista é
+descartado com WARNING; `news_writer_service.py` reescreve em português.
+
+### 7-A.2 Dois eixos de personalização, de propósito
+
+| Eixo | Casa contra | Por quê |
+|---|---|---|
+| **Temas** (`news.user_topics`) | o que o tagger atribuiu | vocabulário controlado, curado |
+| **Palavras-chave** (`news.user_keywords`) | o TEXTO do artigo (`busca_tsv`) | o médico digita o que quiser |
+
+Palavra-chave **não podia ser "mais um tema"**: o tagger escolhe de uma lista fechada, e
+um tema criado pelo usuário nunca estaria nela — ele veria o tema marcado na tela e
+receberia zero destaques para sempre, sem erro e sem log. Os pesos do `tsvector` (`A` no
+título, `B` no corpo) são o que separa "artigo SOBRE amiloidose" de "artigo que menciona
+amiloidose uma vez".
+
+### 7-A.3 O papel da especialidade
+
+`news.topic_specialties` liga tema ↔ especialidade com peso (`core` / `relevante`) e casa
+**por rótulo**, não por FK — daí a regra 8 do §17. A especialidade do médico:
+
+- **pré-marca** os temas na primeira visita (`temas_sugeridos_para`), usando **todas** as
+  especialidades dele (`users.specialties`);
+- **preenche** o feed quando ele tem poucos itens, com temas da área que ele não marcou
+  (`preenchimento=True` — e esses **nunca** disparam o digest por e-mail: completar a tela
+  é cortesia de navegação, não motivo para interromper alguém);
+- **não decide nada depois disso.** O que ele escolheu manda.
+
+`ESPECIALIDADE_PISO = "Clínica Médica"` atende quem não tem especialidade — o embed cria
+usuário só com e-mail. O piso **não filtra por peso**, porque nenhum tema é `core` de
+Clínica Médica; exigir `core` ali devolveria lista vazia. Toda vez que ele é acionado sai
+`news.piso_especialidade` no log: **essa contagem é a métrica de sucesso do trabalho de
+identidade do §3.4.**
+
+### 7-A.4 Rotas (`/api/v1/news`, todas autenticadas)
+
+| Rota | O que faz |
+|---|---|
+| `GET /news/highlights` | O feed montado (temas + palavras-chave + preenchimento) |
+| `GET /news/articles/{id}` | Um destaque |
+| `GET` / `PUT /news/me/topics` | Temas escolhidos; o GET traz os sugeridos e a especialidade |
+| `GET` / `POST` / `DELETE /news/me/keywords` | Palavras-chave |
+| `GET /news/keywords/preview` | Quantos destaques um termo traria **antes** de salvar |
+| `GET` / `POST /news/favorites` | Favoritos |
+| `POST /news/feedback/nao-interessa` | Registra desinteresse, com a especialidade do momento |
+| `GET` / `PUT /news/me/preferences` | E-mail do digest |
+| `POST /news/admin/pipeline` | Dispara o pipeline (admin) |
 
 ---
 
@@ -541,7 +727,40 @@ e2e/                       risco-cv-sbc2025.spec.ts + helpers (auth, wizard)
 
 Duas formas de calculadora: **genérica**, um `formSpec` declarativo renderizado por `DynamicCalculatorForm`; e **com wizard próprio**, uma página dedicada. `RequestCalculatorModal` é a ponte para `/landing-pages/calculators/submit`.
 
-### 10.3 LPs
+### 10.3 `noticias-app/`
+
+React 19 + Vite, **sem React Router e sem design tokens** — é o mais enxuto dos três.
+Duas telas: `TemasPage` (escolha de temas, com amostra real de conteúdo em cada um) e
+`HighlightsMagazine` (o feed). O estado é uma máquina de quatro fases
+(`carregando | erro | temas | feed`) no próprio `App.tsx`.
+
+É o único que guarda o **dono do token** (`medico360_noticias_email` + `tokenPertenceA`):
+em navegador compartilhado — estação de clínica, plantão — o `?email=` do LMS muda mas o
+token antigo continua no `localStorage`, e o segundo médico herdaria a sessão do primeiro.
+`frontend-app` e `calculadoras-app` **não têm essa proteção**.
+
+### 10.4 `shared/` — código comum aos três apps autenticados
+
+Na raiz do monorepo, fora das pastas de app. Hoje só o onboarding
+(`shared/onboarding/`), importado via alias `@shared`.
+
+Não é workspace npm — introduzir workspaces arrastaria build, CI e Dockerfile dos três de
+uma vez. É alias de Vite + `paths` no tsconfig. Duas consequências que travaram o deploy e
+estão resolvidas, mas convém conhecer antes de mexer:
+
+- **TypeScript não acha o React a partir de `shared/`** (ele fica fora do `node_modules`
+  de cada app): daí o `paths` para `@types/react` no `tsconfig.app.json` dos três.
+- **Vite também não**, em runtime: daí `resolve.dedupe: ['react','react-dom']` no
+  `vite.config.ts` dos três — que de quebra garante uma cópia só do React, já que duas
+  quebrariam os hooks.
+
+O componente é **autossuficiente por necessidade**: traz a própria paleta (cópia do
+`:root` do `frontend-app`) e a própria fonte, porque o `noticias-app` não define variável
+de CSS nenhuma. Se o `:root` daquele app mudar, `shared/onboarding/estilos.ts` **não
+acompanha sozinho** — é o custo de não ter tokens compartilhados, e está anotado no topo
+do arquivo.
+
+### 10.5 LPs
 
 `lp-financas`, `lp-contabilidade`, `lp-parceiros`: React 19 + Vite + Tailwind 4 + shadcn/ui, cada uma com um formulário (`LeadForm` / `InterestForm` / `PartnerForm`), schema de perguntas em `src/lib/*-interest-schema.ts` e `src/lib/api.ts` apontando para o backend via `VITE_API_URL`.
 
@@ -556,7 +775,8 @@ PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco f
 ```
 000_baseline → 000a_lp_schema → 000b_lp_tables → 000c → 000d → 000e → 000f → 000g
              → 000h_lp_partners → 001_file_interaction → 002_msg_embeddings
-             → 003_cache_hnsw   (head)
+             → 003_cache_hnsw → 004_news_monorepo → 005_news_taxonomia
+             → 006_news_keywords → 007_identidade_profissional   (head)
 ```
 
 | Revisão | O que faz |
@@ -566,6 +786,10 @@ PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco f
 | `001_file_interaction` | `file_extractions.interaction_id` (nullable, `SET NULL`) — liga o anexo à mensagem em que foi enviado |
 | `002_msg_embeddings` | Tabela `message_embeddings` para o contexto de pasta |
 | `003_cache_hnsw` | Troca o índice de `semantic_cache` de ivfflat para HNSW, com `CONCURRENTLY` |
+| `004_news_monorepo` | Schema `news` inteiro (artigos, temas, escolhas do usuário), vindo do repositório separado |
+| `005_news_taxonomia` | Seed idempotente da taxonomia de temas (`ON CONFLICT DO NOTHING`) |
+| `006_news_keywords` | `news.user_keywords` + coluna gerada `articles.busca_tsv` (tsvector, peso A/B) |
+| `007_identidade_profissional` | 10 colunas em `users` para a identidade profissional (§3.4). Todas nullable, **sem backfill** — preencher é trabalho revisável de `scripts/normalizar_especialidades.py`, não efeito colateral de um `alembic upgrade` |
 
 `alembic/versions_legacy/` é histórico arquivado, **fora da cadeia ativa** — não deve ser alterado nem referenciado por migrations novas.
 
@@ -1046,19 +1270,38 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-
 
 Não há `docker-compose.yml` nem `Procfile` — apenas este Dockerfile serve o backend.
 
-### 13.2 Frontends — `railway.json` (idêntico nos cinco)
+### 13.2 Frontends — Dockerfile por app, contexto na raiz
 
-```json
-{
-  "build": { "builder": "NIXPACKS", "buildCommand": "npm run build" },
-  "deploy": {
-    "startCommand": "npx serve dist -s -l tcp://0.0.0.0:$PORT",
-    "healthcheckPath": "/"
-  }
-}
-```
+Os três apps autenticados importam `shared/onboarding/`, que fica **fora da pasta de cada
+um**. Com o Nixpacks e Root Directory apontando para a pasta do app, `../shared` não
+existia no contexto do build e o `tsc -b` falhava. Cada um tem agora seu Dockerfile
+multi-stage, com o contexto na raiz do monorepo.
 
-As LPs e o `frontend-app` também trazem `nixpacks.toml` com as mesmas duas linhas.
+No painel do Railway, por serviço:
+
+| Campo | Valor |
+|---|---|
+| Root Directory | `/` |
+| Builder | Dockerfile |
+| `RAILWAY_DOCKERFILE_PATH` (variável) | `<app>/Dockerfile` |
+| Config file path | vazio |
+
+**As duas armadilhas, ambas silenciosas:**
+
+1. **Sem `RAILWAY_DOCKERFILE_PATH`**, o Railway acha o `Dockerfile` da raiz — que é o do
+   backend — e o serviço de frontend sobe `uvicorn`, quebrando por falta de `DATABASE_URL`.
+   No log de um frontend deve aparecer `npm ci` e `vite build`, nunca `pip install`.
+2. **`VITE_API_URL` é resolvida em tempo de BUILD.** Se faltar, o build passa e o bundle
+   aponta para `localhost:8000` em produção. Só aparece quando alguém abre o app.
+
+O `.dockerignore` da raiz é obrigatório: sem ele cada build enviaria `venv/`,
+`node_modules/` e os **dumps de banco em `backups/`**.
+
+> Config as Code (`railway.json` / `railway.toml`) está **depreciado** e para de ser lido
+> em **2026-12-01**. Os arquivos dos três apps autenticados foram removidos porque
+> sobrescreviam o painel; as quatro LPs ainda têm os seus. A substituição é
+> Infrastructure as Code (`.railway/railway.ts`), que descreve o projeto inteiro num
+> arquivo — migração pendente, e ela toca todos os serviços de uma vez.
 
 ### 13.3 Backup
 
@@ -1074,9 +1317,11 @@ As LPs e o `frontend-app` também trazem `nixpacks.toml` com as mesmas duas linh
 
 ### 14.1 Suíte
 
-- **Backend** — `tests/`, 35 arquivos (30 na raiz + 5 de calculadoras). Cobertura mínima de 50% cobrada no CI como catraca contra regressão (o número é o medido, arredondado para baixo — não é um atestado de qualidade).
+- **Backend** — `tests/`, 46 arquivos, **811 testes**. Cobertura mínima de 50% cobrada no CI como catraca contra regressão (o número é o medido, arredondado para baixo — não é um atestado de qualidade).
   - Segurança/LGPD: `test_authorization`, `test_idor`, `test_lgpd`, `test_consentimento`, `test_dlp`, `test_dlp_enforcement`, `test_expurgo_agendado`, `test_calculadoras_isolamento`, `test_contexto_seguranca`
-  - Orquestrador: `test_orquestrador_paridade` (garante que `/query` e `/stream` não divirjam), `test_orquestrador_stream`, `test_contexto`, `test_contexto_cache`, `test_folder_context`, `test_exames`, `test_conversas_referencias`, `test_response_metadata`
+  - Orquestrador: `test_orquestrador_paridade` (garante que `/query` e `/stream` não divirjam — **leia este primeiro**, o docstring conta os dois incidentes que o motivaram), `test_orquestrador_stream`, `test_contexto`, `test_contexto_cache`, `test_folder_context`, `test_exames`, `test_conversas_referencias`, `test_response_metadata`
+  - Identidade: `test_especialidades` (vocabulário, precedência, leitura dos grupos `[CFM]`), `test_reconciliacao_embed`, `test_onboarding_pendencias`, `test_prompts_contexto`, `test_normalizar_especialidades`, `test_exclusao_de_conta`
+  - Notícias: `test_news_taxonomia` (coerência da taxonomia, sem banco), `test_news_feed`, `test_news_feed_multiespecialidade`, `test_news_pipeline`, `test_news_keywords`
   - Cache: `test_cache_semantico_contrato`, `test_cache_hit_historico`
   - Resiliência/infra: `test_circuit_breaker`, `test_agregador_resiliencia`, `test_health`, `test_logging`, `test_error_tracking`, `test_usage_limits`, `test_harness`
   - Calculadoras: `tests/calculators/` (fórmulas + validação)
@@ -1147,22 +1392,47 @@ Armadilhas conhecidas, em ordem de quanto custam se ignoradas:
 2. **Migrations partem de `000_baseline`.** `alembic/versions_legacy/` é arquivo morto; não altere nem referencie.
 3. **Os filtros de DLP têm exceções calibradas por medição real** (epônimos médicos — "manobra de Valsalva" não é um paciente). Simplificar `ner._is_person` sem ler a justificativa reintroduz falsos positivos que apagam termos clínicos em definitivo.
 4. **O isolamento da busca em pasta é filtro por `user_id` + `folder_id` em todo caminho de leitura.** É o ponto do sistema onde um filtro frouxo vaza dado de um paciente para a discussão de outro.
-5. **`/query` e `/stream` precisam continuar equivalentes.** Há teste de paridade (`tests/test_orquestrador_paridade.py`) porque os dois já divergiram por cópia. Mudança em um dos dois provavelmente pertence a `orquestrador_shared.py`.
+5. **`/query` e `/stream` precisam continuar equivalentes.** Há teste de paridade (`tests/test_orquestrador_paridade.py`) porque os dois já divergiram por cópia — duas vezes: o atalho de saudação (que virava erro interno no `/query`) e o texto do pedido de reformulação. Mudança em um dos dois provavelmente pertence a `orquestrador_shared.py`.
 6. **Modos se definem em `orquestrador_modes.py` e em nenhum outro lugar.** O mapa modo→prompt em `core/prompts.py` ainda é um segundo lugar — é o débito 6, conhecido e aberto.
-7. **Não há backup automático do Railway.** Antes de qualquer operação destrutiva no banco, rode `scripts/backup_producao.py`.
-8. **Alarme novo exige medição nova.** Toda garantia que o sistema passar a oferecer em silêncio (uma tarefa agendada, um cache, um limite) deve virar uma medição em `vigilancia_service.py`. As duas falhas silenciosas de agosto não foram falta de código correto — foram falta de alguém perguntando.
-9. **`docs/debitos.md` tem 14 itens com o raciocínio de cada um** — incluindo quatro já resolvidos e um marcado como "não é dívida". Vale ler antes de propor melhorias: várias já foram consideradas e recusadas por motivo registrado.
+7. **Especialidade se escreve por `identidade.aplicar_especialidade`, e por mais nenhum caminho.** Um `user.specialty = ...` solto em qualquer lugar mata a precedência do §3.4 e o arquivo vira decoração.
+8. **Renomear um rótulo de especialidade é MIGRAÇÃO DE DADOS.** `users.specialty` e `news.topic_specialties.specialty` casam por string. Há teste travando os 55 rótulos que estão em produção; se ele falhar, a pergunta não é "como conserto o teste".
+9. **Não há backup automático do Railway.** Antes de qualquer operação destrutiva no banco, rode `scripts/backup_producao.py`.
+10. **Alarme novo exige medição nova.** Toda garantia que o sistema passar a oferecer em silêncio (uma tarefa agendada, um cache, um limite) deve virar uma medição em `vigilancia_service.py`. As falhas silenciosas de agosto não foram falta de código correto — foram falta de alguém perguntando.
+11. **`docs/debitos.md` tem o raciocínio de cada débito** — incluindo os já resolvidos e um marcado como "não é dívida". Vale ler antes de propor melhorias: várias já foram consideradas e recusadas por motivo registrado.
 
-Débitos abertos que mais afetam quem for programar aqui:
+### 17.1 Mapa de dívidas — tamanho e risco
 
-| # | Débito | Impacto prático |
-|---|---|---|
-| 2 | PDF escaneado sem OCR (mitigado com aviso) | O médico é avisado, mas o conteúdo não chega ao modelo |
-| 6 | Mapa de prompts e mapa de modos em arquivos diferentes | Acrescentar modo exige achar os dois |
-| 7 | Teste intermitente de consentimento — causa não identificada | Pode falhar sem relação com a sua mudança |
-| 8 | Anexos sem backfill no histórico | Conversas antigas não mostram os arquivos enviados |
-| 10 | Calibração da busca em pasta só parcialmente medida | Threshold e nº de trechos são estimativas informadas |
-| 11 | Sem índice vetorial em `message_embeddings` | Decisão consciente; revisar se pastas crescerem muito |
-| 12 | Indexação preguiçosa cobra a conta na primeira pergunta | Primeira pergunta numa pasta grande é mais lenta |
-| 13 | Embeddings não reindexados quando a mensagem muda | Só importa se edição de mensagem for implementada |
-| 14 | Sem cobertura end-to-end do fluxo de exames | Regressão em anexo+visão só aparece manualmente |
+Para quem for avaliar por onde começar. A coluna que importa é a última: o que dói hoje.
+
+| Dívida | Tamanho | Risco de mexer | O que dói hoje |
+|---|---|---|---|
+| `orquestrador_service` + `_stream` — 1.100 linhas em dois métodos gigantes, com a persistência da interação ainda duplicada | semanas | **alto** — é o caminho principal do produto | Bug corrigido num não chega no outro. Já aconteceu duas vezes |
+| SQL direto em 21 services e 6 endpoints | grande, contínuo | baixo **se de carona** | Nada agudo. Vira campanha cara se tratado como projeto |
+| `services/` com 32 arquivos soltos (~9.600 linhas) | médio | baixo — é mover arquivo | Achar coisa depende de grep |
+| Taxonomia de temas de notícias sem revisão médica | não é código | — | Nasceu de rascunho de engenharia; erro ali é silencioso (o tema não é sugerido a ninguém) |
+| Backup manual, sem agendamento | pequeno | — | RPO = idade do último dump |
+| Webhook de cadastro não construído | médio | baixo | O CRM não chega ao Médico 360; hoje isso é aceito de propósito (§3.4) |
+| Migração para Railway IaC | médio | médio — toca todos os serviços | Prazo real: 2026-12-01 |
+
+**O que NÃO é dívida, e já foi decidido:**
+
+- Perseguir clean architecture no `services/` legado. O benefício real — domínio testável sem banco — já existe em `medicina/`, `news/` e `calculators/formulas/`. A orientação é construir o novo como fatia vertical e deixar o antigo encolher por atrito.
+- `ESPECIALIDADE_PISO` no feed de notícias. Parece gambiarra e não é: o embed cria usuário só com e-mail, e sem o piso ele encara 51 caixas em branco. A contagem de quantas vezes ele é acionado (`news.piso_especialidade` no log) é a métrica de sucesso do trabalho de identidade.
+- Índice vetorial em `message_embeddings`. A busca é sempre dentro de uma pasta de um usuário; varredura exata é mais correta e rápida o bastante (débito 11).
+
+### 17.2 Onde as decisões estão escritas
+
+Este repositório documenta **por que**, não **o quê** — os comentários de código são a
+fonte primária e costumam trazer o incidente que motivou a regra. Vale ler antes de
+"simplificar":
+
+| Arquivo | Decisão que ele guarda |
+|---|---|
+| `app/medicina/identidade.py` | Precedência da especialidade, por que `declarado` fica no fundo, por que o CRM saiu das pendências |
+| `app/medicina/especialidades.py` | Por que os 55 rótulos do TSX foram eleitos canônicos; por que GENERALISTA não vira Clínica Médica |
+| `app/news/taxonomia.py` | Que o arquivo é PRODUTO e ainda não passou por revisão médica |
+| `app/services/integracoes/curseduca_service.py` | O molde de cliente externo: disjuntor, timeout, fail-closed |
+| `app/services/news_feed_service.py` | O piso de especialidade e por que ele não filtra por peso |
+| `alembic/versions/*.py` | Cada migration explica a decisão de modelagem no topo |
+| `docs/debitos.md` | Débitos com status e justificativa |
+| `docs/runbook.md` | Operação: incidentes, rotação de segredos, backup/restore com números medidos |

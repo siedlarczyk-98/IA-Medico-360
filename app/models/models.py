@@ -84,6 +84,10 @@ class User(Base):
     phone_number: Mapped[str | None] = mapped_column(String(20))
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("company.id"))
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Identificador do aluno na Waid. É a CHAVE estável de quem entra pelo LMS —
+    # o e-mail pode mudar lá e, sem isto, o próximo login criaria conta nova.
+    # Nulo para quem entrou por OTP/convite, e para quem ainda não relogou.
+    waid_uuid: Mapped[str | None] = mapped_column(String(64))
     name: Mapped[str | None] = mapped_column(String(255))
     crm: Mapped[str | None] = mapped_column(String(20))
     crm_state: Mapped[str | None] = mapped_column(String(2))

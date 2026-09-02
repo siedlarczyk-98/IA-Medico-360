@@ -1,23 +1,37 @@
 """
-Validação server-to-server de membros da Curseduca (plano de melhorias, item 2.1).
+Integração com a Curseduca/Waid: identidade do aluno e dados de matrícula.
 
-O embed da Curseduca só entrega o e-mail do aluno na URL do iframe — sem SSO nem
-assinatura. O header Origin é forjável server-side, então NÃO prova identidade. Para
-reduzir a superfície de "qualquer e-mail" → "e-mail de membro matriculado", validamos
-o e-mail contra a API da Curseduca (credenciais server-side) antes de emitir o token.
+Duas funções, com papéis muito diferentes:
 
-Contrato (Swagger Curseduca):
-  GET {api_base}/api/v1/members/by?email=<email>
-  Headers: api_key: <key>   e   Authorization: Bearer <access_token>
-  200 -> objeto do membro ({id, name, email, ...})  => membro existe
-  401 -> API Key inválida        (fail-closed: configuração errada)
-  400 -> query não fornecida     (fail-closed: bug nosso)
-  403 -> token ausente/negado    (fail-closed: configuração errada)
+`trocar_token_de_identidade` — O PORTÃO.
+    A Waid entrega à página, por `postMessage`, um token opaco de uso único
+    (5 min). Trocamos esse token por `{uuid, name, email}`. O token não carrega
+    informação: a verdade está na resposta. É isso que torna a identidade
+    VERIFICÁVEL, e não apenas informada — quem não está dentro do iframe, logado
+    na Waid, não tem token nenhum para apresentar.
 
-Fail-closed: enquanto a validação está ligada mas algo impede confirmar a matrícula
-(credencial errada, API fora do ar), o embed é negado — nunca abre com base em dúvida.
-No-op enquanto `curseduca_validation_enabled` for False (default).
+    Contrato (doc "Identidade do aluno em seção incorporada", v1.2):
+      POST {api_base}/api/v1/embed-identity-tokens/validate  {"token": "..."}
+      200 -> {uuid, name, email}
+      400 -> token inválido ou JÁ USADO   (o cliente deve pedir outro)
+      410 -> token expirado               (o cliente deve pedir outro)
+      401 -> api_key ausente/inválida     (configuração NOSSA)
+      403 -> sem permissão para o endpoint(configuração NOSSA — precisa de
+             liberação específica para a credencial, no painel da Waid)
+
+`verify_active_member` / `_fetch_member` — o caminho ANTIGO e o enriquecimento.
+    Nasceu para reduzir a superfície do embed por `?email=`, que não prova
+    identidade nenhuma (o header Origin é forjável server-side). Continua
+    fail-closed enquanto aquele caminho existir.
+
+    Mas o payload dele também é a ÚNICA fonte dos grupos `[CFM] <especialidade>`
+    — o `validate` acima devolve identidade, não matrícula. Por isso, no caminho
+    por token ele é usado só para ENRIQUECER: ali pode falhar sem barrar
+    ninguém, porque o portão já foi a troca do token.
 """
+
+import logging
+from dataclasses import dataclass
 
 import httpx
 from fastapi import HTTPException, status
@@ -26,11 +40,120 @@ from app.core import circuit_breaker
 from app.core.config import get_settings
 from app.core.http_client import get_client
 
+logger = logging.getLogger(__name__)
+
 _TIMEOUT_SECONDS = 8.0
+
+# Grupo de acesso muda em escala de dias; a autenticação passou a acontecer a
+# cada carregamento de página. Sem cache, seria uma chamada externa por load.
+TTL_MEMBRO_SEGUNDOS = 600
 
 
 class CurseducaNotConfigured(Exception):
     """Validação habilitada mas a integração respondeu erro de configuração/indisponibilidade."""
+
+
+class TokenDeIdentidadeInvalido(Exception):
+    """Token recusado pela Waid — inválido, já usado ou expirado.
+
+    Separada de `CurseducaNotConfigured` de propósito: aqui o conserto é PEDIR
+    OUTRO TOKEN, e o cliente consegue fazer isso sozinho. Tratar os dois como o
+    mesmo erro deixaria o médico numa tela de falha que um retry resolveria.
+    """
+
+    def __init__(self, codigo: str):
+        self.codigo = codigo  # token_invalido | token_expirado
+        super().__init__(codigo)
+
+
+@dataclass(frozen=True)
+class IdentidadeWaid:
+    """Quem a Waid diz que é a pessoa do outro lado do iframe.
+
+    `uuid` é a chave: a doc é explícita que ele é estável e o e-mail não. Um
+    médico que troque de e-mail na Waid continua sendo a mesma pessoa aqui.
+    """
+
+    uuid: str
+    nome: str | None
+    email: str
+
+
+def _credenciais() -> tuple[str, str, str]:
+    """Base e credenciais da API, ou 503 se a integração não está configurada."""
+    settings = get_settings()
+    if not settings.curseduca_api_base or not settings.curseduca_api_key:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Integração com a plataforma não está configurada.",
+        )
+    return (
+        settings.curseduca_api_base.rstrip("/"),
+        settings.curseduca_api_key,
+        settings.curseduca_access_token,
+    )
+
+
+async def trocar_token_de_identidade(token: str) -> IdentidadeWaid:
+    """Troca o token de uso único da Waid pela identidade do aluno. FAIL-CLOSED.
+
+    Este é o portão de acesso: em qualquer dúvida, ninguém entra. Mas separa dois
+    tipos de falha, porque a ação certa é diferente em cada uma:
+
+      `TokenDeIdentidadeInvalido` — o token não serve mais (inválido, já usado,
+          expirado). Acontece no uso normal: o médico recarregou a página, ou a
+          troca demorou mais que os 5 minutos. O cliente pede outro pelo mesmo
+          evento e segue. NÃO é erro para mostrar na tela.
+
+      `CurseducaNotConfigured` — credencial nossa errada, sem permissão para o
+          endpoint, ou a Waid fora do ar. Pedir outro token não resolve; insistir
+          vira laço infinito.
+    """
+    api_base, api_key, access_token = _credenciais()
+    url = f"{api_base}/api/v1/embed-identity-tokens/validate"
+    headers = {"api_key": api_key, "accept": "application/json"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+
+    async def _consulta():
+        return await get_client().post(
+            url, json={"token": token}, headers=headers, timeout=_TIMEOUT_SECONDS
+        )
+
+    try:
+        resp = await circuit_breaker.curseduca.chama(_consulta)
+    except circuit_breaker.CircuitoAberto as exc:
+        raise CurseducaNotConfigured(str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise CurseducaNotConfigured(f"Falha ao contatar a Waid: {exc}") from exc
+
+    if resp.status_code == 200:
+        dados = resp.json()
+        uuid = (dados or {}).get("uuid")
+        email = (dados or {}).get("email")
+        if not isinstance(dados, dict) or not uuid or not email:
+            # Formato inesperado é problema NOSSO de contrato, não do token —
+            # mandar o cliente pedir outro entraria em laço.
+            raise CurseducaNotConfigured(
+                f"Resposta do validate sem uuid/email: {resp.text[:200]}"
+            )
+        nome = dados.get("name")
+        return IdentidadeWaid(
+            uuid=str(uuid),
+            nome=nome.strip() if isinstance(nome, str) and nome.strip() else None,
+            email=str(email).strip().lower(),
+        )
+
+    if resp.status_code == 400:
+        raise TokenDeIdentidadeInvalido("token_invalido")
+    if resp.status_code == 410:
+        raise TokenDeIdentidadeInvalido("token_expirado")
+
+    # 401 (api_key), 403 (sem permissão para o endpoint — a doc avisa que ela é
+    # liberada à parte pelo responsável da conta Waid), 5xx.
+    raise CurseducaNotConfigured(
+        f"Waid respondeu {resp.status_code} ao validar o token: {resp.text[:200]}"
+    )
 
 
 async def _fetch_member(email: str, api_base: str, api_key: str, access_token: str) -> dict | None:
@@ -110,6 +233,47 @@ async def verify_active_member(email: str) -> dict | None:
 
     if membro is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "E-mail não corresponde a um membro ativo.")
+    return membro
+
+
+async def buscar_membro_para_enriquecer(email: str) -> dict | None:
+    """O payload do membro, para ler os grupos `[CFM]`. FAIL-OPEN e cacheado.
+
+    Só existe porque o `validate` devolve identidade (`uuid`, `name`, `email`) e
+    NÃO devolve `groups` — que é de onde sai a especialidade do médico.
+
+    A diferença de política em relação a `verify_active_member` é o ponto todo:
+    ali a consulta é o PORTÃO (dúvida = ninguém entra); aqui ela é
+    ENRIQUECIMENTO, porque o portão já foi a troca do token. Uma instabilidade
+    na API de membros deixava todo mundo de fora; agora custa no máximo uma
+    especialidade não preenchida, que a próxima entrada resolve.
+
+    Cacheado por 10 minutos: grupo de acesso muda em escala de dias, e sem cache
+    isto seria uma chamada externa em todo carregamento de página — já que a
+    autenticação passou a acontecer a cada load.
+    """
+    from app.services import cache_service
+
+    chave = cache_service.make_key("waid_membro", email)
+    try:
+        em_cache = await cache_service.get_json(chave)
+        if em_cache is not None:
+            return em_cache
+    except Exception:
+        logger.debug("Cache indisponível ao buscar membro; seguindo direto para a API")
+
+    try:
+        api_base, api_key, access_token = _credenciais()
+        membro = await _fetch_member(email, api_base, api_key, access_token)
+    except (CurseducaNotConfigured, HTTPException) as exc:
+        logger.warning("Enriquecimento de perfil indisponível para %s: %s", email, exc)
+        return None
+
+    if membro is not None:
+        try:
+            await cache_service.set_json(chave, membro, TTL_MEMBRO_SEGUNDOS)
+        except Exception:
+            logger.debug("Não foi possível cachear o membro; segue sem cache")
     return membro
 
 
