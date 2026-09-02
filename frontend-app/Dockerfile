@@ -33,8 +33,17 @@ COPY frontend-app/ frontend-app/
 # args para builds com Dockerfile.
 ARG VITE_API_URL
 ARG VITE_INTERCOM_APP_ID
+ARG VITE_WAID_ORIGIN
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_INTERCOM_APP_ID=$VITE_INTERCOM_APP_ID
+ENV VITE_WAID_ORIGIN=$VITE_WAID_ORIGIN
+
+# TODA variável `VITE_` nova precisa de UMA LINHA `ARG` AQUI, além de existir no
+# painel do Railway. Sem o ARG, o Docker não recebe o valor do serviço e o Vite
+# assa o default do código no bundle — build verde, comportamento errado, e
+# nenhum redeploy conserta. Foi o que aconteceu com `VITE_WAID_ORIGIN`: a
+# variável estava no painel, o `postMessage` saía com a origem errada, o browser
+# descartava em silêncio e a tela ficava no timeout.
 
 RUN cd frontend-app && npm run build
 
