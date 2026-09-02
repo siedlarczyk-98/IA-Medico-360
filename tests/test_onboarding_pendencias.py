@@ -46,11 +46,14 @@ async def test_especialista_com_especialidade_automatica_nao_precisa_informar(
 
 
 async def test_perfil_incompleto_nao_marca_completo_e_diz_o_que_falta(client, user):
-    """Sem CRM e sem especialidade, o onboarding aceita o progresso parcial.
+    """Sem especialidade, o onboarding aceita o progresso parcial.
 
     Recusar com 422 perderia o aceite dos Termos que o médico acabou de dar; o
     servidor grava o que veio e devolve o que ainda falta, para a tela
     continuar de onde parou.
+
+    Note que CRM NÃO aparece: deixou de ser pendência quando ficou claro que a
+    prova de registro vem do grupo `[CFM]`, não de um campo digitado.
     """
     resp = await client.post(
         "/api/v1/auth/onboarding", json=_payload(), headers=auth_headers(user)
@@ -59,7 +62,29 @@ async def test_perfil_incompleto_nao_marca_completo_e_diz_o_que_falta(client, us
     assert resp.status_code == 200
     corpo = resp.json()
     assert corpo["onboarding_complete"] is False
-    assert corpo["onboarding_pendencias"] == ["crm", "especialidade"]
+    assert corpo["onboarding_pendencias"] == ["especialidade"]
+
+
+async def test_crm_nao_bloqueia_mais_o_onboarding(client, db, user):
+    """Especialista com especialidade e SEM CRM completa o cadastro.
+
+    Antes o CRM era exigido de todo médico formado. A prova de registro passou a
+    vir do grupo `[CFM]` criado pela página de cadastro, que consultou o
+    Conselho — um número digitado à mão não acrescentava prova nenhuma.
+    """
+    identidade.aplicar_especialidade(
+        user, slug="cardiologia", fonte=identidade.FONTE_WAID_GRUPO
+    )
+    await db.flush()
+
+    resp = await client.post(
+        "/api/v1/auth/onboarding", json=_payload(), headers=auth_headers(user)
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["onboarding_complete"] is True
+    await db.refresh(user)
+    assert user.crm is None  # segue vazio, e está tudo bem
 
 
 async def test_especialidade_digitada_nao_sobrescreve_a_automatica(client, db, user):

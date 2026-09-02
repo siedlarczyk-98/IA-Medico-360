@@ -28,7 +28,7 @@ import type { ReactNode } from 'react';
 
 import { buscarEspecialidades, buscarPerfil, enviarOnboarding } from './api';
 import * as s from './estilos';
-import { MED_STATUS_OPCOES, UFS } from './tipos';
+import { MED_STATUS_OPCOES } from './tipos';
 import type { DadosOnboarding, Especialidade, Pendencia, Perfil } from './tipos';
 
 interface Props {
@@ -199,8 +199,6 @@ function Formulario({
 }) {
   const [nome, setNome] = useState(perfil.name ?? '');
   const [medStatus, setMedStatus] = useState(perfil.med_status ?? '');
-  const [crm, setCrm] = useState(perfil.crm ?? '');
-  const [uf, setUf] = useState(perfil.crm_state ?? '');
   const [anoIngresso, setAnoIngresso] = useState('');
   const [especialidade, setEspecialidade] = useState(perfil.specialty_slug ?? '');
   const [aceite, setAceite] = useState(false);
@@ -221,11 +219,9 @@ function Formulario({
   const opcoesCarreira = permitidos.length
     ? MED_STATUS_OPCOES.filter(o => permitidos.includes(o.valor))
     : MED_STATUS_OPCOES;
-  // O `med_status` escolhido agora pode revelar campos que o servidor ainda não
-  // sabia serem necessários: quem não tinha estágio de carreira definido não
-  // recebeu `crm` na lista de pendências, porque não dava para saber se era
-  // graduando. A tela resolve isso na hora, sem uma ida ao servidor.
-  const pedirCrm = !graduando && (precisa('crm') || (precisa('med_status') && !!medStatus));
+  // CRM saiu do onboarding: a prova de registro vem do grupo `[CFM]` criado
+  // pela página de cadastro, que consultou o Conselho. Um número digitado aqui
+  // não acrescentaria prova nenhuma. Continua editável no perfil.
   const pedirEspecialidade =
     perfil.specialty_editavel &&
     ['residente', 'especialista'].includes(medStatus) &&
@@ -242,7 +238,6 @@ function Formulario({
     medStatus &&
       (!precisa('aceite_termos') || aceite) &&
       (!precisa('nome') || nome.trim().length > 1) &&
-      (!pedirCrm || (crm.trim() && uf)) &&
       (!pedirEspecialidade || especialidade) &&
       (!graduando || anoIngresso),
   );
@@ -259,7 +254,6 @@ function Formulario({
         // aceite é pendência, e o servidor recusa `false` de qualquer forma.
         terms_accepted: true,
         ...(precisa('nome') ? { name: nome.trim() } : {}),
-        ...(pedirCrm ? { crm: crm.replace(/\D/g, ''), crm_state: uf } : {}),
         ...(pedirEspecialidade ? { specialty: especialidade } : {}),
         ...(graduando && anoIngresso ? { enrollment_year: Number(anoIngresso) } : {}),
       };
@@ -347,36 +341,6 @@ function Formulario({
               inputMode="numeric"
               placeholder="2022"
             />
-          </div>
-        )}
-
-        {pedirCrm && (
-          <div style={{ marginBottom: 17, display: 'flex', gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <label style={s.rotulo} htmlFor="ob-crm">CRM</label>
-              <input
-                id="ob-crm"
-                className="m360-ob-campo"
-                style={s.campo}
-                value={crm}
-                onChange={e => setCrm(e.target.value.replace(/\D/g, ''))}
-                inputMode="numeric"
-                placeholder="000000"
-              />
-            </div>
-            <div style={{ width: 96 }}>
-              <label style={s.rotulo} htmlFor="ob-uf">UF</label>
-              <select
-                id="ob-uf"
-                className="m360-ob-campo"
-                style={s.campo}
-                value={uf}
-                onChange={e => setUf(e.target.value)}
-              >
-                <option value="">—</option>
-                {UFS.map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
-            </div>
           </div>
         )}
 

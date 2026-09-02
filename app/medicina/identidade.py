@@ -242,6 +242,21 @@ PENDENCIA_NOME = "nome"
 PENDENCIA_ACEITE = "aceite_termos"
 PENDENCIA_MED_STATUS = "med_status"
 PENDENCIA_ESPECIALIDADE = "especialidade"
+
+# `crm` NÃO é pendência, de propósito — decisão de 2026-09-02.
+#
+# O CRM servia para provar que a pessoa é médica registrada, e essa prova já
+# vem pronta: a página de cadastro consulta o CFM e cria o grupo
+# `[CFM] <especialidade>`. O grupo É a prova. Um CRM que o próprio médico digita
+# num campo, sem ninguém verificar, é uma afirmação — não acrescenta prova
+# nenhuma sobre o que o grupo já disse.
+#
+# A coluna continua existindo e continua sendo gravada quando o dado chega de
+# fonte confiável (webhook do cadastro, `PATCH /auth/me`). O que mudou é que
+# ela deixou de BLOQUEAR o acesso.
+#
+# Se um dia voltar a fazer falta — RQE, rastro médico-legal, venda de insights —
+# é acrescentar `PENDENCIA_CRM` de volta a `_ORDEM` e à função abaixo.
 PENDENCIA_CRM = "crm"
 
 # Ordem = ordem de apresentação na tela. Os apps renderizam a lista como vem,
@@ -250,7 +265,6 @@ _ORDEM = (
     PENDENCIA_ACEITE,
     PENDENCIA_NOME,
     PENDENCIA_MED_STATUS,
-    PENDENCIA_CRM,
     PENDENCIA_ESPECIALIDADE,
 )
 
@@ -286,13 +300,10 @@ def pendencias(user, *, aceite_vigente: bool) -> list[str]:
         faltando.add(PENDENCIA_MED_STATUS)
         return [p for p in _ORDEM if p in faltando]
 
-    # Graduando não tem CRM nem especialidade — e isso não é pendência, é o
-    # estado correto dele.
+    # Graduando não tem especialidade — e isso não é pendência, é o estado
+    # correto dele.
     if med_status == "graduando":
         return [p for p in _ORDEM if p in faltando]
-
-    if not (getattr(user, "crm", None) or "").strip():
-        faltando.add(PENDENCIA_CRM)
 
     # Especialidade só é exigida de quem declarou tê-la. Generalista sem
     # especialidade é um perfil completo, não um cadastro pela metade.
