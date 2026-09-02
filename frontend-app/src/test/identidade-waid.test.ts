@@ -228,3 +228,27 @@ describe('limpeza', () => {
     expect(remover).toHaveBeenCalledWith('message', expect.any(Function));
   });
 });
+
+describe('fora de um iframe', () => {
+  it('falha na hora, sem esperar o timeout', () => {
+    // Medido nos aplicativos da Waid: a seção abre num webview direto, sem
+    // iframe. `window.parent === window`, então nossos próprios pedidos voltam
+    // para nós e a resposta nunca vem. Esperar 30s por algo impossível é a
+    // pior experiência possível.
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(window);
+
+    const { result } = montar();
+
+    expect(result.current.fase).toBe('erro');
+    expect(result.current.erro?.tipo).toBe('sem_iframe');
+  });
+
+  it('nem chega a pedir identidade', () => {
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(window);
+
+    montar();
+    act(() => void vi.advanceTimersByTime(10_000));
+
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+});

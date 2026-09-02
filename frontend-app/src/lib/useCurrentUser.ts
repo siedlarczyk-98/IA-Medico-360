@@ -10,10 +10,26 @@ const MED_STATUS_LABEL: Record<string, string> = {
 };
 
 export function useCurrentUser() {
+  // O `sub` do JWT entra na chave DE PROPÓSITO.
+  //
+  // Com a chave fixa `['currentUser']`, trocar de médico no mesmo navegador
+  // mantinha o dado do anterior em cache por até 5 minutos: a sessão já era da
+  // pessoa certa, mas a saudação e o card do rodapé mostravam o nome e o CRM de
+  // quem tinha usado antes. Observado em produção ao trocar de conta no LMS.
+  //
+  // Invalidar na hora do login resolveria o caso previsto; a chave por
+  // identidade resolve TODOS, porque um usuário nunca consegue ler a entrada de
+  // outro — a chave simplesmente não bate.
+  // As invalidações no `Sidebar` passam só `['currentUser']` e continuam
+  // valendo: o `invalidateQueries` casa por PREFIXO. Não as troque para
+  // `exact: true` sem passar o `sub` junto, ou o perfil para de atualizar
+  // depois de salvo.
+  const sub = getTokenPayload()?.sub ?? null;
+
   const { data: user } = useQuery<UserResponse | null>({
-    queryKey: ['currentUser'],
+    queryKey: ['currentUser', sub],
     queryFn: getMe,
-    enabled: getTokenPayload() != null,
+    enabled: sub != null,
     staleTime: 5 * 60 * 1000,
   });
 

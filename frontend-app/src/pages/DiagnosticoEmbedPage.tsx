@@ -36,12 +36,42 @@ export function DiagnosticoEmbedPage() {
   const [copiado, setCopiado] = useState(false);
   const inicio = useRef(Date.now());
 
+  /**
+   * `localStorage` funciona AQUI, neste contexto?
+   *
+   * Somos um iframe cross-origin. Navegadores e webviews bloqueiam ou
+   * particionam armazenamento de terceiros nessa situação — e o modo de falha é
+   * traiçoeiro: em alguns, escrever lança; em outros, escreve e some depois;
+   * em outros ainda, o valor fica isolado por sessão. Por isso o teste é de
+   * ida e volta (escreve, lê, compara), não só um `try` em volta do `setItem`.
+   *
+   * Se isto falhar, TUDO se explica: o handshake funciona, a troca funciona, o
+   * token é guardado, o `RequireAuth` não o encontra no próximo render e manda
+   * para o login. Vale para o token novo e valia para o fluxo por e-mail — que
+   * é justamente o que nunca funcionou nos apps.
+   */
+  function testarArmazenamento(): string {
+    const chave = '__m360_teste_armazenamento';
+    try {
+      const valor = String(Date.now());
+      localStorage.setItem(chave, valor);
+      const lido = localStorage.getItem(chave);
+      localStorage.removeItem(chave);
+      if (lido !== valor) return 'FALHA — escreveu mas leu diferente';
+      return 'OK';
+    } catch (e) {
+      return `BLOQUEADO — ${e instanceof Error ? e.name : 'erro'}`;
+    }
+  }
+
   // Colhido uma vez: o que descreve o CONTEXTO em que a página abriu.
   const contexto = useRef({
     url: window.location.href,
     dentroDeIframe: window.parent !== window,
     referrer: document.referrer || '(vazio)',
     origemEsperada: WAID_ORIGIN,
+    armazenamento: testarArmazenamento(),
+    cookiesHabilitados: navigator.cookieEnabled ? 'SIM' : 'NAO',
     userAgent: navigator.userAgent,
   });
 
@@ -88,6 +118,8 @@ export function DiagnosticoEmbedPage() {
     `Dentro de iframe : ${contexto.current.dentroDeIframe ? 'SIM' : 'NAO'}`,
     `document.referrer: ${contexto.current.referrer}`,
     `Origem esperada  : ${contexto.current.origemEsperada}`,
+    `localStorage     : ${contexto.current.armazenamento}`,
+    `Cookies          : ${contexto.current.cookiesHabilitados}`,
     `Pedidos enviados : ${pedidos}`,
     `Mensagens vistas : ${mensagens.length}`,
     ...mensagens.map(m => `  [${m.em}] origem=${m.origin} tipo=${m.tipo} token=${m.temToken ? 'sim' : 'nao'}`),

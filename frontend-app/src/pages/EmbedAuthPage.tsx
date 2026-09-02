@@ -60,7 +60,12 @@ export function EmbedAuthPage() {
           </p>
           {/* A tela precisa dizer o que FAZER, não só que falhou. */}
           <p style={{ fontSize: 13, color: 'var(--pen2)', margin: '0 0 20px', lineHeight: 1.5 }}>
-            Você pode entrar pelo seu e-mail enquanto isso.
+            {erro?.tipo === 'sem_iframe'
+              // Caso conhecido: os aplicativos da Waid abrem a seção sem iframe,
+              // e nesse contexto a plataforma não tem como nos dizer quem é o
+              // médico. Aqui o login por e-mail não é contorno — é o caminho.
+              ? 'No aplicativo, entre pelo seu e-mail. Pelo navegador, o acesso é automático.'
+              : 'Você pode entrar pelo seu e-mail enquanto isso.'}
           </p>
           <button
             onClick={() => navigate('/login')}

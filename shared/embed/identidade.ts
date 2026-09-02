@@ -38,8 +38,12 @@ const MAX_TENTATIVAS = 3;
 export type FaseIdentidade = 'pedindo' | 'trocando' | 'pronto' | 'erro';
 
 export interface MotivoErro {
-  /** `timeout` | `indisponivel` | `desconhecido` */
-  tipo: 'timeout' | 'indisponivel' | 'desconhecido';
+  /**
+   * `sem_iframe`    — a página não está incorporada; ninguém pode responder
+   * `timeout`       — está incorporada, mas a Waid não respondeu
+   * `indisponivel`  — a troca do token falhou por problema de configuração/rede
+   */
+  tipo: 'sem_iframe' | 'timeout' | 'indisponivel' | 'desconhecido';
   mensagem: string;
 }
 
@@ -80,8 +84,40 @@ function tokenPrecisaSerRenovado(corpo: unknown): boolean {
  *  3. `event.origin` é conferido. A doc chama isso de opcional; aqui não é —
  *     é a única barreira contra outra janela injetar um token que não é nosso.
  */
+/**
+ * Existe alguém para responder?
+ *
+ * `window.parent === window` significa que a página NÃO está dentro de um
+ * iframe. Nesse caso o `postMessage` "para o pai" cai na própria janela: os
+ * pedidos voltam para nós mesmos e a resposta nunca vem, porque não há Waid do
+ * outro lado.
+ *
+ * Medido nos aplicativos da Waid (setembro/2026): eles abrem a seção num
+ * webview direto, sem iframe. Sem esta checagem, o médico encara 30 segundos de
+ * spinner esperando algo que não pode acontecer.
+ */
+function estaIncorporada(): boolean {
+  try {
+    return window.parent !== window;
+  } catch {
+    // Acesso a `window.parent` pode lançar em contexto restrito — se lançou, há
+    // um pai de outra origem, então estamos incorporados.
+    return true;
+  }
+}
+
 export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes): Estado {
-  const [estado, setEstado] = useState<Estado>({ fase: 'pedindo', erro: null });
+  const [estado, setEstado] = useState<Estado>(() =>
+    estaIncorporada()
+      ? { fase: 'pedindo', erro: null }
+      : {
+          fase: 'erro',
+          erro: {
+            tipo: 'sem_iframe',
+            mensagem: 'Esta tela precisa ser aberta pelo menu da plataforma.',
+          },
+        },
+  );
 
   // Refs, e não estado: mudanças aqui não devem re-renderizar nem recriar o
   // efeito — recriá-lo removeria o ouvinte no meio do handshake.
@@ -115,6 +151,10 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
   );
 
   useEffect(() => {
+    // Sem pai, não há handshake possível: não adianta registrar ouvinte nem
+    // gastar 30s de espera. O estado inicial já reflete isso.
+    if (!estaIncorporada()) return;
+
     let vivo = true;
 
     async function aoReceber(event: MessageEvent) {
