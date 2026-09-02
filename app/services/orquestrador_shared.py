@@ -14,6 +14,7 @@ Aqui as funções recebem `db` e `user_id` como argumentos em vez de lerem
 
 import json
 import logging
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -29,6 +30,12 @@ from app.services.context_budget import (
 from app.services.conversation_history import load_history
 from app.services.folder_context_service import contexto_da_pasta
 from app.services.integracoes.ai_providers import OpenAIProvider
+from app.services.orquestrador_modes import (
+    PHARMA_CHECK_MIN_CONFIDENCE,
+    PHARMA_MODES,
+    upgrade_mode_for_attachments,
+)
+from app.services.triage_service import triage
 
 logger = logging.getLogger(__name__)
 
@@ -257,3 +264,77 @@ async def check_clarification(prompt: str, contexto: list[dict] | None = None) -
     except Exception as e:
         logger.warning(f"Clarification check falhou: {e}. Assumindo suficiente.")
         return {"sufficient": True}
+
+
+# ── Roteamento: decidir qual agente atende ───────────────────────────────────
+
+# Piso de confiança da triagem. Abaixo dele não adivinhamos o agente — pedimos
+# ao médico que reformule. Estava escrito como literal `0.7` nos DOIS serviços;
+# mudar num não chegava no outro.
+CONFIANCA_MINIMA_TRIAGEM = 0.7
+
+# Texto único para o pedido de reformulação. Os dois caminhos diziam coisas
+# diferentes na MESMA situação — o `/query` mencionava "para te indicar o agente
+# correto" e o `/stream` não. Mesma pergunta, duas respostas, dependendo de o
+# frontend ter pedido streaming ou não.
+MENSAGEM_PRECISA_REFINAR = (
+    "Preciso de um pouco mais de aprofundamento para te indicar o agente correto. "
+    "Pode reformular com mais detalhes?"
+)
+
+
+@dataclass(frozen=True)
+class DecisaoDeRota:
+    """Para onde a pergunta vai — sem saber se a resposta será JSON ou SSE.
+
+    `precisa_refinar` é o único caminho de saída antecipada. Quem chama decide
+    COMO comunicar isso (corpo de resposta no `/query`, evento de erro no
+    `/stream`); o QUE comunicar é decidido aqui, uma vez só.
+    """
+
+    mode: str | None
+    confidence: float
+    precisa_refinar: bool = False
+
+
+async def decidir_rota(
+    prompt: str, mode: str | None, tem_anexos: bool
+) -> DecisaoDeRota:
+    """Resolve o modo final a partir do que o frontend pediu e do que a triagem vê.
+
+    As regras, na ordem em que importam:
+
+    1. Anexo promove a raciocínio clínico — quem manda imagem quer leitura de exame.
+    2. Modo explícito do frontend dispensa triagem e vale 1.0 de confiança...
+    3. ...EXCETO `PHARMA_CHECK`, que ainda passa pela triagem para descobrir o
+       sub-modo (bula, receita, genérico, interação). O gate de confiança baixa
+       é ignorado nesse caso: o usuário já escolheu o modo.
+    4. Confiança abaixo do piso vira pedido de reformulação.
+    5. Sub-modos de pharma com confiança insuficiente caem para busca rápida —
+       responder bula errada é pior que responder de forma genérica.
+    """
+    mode = upgrade_mode_for_attachments(mode, tem_anexos)
+    explicit_pharma = mode == "PHARMA_CHECK"
+
+    if mode and not explicit_pharma:
+        return DecisaoDeRota(mode=mode, confidence=1.0)
+
+    resultado = await triage(prompt)
+    mode = resultado["mode"]
+    confidence = resultado["confidence"]
+
+    if confidence < CONFIANCA_MINIMA_TRIAGEM and not explicit_pharma:
+        return DecisaoDeRota(mode=mode, confidence=confidence, precisa_refinar=True)
+
+    if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
+        mode = "CLINICAL_REASONING" if not explicit_pharma else "PHARMA_CHECK"
+
+    if (
+        mode in PHARMA_MODES
+        and mode != "PHARMA_CHECK"
+        and confidence < PHARMA_CHECK_MIN_CONFIDENCE
+        and not explicit_pharma
+    ):
+        mode = "QUICK_SEARCH"
+
+    return DecisaoDeRota(mode=mode, confidence=confidence)

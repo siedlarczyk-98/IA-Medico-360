@@ -36,12 +36,11 @@ from app.services.orquestrador_modes import (
     MODE_MODEL_MAP,
     MODE_TEMPERATURE_MAP,
     MODOS_CACHEAVEIS,
-    PHARMA_CHECK_MIN_CONFIDENCE,
-    PHARMA_MODES,
-    upgrade_mode_for_attachments,
 )
 from app.services.orquestrador_shared import (
+    MENSAGEM_PRECISA_REFINAR,
     check_clarification,
+    decidir_rota,
     ensure_conversation,
     link_attachments,
     load_context_messages,
@@ -51,7 +50,7 @@ from app.services.pricing import calculate_cost
 from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import is_off_topic_greeting, triage
+from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit
 
 logger = logging.getLogger(__name__)
@@ -116,34 +115,20 @@ class OrquestradorService:
             history_messages = await load_context_messages(self.db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
 
             # 3. Triagem
-            # Quando o frontend manda PHARMA_CHECK explícito, ainda rodamos triage
-            # para descobrir o sub-modo correto (bula, receita, genérico, interação),
-            # mas ignoramos o gate de confiança baixa — o usuário já escolheu o modo.
-            # Anexo presente promove raciocinio clinico para leitura de exame.
-            mode = upgrade_mode_for_attachments(mode, bool(attachment_ids))
+            # As regras de roteamento sao compartilhadas com o /stream
+            # (`orquestrador_shared.decidir_rota`): so a forma de comunicar o
+            # pedido de reformulacao muda entre os dois.
+            decisao = await decidir_rota(sanitized_prompt, mode, bool(attachment_ids))
+            mode, confidence = decisao.mode, decisao.confidence
 
-            explicit_pharma = (mode == "PHARMA_CHECK")
-            if mode and not explicit_pharma:
-                confidence = 1.0
-            else:
-                triage_result = await triage(sanitized_prompt)
-                mode = triage_result["mode"]
-                confidence = triage_result["confidence"]
-
-                if confidence < 0.7 and not explicit_pharma:
-                    return {
-                        "status": "needs_refinement",
-                        "mode": mode,
-                        "confidence": confidence,
-                        "message": "Preciso de um pouco mais de aprofundamento para te indicar o agente correto. Pode reformular com mais detalhes?",
-                        "disclaimer": DISCLAIMER_RESPOSTA,
-                    }
-
-                if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
-                    mode = "CLINICAL_REASONING" if not explicit_pharma else "PHARMA_CHECK"
-
-                if mode in PHARMA_MODES and mode != "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE and not explicit_pharma:
-                    mode = "QUICK_SEARCH"
+            if decisao.precisa_refinar:
+                return {
+                    "status": "needs_refinement",
+                    "mode": mode,
+                    "confidence": confidence,
+                    "message": MENSAGEM_PRECISA_REFINAR,
+                    "disclaimer": DISCLAIMER_RESPOSTA,
+                }
 
             # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
             if mode == "CLINICAL_REASONING" and not force and not clarification_answers:

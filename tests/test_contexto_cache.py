@@ -40,7 +40,7 @@ def sem_dependencias(monkeypatch):
     async def _nada(*a, **k):
         return None
 
-    monkeypatch.setattr("app.services.orquestrador_stream_service.triage", _triagem)
+    monkeypatch.setattr("app.services.orquestrador_shared.triage", _triagem)
     monkeypatch.setattr("app.services.cache_service.get_json", _nada)
     monkeypatch.setattr("app.services.cache_service.set_json", _nada)
 

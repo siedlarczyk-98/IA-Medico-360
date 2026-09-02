@@ -40,12 +40,12 @@ from app.services.orquestrador_modes import (
     MODE_MODEL_MAP,
     MODE_TEMPERATURE_MAP,
     MODOS_CACHEAVEIS,
-    PHARMA_CHECK_MIN_CONFIDENCE,
     PHARMA_MODES,
-    upgrade_mode_for_attachments,
 )
 from app.services.orquestrador_shared import (
+    MENSAGEM_PRECISA_REFINAR,
     check_clarification,
+    decidir_rota,
     ensure_conversation,
     link_attachments,
     load_context_messages,
@@ -55,7 +55,7 @@ from app.services.pricing import calculate_cost, get_model_pricing
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
-from app.services.triage_service import is_off_topic_greeting, triage
+from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
@@ -163,32 +163,18 @@ class OrquestradorStreamService:
                 # usando `sanitized_prompt`, sem histórico.
                 history_messages = await load_context_messages(db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
 
-                # 3. Triage — PHARMA_CHECK explícito ainda passa pelo triage para
-                # resolver o sub-modo correto (bula, receita, genérico, interação),
-                # mas ignora o gate de confiança baixa — o usuário já escolheu o modo.
-                # Anexo presente promove raciocinio clinico para leitura de exame.
-                mode = upgrade_mode_for_attachments(mode, bool(attachment_ids))
+                # 3. Roteamento — regras compartilhadas com o /query
+                # (`orquestrador_shared.decidir_rota`). Aqui muda so a forma de
+                # comunicar: evento SSE em vez de corpo de resposta.
+                decisao = await decidir_rota(sanitized_prompt, mode, bool(attachment_ids))
+                mode, confidence = decisao.mode, decisao.confidence
 
-                explicit_pharma = (mode == "PHARMA_CHECK")
-                if mode and not explicit_pharma:
-                    confidence = 1.0
-                else:
-                    triage_result = await triage(sanitized_prompt)
-                    mode = triage_result["mode"]
-                    confidence = triage_result["confidence"]
-
-                    if confidence < 0.7 and not explicit_pharma:
-                        yield _sse("error", {
-                            "status": "needs_refinement",
-                            "message": "Preciso de um pouco mais de aprofundamento. Pode reformular com mais detalhes?",
-                        })
-                        return
-
-                    if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:
-                        mode = "CLINICAL_REASONING" if not explicit_pharma else "PHARMA_CHECK"
-
-                    if mode in PHARMA_MODES and mode != "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE and not explicit_pharma:
-                        mode = "QUICK_SEARCH"
+                if decisao.precisa_refinar:
+                    yield _sse("error", {
+                        "status": "needs_refinement",
+                        "message": MENSAGEM_PRECISA_REFINAR,
+                    })
+                    return
 
                 if mode in PHARMA_MODES:
                     yield _sse("error", {
