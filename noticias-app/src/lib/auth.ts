@@ -1,41 +1,34 @@
 const TOKEN_KEY = 'medico360_token';
 
-// De quem é o token guardado. O JWT carrega `sub` (id) e `role`, não o e-mail,
-// então sem este registro não há como saber se o token em localStorage pertence
-// à pessoa que o LMS está identificando agora na URL.
-const EMAIL_KEY = 'medico360_noticias_email';
+// Este arquivo tinha também um `EMAIL_KEY` e um `tokenPertenceA(email)`, que
+// registravam DE QUEM era o token guardado.
+//
+// Existiam porque a identidade vinha no `?email=` da URL e a sessão era
+// reaproveitada entre carregamentos: num navegador compartilhado — estação de
+// clínica, plantão — o segundo médico herdava o feed, os temas e os favoritos
+// do primeiro até o token expirar. Era a única proteção do tipo entre os três
+// apps, e os outros dois tinham o problema em aberto.
+//
+// Saíram porque o problema deixou de existir: com o handshake da Waid a
+// autenticação acontece a CADA carregamento, e o `clearToken()` roda antes da
+// troca. O token do médico anterior nunca sobrevive, então não é preciso
+// guardar de quem ele era para descobrir. A proteção virou propriedade do
+// desenho, e passou a valer para os três apps em vez de um.
+//
+// Se algum dia a sessão voltar a ser reaproveitada entre carregamentos, isto
+// aqui precisa voltar — de preferência pelo `waid_uuid`, que é a chave estável,
+// e não pelo e-mail.
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-export function setToken(token: string, email?: string): void {
+export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
-  if (email) localStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(EMAIL_KEY);
-}
-
-/**
- * O token guardado é COMPROVADAMENTE desta pessoa?
- *
- * Importa porque o feed é PERSONALIZADO. Num navegador compartilhado — uma
- * estação de clínica, um plantão — o segundo usuário a abrir o LMS herdaria a
- * sessão do primeiro e veria o feed dele, incluindo favoritos e temas, até o
- * token expirar. Enquanto o conteúdo era o mesmo para todos, isso não aparecia.
- *
- * Dono desconhecido conta como NÃO comprovado, e portanto reautentica. A
- * primeira versão desta função perguntava "é de outra pessoa?" e respondia
- * `false` quando não havia dono registrado — o que fazia todo token criado
- * antes deste controle sobreviver a uma troca de usuário. Reautenticar é uma
- * requisição; herdar a sessão de outra pessoa não tem conserto barato.
- */
-export function tokenPertenceA(email: string): boolean {
-  const guardado = localStorage.getItem(EMAIL_KEY);
-  return guardado !== null && guardado === email.trim().toLowerCase();
 }
 
 export function isAuthenticated(): boolean {

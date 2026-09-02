@@ -1,5 +1,5 @@
 import type { PartnerInterestInput } from './partner-interest-schema'
-import { getLeadFromUrl } from './lead'
+import { getLead } from './lead'
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
@@ -13,7 +13,7 @@ export async function checkAlreadySubmitted(email: string) {
 }
 
 export async function submitPartnerInterest(data: PartnerInterestInput) {
-  const lead = getLeadFromUrl()
+  const lead = getLead()
 
   const response = await fetch(`${BASE}/api/v1/landing-pages/partners/submit`, {
     method: 'POST',

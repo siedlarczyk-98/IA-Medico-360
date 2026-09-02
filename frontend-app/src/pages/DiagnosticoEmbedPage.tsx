@@ -21,7 +21,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 const WAID_ORIGIN =
-  import.meta.env.VITE_WAID_ORIGIN ?? 'https://adminportalmedico360.curseduca.pro';
+  import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
 
 interface MensagemVista {
   em: string;

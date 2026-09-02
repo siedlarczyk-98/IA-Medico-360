@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { checkAlreadySubmitted, submitPartnerInterest } from '@/lib/api'
-import { getLeadFromUrl } from '@/lib/lead'
+import { useLead } from '@/lib/lead'
 import {
   careerStages,
   partnerInterestSchema,
@@ -26,21 +26,31 @@ const inputClass = selectClass
 export function PartnerForm() {
   const [form, setForm] = useState<PartnerInterestInput>(emptyForm)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const leadEmail = getLeadFromUrl().email
+  // A identidade agora chega por handshake com a plataforma, então é
+  // assíncrona: `pronto` diz quando parou de tentar (com ou sem sucesso).
+  const { lead, pronto } = useLead()
+  const leadEmail = lead.email
   const [status, setStatus] = useState<'checking' | 'idle' | 'sending' | 'done'>(
-    leadEmail ? 'checking' : 'idle',
+    'checking',
   )
   const [serverError, setServerError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!leadEmail) return
+    // Ainda identificando: o skeleton continua.
+    if (!pronto) return
+    // Terminou SEM identidade (LP aberta fora do embed, ou pelo app da Waid,
+    // que abre sem iframe). Sem isto a tela ficaria em skeleton para sempre.
+    if (!leadEmail) {
+      setStatus('idle')
+      return
+    }
     checkAlreadySubmitted(leadEmail)
       .then((already) => setStatus(already ? 'done' : 'idle'))
       // Falha no check (rede, CORS, backend fora) nao pode travar a LP num
       // skeleton pra sempre — melhor deixar preencher de novo do que
       // esconder o form inteiro por causa de um GET que falhou.
       .catch(() => setStatus('idle'))
-  }, [leadEmail])
+  }, [pronto, leadEmail])
 
   function update<K extends keyof PartnerInterestInput>(key: K, value: PartnerInterestInput[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))

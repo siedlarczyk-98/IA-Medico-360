@@ -24,7 +24,14 @@ COPY calculadoras-app/ calculadoras-app/
 
 # Resolvida em tempo de build pelo Vite; sem ela o bundle aponta para localhost.
 ARG VITE_API_URL
+ARG VITE_WAID_ORIGIN
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WAID_ORIGIN=$VITE_WAID_ORIGIN
+
+# TODA variável `VITE_` nova precisa de UMA LINHA `ARG` AQUI, além de existir no
+# painel do Railway. Sem o ARG, o Docker não recebe o valor e o Vite assa o
+# default do código no bundle — build verde, comportamento errado, e nenhum
+# redeploy conserta.
 
 RUN cd calculadoras-app && npm run build
 

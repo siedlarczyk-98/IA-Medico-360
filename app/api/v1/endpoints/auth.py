@@ -201,6 +201,49 @@ async def embed_token(
     return TokenResponse(access_token=token, onboarding_complete=user.onboarding_complete)
 
 
+class IdentidadeEmbedResponse(BaseModel):
+    nome: str | None
+    email: str
+
+
+@router.post("/embed/identidade", response_model=IdentidadeEmbedResponse)
+@limiter.limit("10/minute")
+async def identidade_embed(request: Request, body: EmbedTokenRequest):
+    """Quem é o aluno, sem criar sessão nem usuário.
+
+    Existe para as landing pages, que são PÚBLICAS: elas só querem
+    pré-preencher o formulário com o nome e o e-mail de quem está do outro lado,
+    e não têm login. Antes isso vinha do `?email=` na URL, que a Waid posiciona
+    como legado.
+
+    **Não cria conta, de propósito.** Quem abre uma LP pode não ser usuário do
+    produto, e criar cadastro a partir de um formulário de captação seria
+    inventar consentimento que ninguém deu.
+
+    Público sem token nosso, e isso é seguro: o token da Waid é de uso único,
+    vale 5 minutos e só chega a quem está dentro do iframe, logado. É a mesma
+    prova que sustenta `/embed/token`; o que muda é só o que devolvemos.
+    """
+    if not body.token:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Informe o token de identidade da plataforma."
+        )
+    try:
+        identidade = await curseduca_service.trocar_token_de_identidade(body.token)
+    except curseduca_service.TokenDeIdentidadeInvalido as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            {"codigo": exc.codigo, "mensagem": "Token de identidade inválido ou expirado."},
+        ) from exc
+    except curseduca_service.CurseducaNotConfigured as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Não foi possível confirmar sua identidade no momento.",
+        ) from exc
+
+    return IdentidadeEmbedResponse(nome=identidade.nome, email=identidade.email)
+
+
 async def _entrar_por_token_waid(db: AsyncSession, token_waid: str) -> User:
     """Caminho verificável: troca o token pela identidade e resolve o usuário."""
     try:

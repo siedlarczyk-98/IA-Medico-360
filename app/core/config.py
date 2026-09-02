@@ -100,13 +100,20 @@ class Settings(BaseSettings):
     # Caminho legado do embed: `POST /auth/embed/token` com `{email}`.
     #
     # NÃO PROVA IDENTIDADE — quem souber o e-mail de um colega recebe a sessão
-    # dele. Existe só enquanto os três apps migram para o token verificável da
-    # Waid; cada uso sai em WARNING, e esse log é o critério para desligar.
+    # dele. Era o buraco que a migração para o token da Waid veio fechar.
     #
-    # Fica `True` durante o piloto (só o frontend-app migrado) e vira `False`
-    # com guarda de startup em produção quando o último app migrar — o mesmo
-    # padrão de `curseduca_validation_enabled` logo abaixo.
-    embed_email_fallback_enabled: bool = True
+    # DESLIGADO por padrão desde 02/09/2026, quando os seis apps (três
+    # autenticados + três LPs) passaram a usar o handshake. **Fechar isto é o
+    # que de fato elimina a vulnerabilidade** — migrar os apps sozinho não
+    # eliminava, porque o endpoint continuava aceitando `{email}` de qualquer
+    # chamador.
+    #
+    # Ainda é religável por variável de ambiente, de propósito: enquanto os seis
+    # não estiverem verificados em produção, tirar a escada é pior do que
+    # manter a porta destrancada por mais alguns dias. NÃO há trava de startup
+    # ainda — ela entra quando o caminho novo estiver provado, e aí religar
+    # deixa de ser possível.
+    embed_email_fallback_enabled: bool = False
 
     # --- Intercom (Identity Verification / Messenger Security) ---
     # Secret do Web SDK; usado para gerar o user_hash (HMAC) do Messenger.

@@ -19,7 +19,7 @@ import { setToken } from '../lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
-  import.meta.env.VITE_WAID_ORIGIN ?? 'https://adminportalmedico360.curseduca.pro';
+  import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
 
 export function EmbedAuthPage() {
   const navigate = useNavigate();

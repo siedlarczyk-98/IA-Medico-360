@@ -18,7 +18,7 @@ outro, laço infinito de pedidos.
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.models import AuditLog
 from app.models.models import User as UserModel
@@ -320,3 +320,105 @@ async def test_caminho_por_email_desligado_recusa(client, monkeypatch):
     )
 
     assert resp.status_code == 400
+
+
+# ── Identidade sem sessão (landing pages) ────────────────────────────────────
+
+async def test_identidade_sem_sessao_nao_cria_usuario(client, db, monkeypatch):
+    """As LPs são PÚBLICAS e só querem pré-preencher um formulário.
+
+    Criar conta a partir de um formulário de captação seria inventar
+    consentimento que ninguém deu — e quem abre uma LP pode nem ser cliente.
+    """
+    async def troca(_token):
+        return IDENTIDADE
+
+    monkeypatch.setattr(curseduca_service, "trocar_token_de_identidade", troca)
+
+    antes = (await db.execute(text("SELECT count(*) FROM users"))).scalar_one()
+    resp = await client.post(
+        "/api/v1/auth/embed/identidade", json={"token": "9f2c1a"},
+        headers={"Origin": ORIGEM},
+    )
+    depois = (await db.execute(text("SELECT count(*) FROM users"))).scalar_one()
+
+    assert resp.status_code == 200
+    assert resp.json() == {"nome": "João da Silva", "email": IDENTIDADE.email}
+    assert depois == antes, "não pode criar conta"
+
+
+async def test_identidade_sem_sessao_nao_emite_token(client, monkeypatch):
+    """Nem sessão: a resposta não pode trazer nada que sirva de credencial."""
+    async def troca(_token):
+        return IDENTIDADE
+
+    monkeypatch.setattr(curseduca_service, "trocar_token_de_identidade", troca)
+
+    resp = await client.post(
+        "/api/v1/auth/embed/identidade", json={"token": "x"}, headers={"Origin": ORIGEM}
+    )
+
+    assert "access_token" not in resp.json()
+    assert "set-cookie" not in {k.lower() for k in resp.headers}
+
+
+async def test_identidade_sem_sessao_exige_token_valido(client, monkeypatch):
+    async def queimado(_token):
+        raise curseduca_service.TokenDeIdentidadeInvalido("token_expirado")
+
+    monkeypatch.setattr(curseduca_service, "trocar_token_de_identidade", queimado)
+
+    resp = await client.post(
+        "/api/v1/auth/embed/identidade", json={"token": "x"}, headers={"Origin": ORIGEM}
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"]["codigo"] == "token_expirado"
+
+
+async def test_identidade_sem_sessao_recusa_email(client):
+    """O expurgo do e-mail vale aqui também: só token."""
+    resp = await client.post(
+        "/api/v1/auth/embed/identidade",
+        json={"email": "alguem@empresa.com"},
+        headers={"Origin": ORIGEM},
+    )
+    assert resp.status_code == 400
+
+
+async def test_caminho_por_email_ainda_funciona_se_religado(client, db, monkeypatch):
+    """A escada de emergência precisa funcionar quando for puxada.
+
+    O caminho por e-mail está DESLIGADO por padrão desde 02/09/2026 — é isso
+    que fecha a vulnerabilidade. Mas continua religável por variável de
+    ambiente enquanto os seis apps não estiverem verificados em produção.
+
+    Uma saída de emergência que ninguém testa não é saída. Este teste existe
+    para que, no dia em que alguém precisar religar às pressas, o caminho
+    esteja íntegro — e some junto com o ramo, quando a trava de startup entrar.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "embed_email_fallback_enabled", True)
+
+    async def membro_valido(_email):
+        return {"email": "legado@empresa.com", "groups": []}
+
+    monkeypatch.setattr(curseduca_service, "verify_active_member", membro_valido)
+
+    resp = await client.post(
+        "/api/v1/auth/embed/token",
+        json={"email": "legado@empresa.com"},
+        headers={"Origin": ORIGEM},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["access_token"]
+
+    # E fica registrado como legado, para o log ser a evidência de que alguém
+    # ainda depende dele.
+    registros = list(await db.scalars(
+        select(AuditLog).where(AuditLog.action == "auth.embed")
+    ))
+    assert any(r.metadata_["via"] == "email" for r in registros)

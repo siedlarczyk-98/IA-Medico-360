@@ -60,6 +60,19 @@ interface Opcoes {
   aoAutenticar: (resposta: RespostaSessao) => void;
 }
 
+interface OpcoesIdentidade {
+  apiBase: string;
+  waidOrigin: string;
+  /** Chamado com o nome e o e-mail — sem sessão, sem usuário criado. */
+  aoIdentificar: (identidade: IdentidadeSimples) => void;
+}
+
+/** O que as landing pages precisam: só para pré-preencher o formulário. */
+export interface IdentidadeSimples {
+  nome: string | null;
+  email: string;
+}
+
 interface Estado {
   fase: FaseIdentidade;
   erro: MotivoErro | null;
@@ -106,7 +119,24 @@ function estaIncorporada(): boolean {
   }
 }
 
-export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes): Estado {
+/**
+ * O handshake em si, sem opinião sobre o que fazer com o token.
+ *
+ * `trocar` recebe o token e devolve o que deve acontecer:
+ *   `ok`       — deu certo, para de pedir
+ *   `renovar`  — o token queimou; pede outro (ocorrência normal)
+ *   `desistir` — falha que retentar não conserta
+ *
+ * Existe separado porque há dois usos com necessidades diferentes: os três apps
+ * trocam o token por uma SESSÃO; as landing pages, que são públicas, trocam
+ * apenas por nome e e-mail para pré-preencher um formulário. O handshake — a
+ * ordem, a retentativa, o teto de espera — é idêntico nos dois, e é justamente
+ * a parte cheia de detalhe que não pode divergir.
+ */
+function useHandshakeWaid(
+  waidOrigin: string,
+  trocar: (token: string) => Promise<'ok' | 'renovar' | 'desistir'>,
+): Estado {
   const [estado, setEstado] = useState<Estado>(() =>
     estaIncorporada()
       ? { fase: 'pedindo', erro: null }
@@ -123,32 +153,8 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
   // efeito — recriá-lo removeria o ouvinte no meio do handshake.
   const concluido = useRef(false);
   const tentativas = useRef(0);
-  const aoAutenticarRef = useRef(aoAutenticar);
-  aoAutenticarRef.current = aoAutenticar;
-
-  const trocar = useCallback(
-    async (token: string): Promise<'ok' | 'renovar' | 'desistir'> => {
-      const resp = await fetch(`${apiBase}/api/v1/auth/embed/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ token }),
-      });
-
-      if (resp.ok) {
-        aoAutenticarRef.current(await resp.json());
-        return 'ok';
-      }
-      if (resp.status === 401) {
-        const corpo = await resp.json().catch(() => null);
-        // Token queimado é ocorrência normal (recarregar a página basta).
-        // Pedir outro resolve; mostrar erro seria assustar à toa.
-        if (tokenPrecisaSerRenovado(corpo)) return 'renovar';
-      }
-      return 'desistir';
-    },
-    [apiBase],
-  );
+  const trocarRef = useRef(trocar);
+  trocarRef.current = trocar;
 
   useEffect(() => {
     // Sem pai, não há handshake possível: não adianta registrar ouvinte nem
@@ -172,7 +178,7 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
 
       let resultado: 'ok' | 'renovar' | 'desistir';
       try {
-        resultado = await trocar(token);
+        resultado = await trocarRef.current(token);
       } catch {
         resultado = 'desistir';
       }
@@ -228,7 +234,88 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
       clearTimeout(desistencia);
       window.removeEventListener('message', aoReceber);
     };
-  }, [waidOrigin, trocar]);
+  }, [waidOrigin]);
 
   return estado;
+}
+
+
+/**
+ * Identidade + SESSÃO. É o que os três apps do produto usam.
+ *
+ * Troca o token da Waid por um JWT nosso em `/auth/embed/token`, criando o
+ * usuário se ele ainda não existir.
+ */
+export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes): Estado {
+  const aoAutenticarRef = useRef(aoAutenticar);
+  aoAutenticarRef.current = aoAutenticar;
+
+  const trocar = useCallback(
+    async (token: string): Promise<'ok' | 'renovar' | 'desistir'> => {
+      const resp = await fetch(`${apiBase}/api/v1/auth/embed/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ token }),
+      });
+
+      if (resp.ok) {
+        aoAutenticarRef.current(await resp.json());
+        return 'ok';
+      }
+      if (resp.status === 401) {
+        const corpo = await resp.json().catch(() => null);
+        // Token queimado é ocorrência normal (recarregar a página basta).
+        // Pedir outro resolve; mostrar erro seria assustar à toa.
+        if (tokenPrecisaSerRenovado(corpo)) return 'renovar';
+      }
+      return 'desistir';
+    },
+    [apiBase],
+  );
+
+  return useHandshakeWaid(waidOrigin, trocar);
+}
+
+
+/**
+ * SÓ identidade — nome e e-mail. É o que as landing pages usam.
+ *
+ * Não cria sessão nem usuário: quem abre uma LP pode não ser cliente, e criar
+ * cadastro a partir de um formulário de captação seria inventar consentimento.
+ * Serve para pré-preencher o formulário, que antes vinha do `?email=` na URL.
+ *
+ * Falhar aqui não é grave: o lead digita o próprio e-mail, como em qualquer
+ * outro formulário. Por isso quem chama deve tratar `erro` como "peça os dados"
+ * e não como tela de erro.
+ */
+export function useIdentidadeSimplesWaid(
+  { apiBase, waidOrigin, aoIdentificar }: OpcoesIdentidade,
+): Estado {
+  const aoIdentificarRef = useRef(aoIdentificar);
+  aoIdentificarRef.current = aoIdentificar;
+
+  const trocar = useCallback(
+    async (token: string): Promise<'ok' | 'renovar' | 'desistir'> => {
+      const resp = await fetch(`${apiBase}/api/v1/auth/embed/identidade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+
+      if (resp.ok) {
+        const dados = await resp.json();
+        aoIdentificarRef.current({ nome: dados.nome ?? null, email: dados.email });
+        return 'ok';
+      }
+      if (resp.status === 401) {
+        const corpo = await resp.json().catch(() => null);
+        if (tokenPrecisaSerRenovado(corpo)) return 'renovar';
+      }
+      return 'desistir';
+    },
+    [apiBase],
+  );
+
+  return useHandshakeWaid(waidOrigin, trocar);
 }

@@ -90,6 +90,10 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # tela de cadastro precisa dela ANTES de existir sessão — exigir token aqui
     # devolveria a lista para dentro do TSX, que é o que este trabalho desfez.
     ("GET", "/api/v1/meta/especialidades"): PUBLICA,
+    # Identidade para as landing pages, que são públicas e não têm login. Sem
+    # token nosso porque a prova é o token da Waid: uso único, 5 minutos, e só
+    # chega a quem está dentro do iframe. Não cria sessão nem usuário.
+    ("POST", "/api/v1/auth/embed/identidade"): PUBLICA,
     # Correção de especialidade pelo suporte: a válvula que torna defensável
     # travar o campo para o próprio médico (LGPD art. 18, III).
     ("PATCH", "/api/v1/auth/admin/users/{user_id}/especialidade"): ADMIN,

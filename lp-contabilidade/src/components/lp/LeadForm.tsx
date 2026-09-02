@@ -14,7 +14,7 @@ import {
   willingnessToPayOptions,
   type AccountingInterestInput,
 } from '@/lib/accounting-interest-schema'
-import { getLeadFromUrl } from '@/lib/lead'
+import { useLead } from '@/lib/lead'
 
 const emptyForm: AccountingInterestInput = {
   careerStage: '',
@@ -60,21 +60,31 @@ function SelectField({
 export function LeadForm() {
   const [form, setForm] = useState<AccountingInterestInput>(emptyForm)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const leadEmail = getLeadFromUrl().email
+  // A identidade agora chega por handshake com a plataforma, então é
+  // assíncrona: `pronto` diz quando parou de tentar (com ou sem sucesso).
+  const { lead, pronto } = useLead()
+  const leadEmail = lead.email
   const [status, setStatus] = useState<'checking' | 'idle' | 'sending' | 'done'>(
-    leadEmail ? 'checking' : 'idle',
+    'checking',
   )
   const [serverError, setServerError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!leadEmail) return
+    // Ainda identificando: o skeleton continua.
+    if (!pronto) return
+    // Terminou SEM identidade (LP aberta fora do embed, ou pelo app da Waid,
+    // que abre sem iframe). Sem isto a tela ficaria em skeleton para sempre.
+    if (!leadEmail) {
+      setStatus('idle')
+      return
+    }
     checkAlreadySubmitted(leadEmail)
       .then((already) => setStatus(already ? 'done' : 'idle'))
       // Falha no check (rede, CORS, backend fora) nao pode travar a LP num
       // skeleton pra sempre — melhor deixar preencher de novo do que
       // esconder o form inteiro por causa de um GET que falhou.
       .catch(() => setStatus('idle'))
-  }, [leadEmail])
+  }, [pronto, leadEmail])
 
   function update<K extends keyof AccountingInterestInput>(key: K, value: AccountingInterestInput[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))

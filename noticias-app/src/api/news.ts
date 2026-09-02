@@ -169,12 +169,6 @@ export function naoInteressa(articleId: number, topicSlug?: string): Promise<voi
   });
 }
 
-export function autenticarEmbed(email: string): Promise<{ access_token: string }> {
-  return request<{ access_token: string }>('/auth/embed/token', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
-}
 
 // ── Palavras-chave ──────────────────────────────────────────────────────────
 
