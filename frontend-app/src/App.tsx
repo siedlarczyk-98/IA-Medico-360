@@ -23,6 +23,9 @@ const InvitePage = lazy(() => import('./pages/InvitePage').then(m => ({ default:
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then(m => ({ default: m.OnboardingPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })));
 const EmbedAuthPage = lazy(() => import('./pages/EmbedAuthPage').then(m => ({ default: m.EmbedAuthPage })));
+// Tela técnica, sem link em lugar nenhum: só é alcançada por quem digita a rota
+// ou por uma seção da Waid apontada para ela. Ver o docblock do arquivo.
+const DiagnosticoEmbedPage = lazy(() => import('./pages/DiagnosticoEmbedPage').then(m => ({ default: m.DiagnosticoEmbedPage })));
 
 const BACKEND_TO_CHIP: Record<string, string> = {
   QUICK_SEARCH:      'busca',
@@ -424,6 +427,7 @@ function App() {
         <Route path="/invite" element={<InvitePage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/embed-auth" element={<EmbedAuthPage />} />
+        <Route path="/diagnostico-embed" element={<DiagnosticoEmbedPage />} />
         <Route path="/" element={
           <RequireAuth>
             {/*
