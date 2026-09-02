@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from xml.etree import ElementTree
 
 from app.core.http_client import get_client
-from app.services.pubmed_eutils import EUTILS_BASE, eutils_params
+from app.services.integracoes.pubmed_eutils import EUTILS_BASE, eutils_params
 
 logger = logging.getLogger(__name__)
 

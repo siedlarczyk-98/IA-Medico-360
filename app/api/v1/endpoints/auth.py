@@ -2,8 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import delete as sql_delete
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import COOKIE_NAME, get_current_user
@@ -11,19 +10,8 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.medicina import especialidades, identidade
-from app.models.models import (
-    AuditLog,
-    Conversation,
-    Folder,
-    Interaction,
-    InteractionMedication,
-    InteractionResponse,
-    PharmaAlert,
-    PubmedValidation,
-    User,
-    UserPreference,
-    UserWeeklyUsage,
-)
+from app.models.models import AuditLog, User
+from app.repositories import auth_repository
 from app.schemas.auth import (
     DeleteAccountRequest,
     InviteAcceptRequest,
@@ -41,9 +29,9 @@ from app.services import (
     auth_service,
     cache_service,
     consent_service,
-    curseduca_service,
     data_subject_service,
 )
+from app.services.integracoes import curseduca_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -465,30 +453,8 @@ async def delete_me(
     if not body.confirm_name or body.confirm_name != current_user.name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nome de confirmação não confere")
 
-    user_id = current_user.id
-
-    # Coleta IDs das conversas do usuário
-    conv_ids_result = await db.execute(select(Conversation.id).where(Conversation.user_id == user_id))
-    conv_ids = [r[0] for r in conv_ids_result.fetchall()]
-
-    if conv_ids:
-        # Coleta IDs das interactions dessas conversas
-        inter_ids_result = await db.execute(select(Interaction.id).where(Interaction.conversation_id.in_(conv_ids)))
-        inter_ids = [r[0] for r in inter_ids_result.fetchall()]
-
-        if inter_ids:
-            await db.execute(sql_delete(PubmedValidation).where(PubmedValidation.interaction_id.in_(inter_ids)))
-            await db.execute(sql_delete(InteractionMedication).where(InteractionMedication.interaction_id.in_(inter_ids)))
-            await db.execute(sql_delete(PharmaAlert).where(PharmaAlert.interaction_id.in_(inter_ids)))
-            await db.execute(sql_delete(InteractionResponse).where(InteractionResponse.interaction_id.in_(inter_ids)))
-
-        await db.execute(sql_delete(Interaction).where(Interaction.conversation_id.in_(conv_ids)))
-
-    await db.execute(sql_delete(Conversation).where(Conversation.user_id == user_id))
-    await db.execute(sql_delete(Folder).where(Folder.user_id == user_id))
-    await db.execute(sql_delete(UserPreference).where(UserPreference.user_id == user_id))
-    await db.execute(sql_delete(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user_id))
-    # Nullifica referências em audit_logs (user_id nullable) antes de remover o user
-    await db.execute(update(AuditLog).where(AuditLog.user_id == user_id).values(user_id=None))
-    await db.execute(sql_delete(User).where(User.id == user_id))
+    # A cascata em si vive no repositório: a ORDEM das exclusões é conhecimento
+    # sobre o schema, não sobre HTTP. Aqui fica só o que é do endpoint —
+    # validar a confirmação e fechar a transação.
+    await auth_repository.apagar_dados_do_usuario(db, current_user.id)
     await db.commit()

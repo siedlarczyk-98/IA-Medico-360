@@ -18,8 +18,8 @@ import json
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.services import ai_providers
-from app.services.ai_providers import StreamToken
+from app.services.integracoes import ai_providers
+from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 
 
@@ -213,7 +213,7 @@ class ProviderCompleteFake:
         self.chamado_com: list[str] = []
 
     async def complete(self, model_id, prompt, **kwargs):
-        from app.services.ai_providers import ProviderResponse
+        from app.services.integracoes.ai_providers import ProviderResponse
 
         self.chamado_com.append(model_id)
         return ProviderResponse(text=self.texto, tokens_in=10, tokens_out=20)

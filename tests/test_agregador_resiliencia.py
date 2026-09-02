@@ -15,9 +15,9 @@ from sqlalchemy import select
 
 from app.models.models import InteractionResponse, UserWeeklyUsage
 from app.schemas.agregador import AgregadorRequest
-from app.services import ai_providers
 from app.services.agregador_service import AgregadorService
-from app.services.ai_providers import ProviderResponse
+from app.services.integracoes import ai_providers
+from app.services.integracoes.ai_providers import ProviderResponse
 
 
 class ProviderQueResponde:

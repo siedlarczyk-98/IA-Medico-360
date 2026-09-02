@@ -31,8 +31,8 @@ from app.schemas.agregador import (
     InteractionHistoryItem,
 )
 from app.services.agregador_service import AgregadorService
-from app.services.ai_providers import get_provider_by_type
 from app.services.file_extractor_service import resolve_file_context
+from app.services.integracoes.ai_providers import get_provider_by_type
 from app.services.usage_service import check_limit
 
 logger = logging.getLogger(__name__)

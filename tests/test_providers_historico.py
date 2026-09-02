@@ -13,7 +13,7 @@ receber contexto malformado e responde pior. Daí os testes.
 
 import pytest
 
-from app.services.ai_providers import (
+from app.services.integracoes.ai_providers import (
     AnthropicProvider,
     DlpEnforcingProvider,
     GeminiProvider,
@@ -51,7 +51,7 @@ class ClienteFalso:
 
 def _instalar_cliente(monkeypatch, modulo_resposta):
     cliente = ClienteFalso(modulo_resposta)
-    monkeypatch.setattr("app.services.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
     return cliente
 
 

@@ -11,7 +11,7 @@ RN-SEC-001: nenhuma PII pode sair do backend brasileiro.
 
 import pytest
 
-from app.services.ai_providers import (
+from app.services.integracoes.ai_providers import (
     PROVIDER_TYPE_REGISTRY,
     DlpEnforcingProvider,
     ProviderResponse,

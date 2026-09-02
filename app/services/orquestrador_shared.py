@@ -20,7 +20,6 @@ from sqlalchemy import select, update
 
 from app.core.prompts import SYSTEM_PROMPT_CLARIFICATION
 from app.models.models import Conversation, FileExtraction, Interaction
-from app.services.ai_providers import OpenAIProvider
 from app.services.context_budget import (
     DEFAULT_HISTORY_TOKEN_BUDGET,
     Turn,
@@ -29,6 +28,7 @@ from app.services.context_budget import (
 )
 from app.services.conversation_history import load_history
 from app.services.folder_context_service import contexto_da_pasta
+from app.services.integracoes.ai_providers import OpenAIProvider
 
 logger = logging.getLogger(__name__)
 

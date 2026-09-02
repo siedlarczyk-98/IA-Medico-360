@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.models import Interaction, InteractionResponse
-from app.services.ai_providers import StreamToken
+from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 
 pytestmark = pytest.mark.asyncio

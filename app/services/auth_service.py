@@ -13,7 +13,8 @@ from app.core.config import get_settings
 from app.medicina import especialidades, identidade
 from app.models.models import InviteToken, OtpCode, User
 from app.repositories import auth_repository as repo
-from app.services import curseduca_service, email_service
+from app.services import email_service
+from app.services.integracoes import curseduca_service
 
 logger = logging.getLogger(__name__)
 

@@ -31,10 +31,10 @@ from app.schemas.agregador import (
     PubmedValidationResult,
     VerifiedCitationOut,
 )
-from app.services.ai_providers import ProviderResponse, get_provider_by_type
+from app.services.integracoes.ai_providers import ProviderResponse, get_provider_by_type
+from app.services.integracoes.pubmed_service import validate_with_pubmed
 from app.services.medication_extractor import extract_from_interaction
 from app.services.pricing import Pricing, calculate_cost, get_model_pricing
-from app.services.pubmed_service import validate_with_pubmed
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.usage_service import add_interaction_audit, record_cost
 

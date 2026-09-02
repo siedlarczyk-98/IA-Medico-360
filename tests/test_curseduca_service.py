@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.services import curseduca_service
+from app.services.integracoes import curseduca_service
 
 
 def _settings(**over):

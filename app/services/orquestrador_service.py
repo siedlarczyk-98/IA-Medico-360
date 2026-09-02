@@ -27,7 +27,8 @@ from app.models.models import (
     PharmaAlert,
     PubmedValidation,
 )
-from app.services.ai_providers import get_provider_by_type
+from app.services.integracoes.ai_providers import get_provider_by_type
+from app.services.integracoes.pubmed_service import validate_with_pubmed
 from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
     FALLBACK_MODELS,
@@ -47,7 +48,6 @@ from app.services.orquestrador_shared import (
     resolve_clarification_prompt,
 )
 from app.services.pricing import calculate_cost
-from app.services.pubmed_service import validate_with_pubmed
 from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
@@ -450,8 +450,8 @@ class OrquestradorService:
     # ── PHARMA_CHECK ─────────────────────────────────────────
 
     async def _handle_pharma_check(self, prompt: str, interaction_id) -> dict:
+        from app.services.integracoes.pharmadb_service import get_pharmadb_service
         from app.services.medication_extractor import extract_medications
-        from app.services.pharmadb_service import get_pharmadb_service
 
         pharmadb = get_pharmadb_service()
 
@@ -518,7 +518,7 @@ class OrquestradorService:
         Fluxo único para os modos PharmaDB baseados em medicamento
         (bula/receita/genérico). As diferenças por modo vêm de PHARMA_MODE_CONFIG.
         """
-        from app.services.pharmadb_service import get_pharmadb_service
+        from app.services.integracoes.pharmadb_service import get_pharmadb_service
 
         pharmadb = get_pharmadb_service()
         buscar_attr, formatar_attr, label = PHARMA_MODE_CONFIG[mode]

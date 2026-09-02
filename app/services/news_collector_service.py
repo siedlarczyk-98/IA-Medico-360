@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.news import Article, ArticleStatus
 from app.news.journals import JournalConfig, journal_for_today
-from app.services.news_pubmed import ArtigoPubMed, buscar_artigos_por_issn
+from app.services.integracoes.news_pubmed import ArtigoPubMed, buscar_artigos_por_issn
 
 logger = logging.getLogger(__name__)
 

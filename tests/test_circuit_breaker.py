@@ -174,7 +174,7 @@ async def test_curseduca_traduz_circuito_aberto_para_fail_closed():
     Circuito aberto na Curseduca precisa virar `CurseducaNotConfigured`, que o
     endpoint converte em 503 — nunca em "membro válido".
     """
-    from app.services.curseduca_service import CurseducaNotConfigured, _fetch_member
+    from app.services.integracoes.curseduca_service import CurseducaNotConfigured, _fetch_member
 
     circuit_breaker.curseduca._estado = Estado.ABERTO
     circuit_breaker.curseduca._aberto_em = __import__("time").monotonic()

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.models.news import Article, ArticleStatus, ArticleTopic, Topic
 from app.news.journals import JOURNALS_BY_SLUG
 from app.services import news_collector_service, news_tagger_service, news_writer_service
-from app.services.news_pubmed import ArtigoPubMed
+from app.services.integracoes.news_pubmed import ArtigoPubMed
 
 # Marca apenas as funcoes async: um `pytestmark` global faria o pytest-asyncio
 # reclamar de todo teste sincrono deste arquivo.

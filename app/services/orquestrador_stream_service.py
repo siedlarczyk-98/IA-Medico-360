@@ -30,7 +30,8 @@ from app.models.models import (
     InteractionResponse,
     PubmedValidation,
 )
-from app.services.ai_providers import get_provider_by_type
+from app.services.integracoes.ai_providers import get_provider_by_type
+from app.services.integracoes.pubmed_service import validate_with_pubmed
 from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
     EFFORT_MAX_TOKENS,
@@ -51,7 +52,6 @@ from app.services.orquestrador_shared import (
     resolve_clarification_prompt,
 )
 from app.services.pricing import calculate_cost, get_model_pricing
-from app.services.pubmed_service import validate_with_pubmed
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
