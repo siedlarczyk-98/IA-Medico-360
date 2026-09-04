@@ -27,7 +27,7 @@ contabilizado e rastreamento sem tocar no contrato da chamada.
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOKENS = 1500
+
+# Teto de retentativas por artigo. Uma falha aqui costuma ser transitória — o
+# timeout de uma geração longa é o caso comum —, e o lote seguinte reprocessa.
+# O teto existe para que o que NÃO tem conserto (abstract que o modelo recusa,
+# journal com formato quebrado) pare de consumir chamada a cada rodada.
+MAX_TENTATIVAS = 3
 
 SYSTEM_PROMPT = """\
 Você é um redator médico especializado em traduzir resumos de artigos científicos (abstracts) \
@@ -101,7 +107,7 @@ def _citacao_html(article: Article, journal: str) -> str:
     return f"<p><em>Fonte: {autores}{article.original_title or ''} — {journal}.</em></p>"
 
 
-async def redigir(article: Article, journal: str, timeout: int = 60) -> tuple[str, str]:
+async def redigir(article: Article, journal: str, timeout: int = 120) -> tuple[str, str]:
     """
     Chama o Claude para reescrever um artigo. Retorna (título, corpo_html).
 
@@ -160,10 +166,24 @@ async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
     matéria-prima. Misturar os dois faria a fila de falhas encher de itens que
     não têm conserto e esconderia as falhas de verdade.
     """
+    # `tagged` são os novos; `failed` abaixo do teto são os que merecem outra
+    # chance. Um `ReadTimeout` do modelo não é veredito sobre o artigo — sem
+    # esta segunda linha, `retry_count` seria incrementado e nunca lido, e todo
+    # timeout viraria perda permanente de uma notícia.
     resultado = await db.execute(
         select(Article)
         .options(selectinload(Article.topics))
-        .where(Article.status == ArticleStatus.TAGGED.value)
+        .where(
+            or_(
+                Article.status == ArticleStatus.TAGGED.value,
+                and_(
+                    Article.status == ArticleStatus.FAILED.value,
+                    Article.retry_count < MAX_TENTATIVAS,
+                ),
+            )
+        )
+        # Os novos primeiro: uma retentativa não deve atrasar a fila corrente.
+        .order_by(Article.retry_count.asc(), Article.id.asc())
         .limit(tamanho_lote)
         .with_for_update(skip_locked=True)
     )
@@ -199,11 +219,24 @@ async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
             article.status = ArticleStatus.PUBLISHED.value
             publicados += 1
         except Exception as exc:
-            logger.exception("Falha ao redigir artigo id=%s", article.id)
             article.status = ArticleStatus.FAILED.value
             article.last_error = str(exc)[:2000]
             article.retry_count += 1
             falhas += 1
+            # Enquanto há retentativa pela frente, isto é ruído esperado (um
+            # timeout do modelo costuma passar na rodada seguinte). Só o
+            # esgotamento é notícia: dali em diante o artigo não volta à fila
+            # sozinho, e ninguém seria avisado se o log não distinguisse.
+            if article.retry_count >= MAX_TENTATIVAS:
+                logger.exception(
+                    "Artigo id=%s desistido após %d tentativas",
+                    article.id, article.retry_count,
+                )
+            else:
+                logger.warning(
+                    "Falha ao redigir artigo id=%s (tentativa %d/%d, será reprocessado): %s",
+                    article.id, article.retry_count, MAX_TENTATIVAS, exc,
+                )
 
         await db.flush()
 

@@ -229,6 +229,56 @@ async def test_falha_do_modelo_registra_erro(db, monkeypatch):
 
 
 @asyncio
+async def test_artigo_que_falhou_volta_no_lote_seguinte(db, monkeypatch):
+    """Uma falha transitória (timeout do modelo) não pode custar a notícia."""
+
+    async def falha(*a, **kw):
+        raise ValueError("timeout simulado")
+
+    monkeypatch.setattr(news_writer_service, "redigir", falha)
+    art = await _artigo(db, external_id="transitorio")
+    await news_writer_service.redigir_lote(db)
+    await db.refresh(art)
+    assert art.status == ArticleStatus.FAILED.value
+
+    # Segunda rodada, agora com o modelo respondendo: o artigo tem de ser
+    # recolhido pela query — é isto que `retry_count` passou a significar.
+    async def redige(article, journal, **kw):
+        return "Recuperado", "<p>Corpo</p>"
+
+    monkeypatch.setattr(news_writer_service, "redigir", redige)
+    resultado = await news_writer_service.redigir_lote(db)
+
+    await db.refresh(art)
+    assert art.status == ArticleStatus.PUBLISHED.value
+    assert art.rewritten_title == "Recuperado"
+    assert resultado["publicados"] == 1
+
+
+@asyncio
+async def test_artigo_para_de_ser_tentado_no_teto(db, monkeypatch):
+    """O teto existe para que falha sem conserto não consuma chamada eterna."""
+
+    async def falha(*a, **kw):
+        raise ValueError("erro permanente")
+
+    monkeypatch.setattr(news_writer_service, "redigir", falha)
+    art = await _artigo(db, external_id="insistente")
+
+    for _ in range(news_writer_service.MAX_TENTATIVAS):
+        await news_writer_service.redigir_lote(db)
+
+    await db.refresh(art)
+    assert art.retry_count == news_writer_service.MAX_TENTATIVAS
+
+    # Esgotado: a rodada seguinte não pode mais pegá-lo.
+    resultado = await news_writer_service.redigir_lote(db)
+    assert resultado["falhas"] == 0
+    await db.refresh(art)
+    assert art.retry_count == news_writer_service.MAX_TENTATIVAS
+
+
+@asyncio
 async def test_citacao_e_montada_sem_o_modelo():
     """A referência à fonte não passa pelo LLM — é o que garante citação correta."""
     art = Article(
