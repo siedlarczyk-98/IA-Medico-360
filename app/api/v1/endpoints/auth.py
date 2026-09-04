@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import COOKIE_NAME, get_current_user
+from app.core.alarme import alarmar
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
@@ -270,6 +271,17 @@ async def _entrar_por_token_waid(db: AsyncSession, token_waid: str) -> User:
     except curseduca_service.CurseducaNotConfigured as exc:
         # Credencial nossa, permissão ausente para o endpoint, ou a Waid fora do
         # ar. Pedir outro token não resolve — insistir viraria laço.
+        #
+        # Alarma porque este é o 4xx/5xx que NÃO é o cliente errando: ninguém
+        # consegue entrar pelo embed enquanto durar, e sem isto o sintoma seria
+        # apenas silêncio — o médico vê "não foi possível confirmar sua
+        # identidade" e o painel não registra nada. O 401 vizinho não alarma de
+        # propósito: ali o cliente pede outro token e se recupera sozinho.
+        alarmar(
+            tag="embed_identidade_indisponivel",
+            mensagem="Troca do token de identidade da Waid indisponível: ninguém entra pelo embed",
+            contexto={"erro": str(exc), "excecao": type(exc).__name__},
+        )
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Não foi possível confirmar sua identidade no momento.",
