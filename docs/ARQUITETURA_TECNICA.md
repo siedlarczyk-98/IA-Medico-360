@@ -66,7 +66,11 @@ Não existem "3 instâncias" no sentido de serviços de backend independentes. A
 
 Fora das pastas de app existe **`shared/`**, na raiz do monorepo: código que os três apps autenticados importam via alias `@shared`. Hoje contém só o onboarding (§3.4). Não é workspace npm — é alias de Vite + `paths` de TypeScript, e é o motivo de os três buildarem por Dockerfile com contexto na raiz (§13.2).
 
-Os frontends não conversam entre si, e **os três autenticados são embedados separadamente** como iframes no LMS (Curseduca) — cada um com seu próprio `EmbedAuthPage`. Compartilham sessão via cookie SSO (`medico360_session`, domínio comum em `COOKIE_DOMAIN`) mais o fluxo dedicado `/auth/embed/token`. O que eles de fato compartilham é o **banco**: uma linha em `users` serve aos três, e é por isso que o onboarding preenchido em qualquer um vale para todos.
+Os frontends não conversam entre si, e **os três autenticados são embedados separadamente** como iframes no LMS (Curseduca) — cada um com seu próprio `EmbedAuthPage`. Cada um faz seu próprio `/auth/embed/token` e carrega a sessão no header `Authorization`.
+
+**Não há SSO por cookie entre eles, e não pode haver na topologia atual.** Os quatro serviços são subdomínios diretos de `up.railway.app` (`medico360-ia`, `frontend-medico-360-production`, `calculadoras-medico-360`, `news-m360`), cujo único pai comum está na Public Suffix List — nenhum navegador aceita cookie nele. Por isso `COOKIE_DOMAIN` fica vazio: não existe valor que funcione, e o cookie `medico360_session` vale só por origem. O SSO real só passa a existir com domínios próprios sob uma raiz comum (`api.` / `app.` / `calc.` / `news.medico360.app`), decidido para a saída do Railway.
+
+O que os três de fato compartilham é o **banco**: uma linha em `users` serve aos três, e é por isso que o onboarding preenchido em qualquer um vale para todos.
 
 As LPs são públicas — não autenticam, exceto `/landing-pages/calculators/submit`, que é chamada de dentro do módulo logado.
 
@@ -232,14 +236,26 @@ e uma **decisão deliberada sobre o que fazer quando o outro lado não responde*
 **Sessão.** `get_current_user` (`app/api/deps.py`) aceita `Authorization: Bearer <jwt>`
 **ou** o cookie `medico360_session`; decodifica com `jwt_secret_key`, valida `sub` como
 UUID e busca o `User` com `status=true`. O cookie é setado em `_set_session_cookie`
-(`auth.py`) com `httponly`, `secure=is_production`, `samesite=lax`, `domain=COOKIE_DOMAIN`.
+(`auth.py`) com `httponly`, `secure=is_production`, `domain=COOKIE_DOMAIN` e
+`samesite=none` em produção (`lax` fora dela). O `none` não é preferência: os apps rodam
+dentro do iframe da Waid, então toda chamada à API é cross-site e `lax` faria o navegador
+aceitar o cookie e nunca mais enviá-lo. Como `none` exige `Secure` e `Secure` exige HTTPS,
+em desenvolvimento o par seria rejeitado — daí a condicional.
 Todas as rotas exigem autenticação, exceto as marcadas "não" nas tabelas do §4.
 
 **Como o médico entra.** Quatro caminhos: OTP por e-mail, convite, auto-cadastro
 (desligado por padrão) e — o que importa na prática — **embed do LMS**
-(`POST /auth/embed/token`). O LMS monta a URL do iframe com `?email=`; trocamos por um
-JWT. O `?email=` não é identidade: a prova vem da validação server-to-server na API da
-Curseduca, obrigatória em produção (o startup cai sem ela).
+(`POST /auth/embed/token`). A página pede identidade por `postMessage` ao `window.parent`;
+a Waid devolve um token opaco de uso único, que trocamos server-to-server por
+`{uuid, name, email}` — **o e-mail é resultado da verificação, não entrada**. O `?email=`
+legado foi desligado (`embed_email_fallback_enabled=False`), e o handshake vive em
+`shared/embed/identidade.ts`. A validação server-to-server na Curseduca segue obrigatória
+em produção — `CURSEDUCA_VALIDATION_ENABLED=false` derruba o startup (fail-closed), porque
+sem ela o endpoint voltaria a confiar só no `Origin`, que é forjável.
+
+Isso **não funciona nos aplicativos da Waid**, que abrem a seção em webview direto, sem
+iframe: sem `window.parent` não há quem responda ao pedido. No mobile o médico entra por
+OTP — e o `noticias-app`, que não tem tela de login, fica sem saída (ticket aberto).
 
 #### De onde vem a especialidade
 
@@ -1212,7 +1228,7 @@ erDiagram
 | INVITE_TOKEN_EXPIRE_HOURS | 72 | não |
 | OTP_EXPIRE_MINUTES | 10 | não |
 | ALLOW_PUBLIC_REGISTRATION | False | não |
-| COOKIE_DOMAIN | None | não |
+| COOKIE_DOMAIN | None | não (e **sem valor útil hoje**: `up.railway.app` está na Public Suffix List — ver §2) |
 | EMBED_ALLOWED_ORIGINS | `["https://adminportalmedico360.curseduca.pro"]` | não |
 | **LANDING_PAGES_ORIGINS** | `["http://localhost:5175"]` | não (mas necessária para as LPs em produção) |
 | CURSEDUCA_VALIDATION_ENABLED | False | sim (deve ser `true`) |
