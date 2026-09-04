@@ -40,14 +40,25 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    """Seta o cookie SSO compartilhado entre apps do mesmo domínio raiz, além do token no body."""
+    """Seta o cookie SSO compartilhado entre apps do mesmo domínio raiz, além do token no body.
+
+    `SameSite` não é preferência: os apps rodam dentro do iframe da Waid, então
+    toda chamada à API é cross-site e `lax` faz o navegador ENGOLIR o cookie —
+    ele é aceito na resposta e nunca mais enviado. Daí os 401 em `/auth/me` que
+    só somem quando o `Authorization` header entra em cena, mascarando o SSO
+    quebrado entre os apps.
+
+    `None` exige `Secure`, e `Secure` exige HTTPS. Em desenvolvimento (HTTP) o
+    par `None`+inseguro é rejeitado pelo navegador, o que quebraria o local —
+    por isso ali continua `lax`, onde mesmo-site já basta.
+    """
     settings = get_settings()
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
         secure=settings.is_production,
-        samesite="lax",
+        samesite="none" if settings.is_production else "lax",
         domain=settings.cookie_domain or None,
         max_age=settings.jwt_access_token_expire_minutes * 60,
     )

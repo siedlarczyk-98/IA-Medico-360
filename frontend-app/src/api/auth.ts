@@ -52,6 +52,7 @@ async function post<T>(path: string, body: unknown, auth = false): Promise<T> {
   const res = await fetch(`${BASE}/api/v1${path}`, {
     method: 'POST',
     headers,
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -70,6 +71,7 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -87,6 +89,7 @@ async function del(path: string, body: unknown): Promise<void> {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -102,6 +105,7 @@ async function get<T>(path: string): Promise<T> {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    credentials: 'include',
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
