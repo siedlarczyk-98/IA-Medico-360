@@ -322,3 +322,26 @@ def test_lista_comum_nao_e_confundida_com_par_de_header():
     limpo = scrub_event(evento)["extra"]["coordenadas"]
 
     assert limpo == [["latitude", "-23.55"], ["longitude", "-46.63"]]
+
+
+# --- Amostragem de transações -------------------------------------------------
+
+
+def test_amostragem_fora_da_faixa_falha_no_boot():
+    """O Sentry ignoraria em silêncio; aqui tem de falhar alto.
+
+    Um `2.0` no painel não amostra o dobro: desliga o tracing sem avisar, e a
+    descoberta viria semanas depois com "por que não há dado nenhum".
+    """
+    from app.core.config import Settings
+
+    for invalido in (2.0, -0.1):
+        with pytest.raises(ValueError, match="SENTRY_TRACES_SAMPLE_RATE"):
+            Settings(sentry_traces_sample_rate=invalido)
+
+
+def test_amostragem_valida_passa():
+    from app.core.config import Settings
+
+    assert Settings(sentry_traces_sample_rate=0.0).sentry_traces_sample_rate == 0.0
+    assert Settings(sentry_traces_sample_rate=1.0).sentry_traces_sample_rate == 1.0

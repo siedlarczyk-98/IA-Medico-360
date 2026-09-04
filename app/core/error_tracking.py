@@ -132,8 +132,17 @@ def scrub_event(event: dict, hint: dict | None = None) -> dict | None:
         return None
 
 
-def setup_sentry(dsn: str, environment: str, release: str | None = None) -> bool:
-    """Inicializa o Sentry. Retorna False (no-op) se não houver DSN configurado."""
+def setup_sentry(
+    dsn: str,
+    environment: str,
+    release: str | None = None,
+    traces_sample_rate: float = 0.0,
+) -> bool:
+    """Inicializa o Sentry. Retorna False (no-op) se não houver DSN configurado.
+
+    `traces_sample_rate` default 0.0 mantém o comportamento antigo para qualquer
+    chamador que não o passe (testes, scripts): tracing é opt-in explícito.
+    """
     if not dsn:
         return False
 
@@ -148,9 +157,15 @@ def setup_sentry(dsn: str, environment: str, release: str | None = None) -> bool
             send_default_pii=False,
             before_send=scrub_event,
             before_send_transaction=scrub_event,
-            # Amostragem de performance desligada por ora — o objetivo aqui é
-            # alerta de erro, e trace de LLM já vive no Phoenix.
-            traces_sample_rate=0.0,
+            # Amostra de transações: o que dá TAXA de resposta por rota, e a
+            # única leitura capaz de separar o 401 que é fluxo normal do embed
+            # do 401 que é rota quebrada — um alarme por evento não distingue
+            # os dois. Trace de LLM continua no Phoenix; isto aqui é HTTP.
+            #
+            # Passa pelo mesmo `before_send_transaction=scrub_event`, então a
+            # query string e o corpo saem antes de sair da máquina — a URL da
+            # transação chegaria a carregar `?email=` sem isso.
+            traces_sample_rate=traces_sample_rate,
         )
         return True
     except Exception as e:

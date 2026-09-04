@@ -1238,6 +1238,7 @@ erDiagram
 | INTERCOM_IDENTITY_SECRET | "" | não |
 | REDIS_URL | redis://localhost:6379/0 | não |
 | SENTRY_DSN / SENTRY_RELEASE | "" | não (vazio desliga o Sentry) |
+| SENTRY_TRACES_SAMPLE_RATE | 0.05 | não (amostra de transações: dá a taxa de 4xx/5xx por rota; baixar se o tráfego crescer no plano free) |
 | PHOENIX_API_KEY / PHOENIX_PROJECT_NAME / PHOENIX_ENDPOINT | "" / medico-360 / app.phoenix.arize.com/s/ruben-nogueira | não |
 | MAX_MODELS_PER_QUERY | 4 | não |
 | MAX_PROMPT_CHARS | 4000 | não |

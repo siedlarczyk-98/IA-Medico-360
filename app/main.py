@@ -46,8 +46,12 @@ async def lifespan(app: FastAPI):
         dsn=settings.sentry_dsn,
         environment=settings.app_env,
         release=settings.sentry_release or None,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
     ):
-        logger.info("Sentry ativo (scrubbing de PII habilitado)")
+        logger.info(
+            "Sentry ativo (scrubbing de PII habilitado, amostragem de traces em %.0f%%)",
+            settings.sentry_traces_sample_rate * 100,
+        )
     setup_phoenix(
         api_key=settings.phoenix_api_key,
         project_name=settings.phoenix_project_name,

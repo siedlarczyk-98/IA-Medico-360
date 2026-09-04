@@ -127,6 +127,32 @@ class Settings(BaseSettings):
     # é obrigatório: sem ele o prompt clínico bruto sai em cada evento de erro.
     sentry_dsn: str = ""
     sentry_release: str = ""
+    # Amostragem de transações (performance). É o que dá a TAXA de resposta por
+    # rota — a leitura que distingue "401 é o fluxo normal do embed" de "401 em
+    # toda chamada desta rota", coisa que alarme por evento não consegue mostrar.
+    #
+    # O default é baixo de propósito: no plano free do Sentry a cota de
+    # transações é bem menor que a de erros, e amostrar demais a queima em dias
+    # — ficando sem visibilidade justamente quando o tráfego cresce. 5% já
+    # descreve tendência por rota no volume atual. É variável de ambiente para
+    # subir junto com o plano, sem deploy: com mais usuários, baixe a taxa (a
+    # amostra por rota continua grande); ao escalar o plano, suba.
+    sentry_traces_sample_rate: float = 0.05
+
+    @field_validator("sentry_traces_sample_rate")
+    @classmethod
+    def _faixa_da_amostragem(cls, v: float) -> float:
+        """O Sentry ignora valor fora de 0..1 em silêncio — aqui falha alto.
+
+        Um `2.0` digitado no painel não amostraria o dobro: desligaria o
+        tracing sem dizer nada, e a descoberta viria semanas depois, com a
+        pergunta "por que não há dado nenhum".
+        """
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                f"SENTRY_TRACES_SAMPLE_RATE deve estar entre 0.0 e 1.0 (recebido: {v})"
+            )
+        return v
 
     # --- Observabilidade (Arize Phoenix) ---
     phoenix_api_key: str = ""
