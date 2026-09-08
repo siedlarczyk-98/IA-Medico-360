@@ -16,6 +16,8 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -28,6 +30,7 @@ from app.models.models import (
     FileExtraction,
     Interaction,
     InteractionMedication,
+    InteractionResponse,
     PubmedValidation,
 )
 from app.services.context_budget import (
@@ -49,6 +52,7 @@ from app.services.orquestrador_modes import (
     OrquestradorMode,
     upgrade_mode_for_attachments,
 )
+from app.services.response_metadata import build_metadata_from_cached
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import triage
 
@@ -542,3 +546,69 @@ async def pos_processar_interacao(
         medications=medications,
         pubmed=pubmed,
     )
+
+
+async def registrar_hit_de_cache(
+    db,
+    *,
+    user_id: UUID,
+    company_id: UUID | None,
+    conversation_id: UUID | None,
+    folder_id: UUID | None,
+    mode: str,
+    sanitized_prompt: str,
+    prompt_sanitizado: bool,
+    confidence: float,
+    cached: dict,
+) -> tuple[UUID, Interaction]:
+    """
+    Grava a resposta vinda do cache no histórico do usuário ATUAL.
+
+    Devolve `(conversation_id, interaction)` para que quem chamou possa
+    devolver ids que são DELE — e não os do payload cacheado.
+
+    Dois defeitos que isto veio consertar, e que só existiam porque os dois
+    caminhos tinham cópias separadas deste bloco:
+
+    1. O `/query` retornava o dicionário do cache cru. Como o cache é global
+       por modo, `conversation_id` e `interaction_id` de lá são da interação
+       que o POPULOU — de outro médico. Não havia IDOR (`ensure_conversation`
+       filtra por `user_id`), mas o médico ficava com um identificador de outro
+       titular e a mensagem saía do histórico dele.
+    2. Sem criar a `Interaction`, `cache_hit` nunca era gravado — e
+       `vigilancia_service.medir_cache_semantico` conta hits exatamente por
+       esse campo. A métrica ficava cega para metade do tráfego.
+
+    Não faz commit: cada caminho tem sua própria política de transação (o
+    `/stream` commita aqui, o `/query` deixa para o endpoint).
+    """
+    conv_id = await ensure_conversation(
+        db, user_id, conversation_id, sanitized_prompt, folder_id=folder_id
+    )
+    interaction = Interaction(
+        conversation_id=conv_id,
+        user_id=user_id,
+        company_id=company_id,
+        feature="ORQUESTRADOR",
+        mode=mode,
+        prompt_text=sanitized_prompt,
+        prompt_sanitized=prompt_sanitizado,
+        triage_confidence=confidence,
+        triage_category=mode,
+        cache_hit=True,
+        confidence_score=cached.get("confidence_score"),
+        specialty_detected=cached.get("specialty_detected"),
+        topic_detected=cached.get("topic_detected"),
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+    )
+    db.add(interaction)
+    await db.flush()
+    db.add(InteractionResponse(
+        interaction_id=interaction.id,
+        model_used=cached.get("model_used") or "cache",
+        response_text=cached.get("response_text") or "",
+        cost_usd=Decimal("0"),
+        extra_metadata=build_metadata_from_cached(cached),
+    ))
+    return conv_id, interaction

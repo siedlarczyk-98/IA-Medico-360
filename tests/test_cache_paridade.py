@@ -55,21 +55,31 @@ def test_query_sobrescreve_os_ids_do_cache():
     assert '"interaction_id": str(cached_interaction.id)' in trecho
 
 
-def test_query_grava_interaction_no_cache_hit():
-    """Sem Interaction, `vigilancia_service.medir_cache_semantico` fica cega
-    para este caminho — ela conta hits por `Interaction.cache_hit`."""
-    from app.services import orquestrador_service
+def test_o_registro_do_hit_grava_interaction_e_response():
+    """Sem `Interaction`, `vigilancia_service.medir_cache_semantico` fica cega —
+    ela conta hits por `Interaction.cache_hit`.
 
-    fonte = _fonte(orquestrador_service)
-    i = fonte.find("if cached is not None:")
-    trecho = fonte[i:i + 4000]
+    Agora isto vive em `registrar_hit_de_cache`, um lugar só para os dois
+    caminhos: é o que impede que um deles volte a esquecer.
+    """
+    from app.services import orquestrador_shared
 
-    assert "cache_hit=True" in trecho, "o /query não registra o hit no banco"
-    assert "InteractionResponse(" in trecho
+    fonte = _fonte(orquestrador_shared.registrar_hit_de_cache)
+
+    assert "cache_hit=True" in fonte
+    assert "InteractionResponse(" in fonte
+    assert "build_metadata_from_cached(cached)" in fonte, (
+        "a resposta do cache entraria no histórico sem as referências"
+    )
 
 
-def test_os_dois_caminhos_tratam_o_cache_hit_igual():
-    """A divergência que este bloco veio consertar."""
+def test_os_dois_caminhos_usam_o_registro_compartilhado():
+    """A divergência que este bloco veio consertar — agora pela raiz.
+
+    Enquanto cada serviço tinha sua cópia do bloco, um podia ser corrigido e o
+    outro não. Foi exatamente o que aconteceu: o `/stream` sobrescrevia os ids
+    desde sempre e o `/query` seguiu devolvendo os de outro médico.
+    """
     from app.services import orquestrador_service, orquestrador_stream_service
 
     for modulo, nome in (
@@ -77,11 +87,14 @@ def test_os_dois_caminhos_tratam_o_cache_hit_igual():
         (orquestrador_stream_service, "/stream"),
     ):
         fonte = _fonte(modulo)
-        i = fonte.find("if cached is not None:")
-        trecho = fonte[i:i + 4000]
-        assert "ensure_conversation" in trecho, f"{nome} não cria conversa no hit"
-        assert "cache_hit=True" in trecho, f"{nome} não grava o hit"
-        assert "conversation_id" in trecho, f"{nome} não devolve id próprio"
+        assert "registrar_hit_de_cache(" in fonte, (
+            f"{nome} não usa o registro compartilhado de cache hit"
+        )
+        # A cópia não pode voltar: se alguém recolar a construção da Interaction
+        # aqui, a divergência volta a ser possível.
+        assert "cache_hit=True" not in fonte, (
+            f"{nome} voltou a construir a Interaction do hit por conta própria"
+        )
 
 
 # ── Cache não serve resposta condicionada a paciente ─────────────────────────

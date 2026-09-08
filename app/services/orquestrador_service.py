@@ -41,10 +41,11 @@ from app.services.orquestrador_shared import (
     load_context_messages,
     pode_usar_cache,
     pos_processar_interacao,
+    registrar_hit_de_cache,
     resolve_clarification_prompt,
 )
 from app.services.pricing import calcular_custo_ferramentas, calculate_cost
-from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
+from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit, record_cost
@@ -179,53 +180,21 @@ class OrquestradorService:
                     self.db, mode, sanitized_prompt
                 )
                 if cached is not None:
-                    # A resposta do cache TAMBÉM entra no histórico, e os ids
-                    # devolvidos precisam ser os DESTE usuário.
-                    #
-                    # Antes este caminho retornava o dicionário do cache cru.
-                    # Como o cache é global por modo, `conversation_id` e
-                    # `interaction_id` de lá são da interação que o POPULOU —
-                    # de outro médico. O cliente gravava esse id e o mandava na
-                    # mensagem seguinte; `ensure_conversation` filtra por
-                    # `user_id` e criava outra conversa, então não havia IDOR,
-                    # mas a mensagem saía do histórico do médico e ele ficava
-                    # com um identificador de outro titular.
-                    #
-                    # O `/stream` já corrigia isso desde sempre. Os dois
-                    # caminhos tinham divergido — de novo.
-                    conv_id = await ensure_conversation(
-                        self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id
-                    )
-                    cached_interaction = Interaction(
-                        conversation_id=conv_id,
+                    # Os ids devolvidos precisam ser os DESTE usuário: o cache
+                    # é global por modo, e os do payload são de quem o populou.
+                    # Ver `registrar_hit_de_cache`.
+                    conv_id, cached_interaction = await registrar_hit_de_cache(
+                        self.db,
                         user_id=self.user_id,
                         company_id=self.company_id,
-                        feature="ORQUESTRADOR",
+                        conversation_id=conversation_id,
+                        folder_id=folder_id,
                         mode=mode,
-                        prompt_text=sanitized_prompt,
-                        prompt_sanitized=dlp_result.was_sanitized,
-                        triage_confidence=confidence,
-                        triage_category=mode,
-                        # Sem isto, `vigilancia_service.medir_cache_semantico`
-                        # ficava cega para o `/query`: ela conta hits por
-                        # `Interaction.cache_hit`, e este caminho não criava
-                        # Interaction nenhuma.
-                        cache_hit=True,
-                        confidence_score=cached.get("confidence_score"),
-                        specialty_detected=cached.get("specialty_detected"),
-                        topic_detected=cached.get("topic_detected"),
-                        started_at=datetime.now(UTC),
-                        completed_at=datetime.now(UTC),
+                        sanitized_prompt=sanitized_prompt,
+                        prompt_sanitizado=dlp_result.was_sanitized,
+                        confidence=confidence,
+                        cached=cached,
                     )
-                    self.db.add(cached_interaction)
-                    await self.db.flush()
-                    self.db.add(InteractionResponse(
-                        interaction_id=cached_interaction.id,
-                        model_used=cached.get("model_used") or "cache",
-                        response_text=cached.get("response_text") or "",
-                        cost_usd=Decimal("0"),
-                        extra_metadata=build_metadata_from_cached(cached),
-                    ))
                     return {
                         **cached,
                         "cache_hit": True,
