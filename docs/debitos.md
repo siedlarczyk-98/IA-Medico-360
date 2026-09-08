@@ -312,3 +312,31 @@ o fluxo de exames depende de chamada real a provedor de visão — o que o guard
 rede dos testes bloqueia por bom motivo.
 
 **Mitigação atual:** validação manual. Está no roteiro de teste do dia seguinte.
+
+---
+
+## 15. Câmbio fixo no custo da Maritaca (Data Ocean)
+
+**O que é.** `app/services/pricing.py` converte os preços da Maritaca — que são
+cobrados em REAIS — para o dólar em que o resto do sistema calcula custo, usando
+uma taxa **fixa** de R$ 5,20 (`BRL_POR_USD`).
+
+**Por quê.** O dólar flutua, então todo custo gravado para esse provider carrega
+o erro entre a taxa fixa e a do dia: a R$ 5,60 fica ~7% subestimado, a R$ 4,80
+~8% superestimado.
+
+A alternativa seria consultar cotação a cada chamada, o que acrescenta uma
+dependência externa e um modo de falha novo no caminho de resposta ao médico —
+para corrigir poucos por cento sobre um custo que é de centavos por consulta. A
+ordem de grandeza, que é o que decide se o modo está caro, não muda.
+
+**O que resolve.** Passar a converter por cotação do dia (o Banco Central publica
+a PTAX, e o próprio Data Ocean a consulta) e gravar a taxa usada junto do custo.
+
+**Quando revisar.** Se o dólar sair da faixa de R$ 4,80 a R$ 5,60, ou se o custo
+do modo DATA_OCEAN passar a ser material no total da plataforma.
+
+**Mitigação.** O consumo bruto de ferramentas fica gravado em
+`InteractionResponse.extra_metadata` (`tool_usage`), em unidades, não em dinheiro.
+Recalcular o histórico inteiro com outra taxa é possível a qualquer momento —
+nenhum dado se perde por causa desta aproximação.

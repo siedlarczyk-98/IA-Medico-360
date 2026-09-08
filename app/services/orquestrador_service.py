@@ -46,7 +46,7 @@ from app.services.orquestrador_shared import (
     load_context_messages,
     resolve_clarification_prompt,
 )
-from app.services.pricing import calculate_cost
+from app.services.pricing import calcular_custo_ferramentas, calculate_cost
 from app.services.response_metadata import build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
@@ -207,6 +207,11 @@ class OrquestradorService:
                     agent_response.get("tokens_in"),
                     agent_response.get("tokens_out"),
                 )
+                # Ferramentas integradas (Data Ocean) cobram por GB, busca e
+                # minuto de execução — grandezas que `calculate_cost` não vê.
+                # Enquanto os preços não estiverem preenchidos isto soma zero,
+                # e o custo do modo fica subestimado: ver `PRECOS_FERRAMENTAS_USD`.
+                cost += calcular_custo_ferramentas(agent_response.get("tool_usage"))
 
             ir = InteractionResponse(
                 interaction_id=interaction.id,

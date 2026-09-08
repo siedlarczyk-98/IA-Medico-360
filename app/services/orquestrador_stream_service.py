@@ -51,7 +51,7 @@ from app.services.orquestrador_shared import (
     load_context_messages,
     resolve_clarification_prompt,
 )
-from app.services.pricing import calculate_cost, get_model_pricing
+from app.services.pricing import calcular_custo_ferramentas, calculate_cost, get_model_pricing
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
@@ -355,6 +355,9 @@ class OrquestradorStreamService:
                 cost = Decimal("0")
                 if model_id and model_id != "pharmadb":
                     cost = await calculate_cost(db, model_id, tokens_in, tokens_out)
+                    # Ferramentas integradas (Data Ocean) cobram por GB, busca
+                    # e minuto — grandezas que `calculate_cost` não vê.
+                    cost += calcular_custo_ferramentas(tool_usage)
 
                 ir = InteractionResponse(
                     interaction_id=interaction.id,

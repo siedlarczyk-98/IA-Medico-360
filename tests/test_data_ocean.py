@@ -16,6 +16,8 @@ este arquivo protege:
    o aciona.
 """
 
+from decimal import Decimal
+
 import pytest
 
 from app.core.prompts import MODE_SYSTEM_PROMPTS
@@ -268,3 +270,86 @@ def test_resposta_sem_ferramenta_nao_polui_o_metadata():
 
     assert build_response_metadata(tool_usage=None) is None
     assert build_response_metadata(tool_usage={}) is None
+
+
+# ── Custo das ferramentas ────────────────────────────────────────────────────
+# Os preços da Maritaca são em REAIS; todo o resto do sistema calcula em USD.
+# A conversão usa um câmbio FIXO (`BRL_POR_USD`), que é um gap conhecido e
+# aceito — documentado na constante. Estes testes travam a aritmética e o
+# vínculo com a tabela publicada.
+
+def test_precos_batem_com_a_tabela_publicada_da_maritaca():
+    """Trava os valores contra a página de preços.
+
+    Se a Maritaca reajustar, o teste falha e obriga a olhar a fonte — em vez de
+    o custo divergir da fatura em silêncio por meses.
+    """
+    from app.services.pricing import PRECOS_FERRAMENTAS_BRL
+
+    assert PRECOS_FERRAMENTAS_BRL["data_ocean_gb_processed"] == Decimal("0.10")
+    assert PRECOS_FERRAMENTAS_BRL["web_search_calls"] == Decimal("0.0165")
+    assert PRECOS_FERRAMENTAS_BRL["page_reads"] == Decimal("0.066")
+    assert PRECOS_FERRAMENTAS_BRL["code_execution_minutes"] == Decimal("0.016")
+
+
+def test_custo_e_convertido_de_real_para_dolar():
+    """O resto do sistema grava `cost_usd`; a Maritaca cobra em real."""
+    from app.services.pricing import BRL_POR_USD, calcular_custo_ferramentas
+
+    # 1 GB processado = R$ 0,10
+    custo = calcular_custo_ferramentas({"data_ocean_gb_processed": 1})
+
+    assert custo == (Decimal("0.10") / BRL_POR_USD).quantize(Decimal("0.000001"))
+
+
+def test_soma_todas_as_unidades_cobradas():
+    """`data_ocean: true` liga busca e execução de código junto — as três são
+    cobradas na mesma requisição."""
+    from app.services.pricing import BRL_POR_USD, calcular_custo_ferramentas
+
+    custo = calcular_custo_ferramentas({
+        "data_ocean_gb_processed": 0.5,     # R$ 0,05
+        "web_search_calls": 2,              # R$ 0,033
+        "page_reads": 5,                    # R$ 0,33
+        "code_execution_minutes": 1,        # R$ 0,016
+    })
+
+    esperado_brl = Decimal("0.05") + Decimal("0.033") + Decimal("0.33") + Decimal("0.016")
+    assert custo == (esperado_brl / BRL_POR_USD).quantize(Decimal("0.000001"))
+
+
+def test_sem_consumo_nao_cobra():
+    """A maioria das respostas não usa ferramenta nenhuma."""
+    from app.services.pricing import calcular_custo_ferramentas
+
+    assert calcular_custo_ferramentas(None) == Decimal("0")
+    assert calcular_custo_ferramentas({}) == Decimal("0")
+
+
+def test_unidade_desconhecida_nao_derruba_o_calculo():
+    """Se a Maritaca reportar uma unidade nova, o custo das demais ainda vale —
+    e `custo_de_ferramentas_e_conhecido` é quem sinaliza a lacuna."""
+    from app.services.pricing import BRL_POR_USD, calcular_custo_ferramentas
+
+    custo = calcular_custo_ferramentas({
+        "data_ocean_gb_processed": 1,
+        "unidade_que_ainda_nao_existe": 999,
+    })
+
+    assert custo == (Decimal("0.10") / BRL_POR_USD).quantize(Decimal("0.000001"))
+
+
+def test_o_cambio_fixo_esta_documentado_como_gap():
+    """O câmbio é fixo e o dólar flutua: todo custo deste provider carrega esse
+    erro. A decisão foi aceitar e documentar — este teste garante que a
+    explicação não seja apagada num refactor, deixando um número mágico."""
+    import inspect
+
+    from app.services import pricing
+
+    fonte = inspect.getsource(pricing)
+    i = fonte.find("BRL_POR_USD = ")
+    contexto = fonte[max(0, i - 1400):i]
+
+    assert "GAP CONHECIDO" in contexto, "a natureza aproximada do câmbio saiu do código"
+    assert "flutua" in contexto

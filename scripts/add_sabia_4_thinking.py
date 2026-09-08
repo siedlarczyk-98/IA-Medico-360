@@ -3,23 +3,25 @@ Registra o `sabia-4-thinking` (Maritaca) em `model_pricing` — o modelo do modo
 DATA_OCEAN.
 
 Execute via:
-    python -m scripts.add_sabia_4_thinking --input 5.00 --output 15.00
+    python -m scripts.add_sabia_4_thinking
 
-POR QUE OS PREÇOS SÃO OBRIGATÓRIOS NA LINHA DE COMANDO
-Os demais scripts deste diretório trazem o preço embutido, copiado da página do
-provedor no dia em que foram escritos. Aqui não dá: a documentação das
-ferramentas integradas não publica a tabela, e um preço chutado é pior que
-preço nenhum — ele produz relatórios de custo que PARECEM certos.
+OS PREÇOS DA MARITACA SÃO EM REAIS; A TABELA DO PROJETO É EM DÓLAR
+Tabela publicada para o sabia-4-thinking: R$ 5,00 por 1M tokens de entrada e
+R$ 40,00 por 1M de saída. Convertidos por `pricing.BRL_POR_USD` (fixo em 5,20),
+viram US$ 0,9615 e US$ 7,6923 — que é o que vai para o banco, porque
+`calculate_cost` e todo o resto do sistema calculam em USD.
 
-Sem os valores reais, este script recusa rodar.
+O câmbio fixo é um gap conhecido e aceito: ver o comentário de `BRL_POR_USD`
+em `app/services/pricing.py`.
 
-ATENÇÃO — O CUSTO POR TOKEN NÃO É O CUSTO TOTAL
+Os valores podem ser sobrescritos por `--input`/`--output` (já em USD) quando a
+tabela da Maritaca mudar antes de este script ser atualizado.
+
+O CUSTO POR TOKEN NÃO É O CUSTO TOTAL
 `data_ocean: true` liga junto `web_search` e `code_execution`, e as três são
-cobradas por USO, não por token: GB processados, páginas lidas e minutos de
-execução. Esses valores voltam em `usage.tool_execution_details` e são
-guardados crus em `ProviderResponse.tool_usage`. A conversão para dólar depende
-de uma tabela que ainda não temos — enquanto ela não existir, o custo gravado
-para este modo é APENAS o de tokens, e portanto está subestimado.
+cobradas por USO: GB processados, páginas lidas e minutos de execução. Esses
+preços vivem em `pricing.PRECOS_FERRAMENTAS_BRL` e são somados ao custo da
+interação a partir de `usage.tool_execution_details` — não passam por aqui.
 """
 
 import argparse
@@ -32,6 +34,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
 from app.models.models import ModelPricing
+from app.services.pricing import BRL_POR_USD
 
 MODEL_ID = "sabia-4-thinking"
 
@@ -70,17 +73,32 @@ async def add_sabia(input_per_million: Decimal, output_per_million: Decimal) -> 
 
         print(f"  - Input:  ${input_per_million} / 1M tokens")
         print(f"  - Output: ${output_per_million} / 1M tokens")
-        print("  - AVISO: o custo das ferramentas (Data Ocean, busca, código)")
-        print("           NÃO está incluído — ver o cabeçalho deste script.")
+        print("  - (convertido de BRL por BRL_POR_USD, câmbio fixo)")
+        print("  - O custo das ferramentas é somado à parte, a partir de")
+        print("    tool_execution_details — ver pricing.PRECOS_FERRAMENTAS_BRL.")
 
     await engine.dispose()
 
 
+# Tabela da Maritaca em BRL por 1M de tokens, convertida na hora do uso.
+# Mantida em reais pelo mesmo motivo de `PRECOS_FERRAMENTAS_BRL`: é o número
+# que dá para conferir contra a página de preços e contra a fatura.
+INPUT_BRL_POR_MILHAO = Decimal("5.00")
+OUTPUT_BRL_POR_MILHAO = Decimal("40.00")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", required=True, type=Decimal,
-                        help="USD por 1M tokens de entrada (da tabela de preços da Maritaca)")
-    parser.add_argument("--output", required=True, type=Decimal,
-                        help="USD por 1M tokens de saída")
+    parser.add_argument("--input", type=Decimal, default=None,
+                        help="USD por 1M tokens de entrada (sobrescreve a tabela embutida)")
+    parser.add_argument("--output", type=Decimal, default=None,
+                        help="USD por 1M tokens de saída (sobrescreve a tabela embutida)")
     args = parser.parse_args()
-    asyncio.run(add_sabia(args.input, args.output))
+
+    entrada = args.input if args.input is not None else (
+        (INPUT_BRL_POR_MILHAO / BRL_POR_USD).quantize(Decimal("0.0001"))
+    )
+    saida = args.output if args.output is not None else (
+        (OUTPUT_BRL_POR_MILHAO / BRL_POR_USD).quantize(Decimal("0.0001"))
+    )
+    asyncio.run(add_sabia(entrada, saida))
