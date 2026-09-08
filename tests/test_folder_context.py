@@ -30,11 +30,15 @@ from app.models.models import Interaction, InteractionResponse, MessageEmbedding
 from app.services import folder_context_service
 from app.services.folder_context_service import (
     EMBEDDING_DIMS,
+    MAX_CHARS_EVOLUCAO_NO_PROMPT,
     SIMILARITY_FLOOR,
     contexto_da_pasta,
+    evolucao_da_pasta,
     formatar_bloco,
+    formatar_bloco_evolucao,
     recuperar_trechos,
 )
+from app.services.orquestrador_shared import load_context_messages
 
 # asyncio_mode=auto no pytest.ini — os testes async não precisam de marca de
 # módulo, e uma marca aqui pegaria também os síncronos de formatação.
@@ -625,3 +629,151 @@ def test_contexto_da_clarificacao_e_limitado():
     )
 
     assert len(montado) < MAX_CHARS_CONTEXTO_CLARIFICACAO + 500
+
+
+# ── Evolução declarada pelo médico ───────────────────────────────────────────
+# Diferente de tudo o que está acima neste arquivo: os trechos recuperados por
+# similaridade são material de APOIO e podem ser de outro paciente, e o bloco
+# deles avisa isso ao modelo. A evolução é o contrário — foi o médico que
+# escreveu, sobre o paciente DESTA pasta, e vale como parte do caso atual.
+#
+# O bloco de isolamento continua valendo aqui, e com mais força: isto é dado
+# clínico declarado, não trecho de conversa.
+
+
+def test_evolucao_e_marcada_como_caso_atual_nao_como_apoio():
+    """A marcação é o que separa evolução de material de apoio.
+
+    Reaproveitar a marcação de `formatar_bloco` entregaria ao modelo um texto
+    autoritativo com um aviso dizendo para não confiar nele — e o modelo
+    obedeceria.
+    """
+    bloco = formatar_bloco_evolucao("Jorge, 58a, HAS + DM2, losartana 50mg")
+
+    assert "Vale como parte do caso atual" in bloco
+    assert "pode ser de outro paciente" not in bloco
+    assert "Jorge, 58a, HAS + DM2, losartana 50mg" in bloco
+
+
+def test_evolucao_vazia_nao_gera_bloco():
+    """Pasta sem evolução é o caso normal — a maioria é só organização por tema."""
+    assert formatar_bloco_evolucao(None) == ""
+    assert formatar_bloco_evolucao("") == ""
+    assert formatar_bloco_evolucao("   \n  ") == ""
+
+
+def test_evolucao_gigante_e_truncada_com_marca():
+    """Trunca avisando: sem a marca, o modelo lê uma evolução interrompida no
+    meio como se fosse a evolução inteira."""
+    bloco = formatar_bloco_evolucao("x" * (MAX_CHARS_EVOLUCAO_NO_PROMPT + 5000))
+
+    assert "truncada por limite" in bloco
+    assert len(bloco) < MAX_CHARS_EVOLUCAO_NO_PROMPT + 500
+
+
+async def test_evolucao_da_pasta_chega_pela_conversa(db, user, folder_factory, conversation_factory):
+    pasta = await folder_factory(user, clinical_context="Jorge, 58a, HAS em acompanhamento")
+    conv = await conversation_factory(user, folder=pasta)
+
+    bloco = await evolucao_da_pasta(db, user.id, conv.id)
+
+    assert "Jorge, 58a, HAS em acompanhamento" in bloco
+
+
+async def test_evolucao_chega_na_conversa_nova_pelo_folder_id(db, user, folder_factory):
+    """O caso mais comum do recurso: o médico abre uma conversa NOVA dentro da
+    pasta do paciente. Não há `conversation_id` ainda — a pasta vem no corpo da
+    requisição, e era justamente esse o caminho que saía sem contexto."""
+    pasta = await folder_factory(user, clinical_context="Maria, 34a, gestante 28s")
+
+    bloco = await evolucao_da_pasta(db, user.id, None, folder_id=pasta.id)
+
+    assert "Maria, 34a, gestante 28s" in bloco
+
+
+async def test_evolucao_de_pasta_alheia_nunca_vaza(db, user_factory, folder_factory):
+    """O teste que mais importa: evolução é dado clínico de um paciente.
+
+    Passar o id da pasta de outro médico não pode trazer a evolução dela.
+    """
+    dono = await user_factory(email="dono@teste.com")
+    intruso = await user_factory(email="intruso@teste.com")
+    pasta_do_dono = await folder_factory(dono, clinical_context="SEGREDO CLINICO DO PACIENTE")
+
+    bloco = await evolucao_da_pasta(db, intruso.id, None, folder_id=pasta_do_dono.id)
+
+    assert bloco == ""
+    assert "SEGREDO" not in bloco
+
+
+async def test_conversa_fora_de_pasta_nao_tem_evolucao(db, user, conversation_factory):
+    conv = await conversation_factory(user)
+
+    assert await evolucao_da_pasta(db, user.id, conv.id) == ""
+
+
+async def test_evolucao_entra_em_toda_mensagem_mesmo_com_conversa_longa(
+    db, user, folder_factory, conversation_factory
+):
+    """O contrato do campo: "está em toda mensagem desta pasta".
+
+    Se a evolução disputasse o orçamento de contexto com o histórico, uma
+    conversa longa a descartaria — justamente o texto que o médico escreveu
+    para ser sempre considerado, e sem que ele pudesse perceber.
+    """
+    pasta = await folder_factory(user, clinical_context="Jorge, 58a, alergia a dipirona")
+    conv = await conversation_factory(user, folder=pasta)
+
+    # Histórico longo o bastante para estourar o orçamento sozinho.
+    for i in range(25):
+        interaction = Interaction(
+            conversation_id=conv.id,
+            user_id=user.id,
+            feature="ORQUESTRADOR",
+            mode="CLINICAL_REASONING",
+            prompt_text=f"Pergunta longa numero {i}. " * 100,
+            status="completed",
+            started_at=datetime.now(UTC),
+        )
+        db.add(interaction)
+        await db.flush()
+        db.add(InteractionResponse(
+            interaction_id=interaction.id,
+            model_used="claude-sonnet-4-6",
+            response_text=f"Resposta longa numero {i}. " * 100,
+            created_at=datetime.now(UTC),
+        ))
+    await db.flush()
+
+    mensagens = await load_context_messages(
+        db, user.id, conv.id, pergunta_atual="e agora?", folder_id=pasta.id
+    )
+
+    texto = " ".join(m["content"] for m in mensagens)
+    assert "alergia a dipirona" in texto, (
+        "a evolução foi descartada pelo orçamento numa conversa longa"
+    )
+
+
+async def test_evolucao_vem_antes_do_historico(db, user, folder_factory, conversation_factory):
+    """É pano de fundo do caso, não a última coisa dita."""
+    pasta = await folder_factory(user, clinical_context="CONTEXTO DO PACIENTE")
+    conv = await conversation_factory(user, folder=pasta)
+
+    interaction = Interaction(
+        conversation_id=conv.id,
+        user_id=user.id,
+        feature="ORQUESTRADOR",
+        mode="CLINICAL_REASONING",
+        prompt_text="minha pergunta",
+        status="completed",
+        started_at=datetime.now(UTC),
+    )
+    db.add(interaction)
+    await db.flush()
+
+    mensagens = await load_context_messages(
+        db, user.id, conv.id, pergunta_atual="e agora?", folder_id=pasta.id
+    )
+
+    assert "CONTEXTO DO PACIENTE" in mensagens[0]["content"]

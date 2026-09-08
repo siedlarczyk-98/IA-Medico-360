@@ -14,12 +14,50 @@ from app.schemas.conversations import FolderOut
 router = APIRouter(prefix="/folders", tags=["folders"])
 
 
+def _limpar_evolucao(texto: str | None) -> str | None:
+    """Normaliza o texto de evolução: vazio ou só espaço vira `None`.
+
+    Guardar `""` e `None` como coisas diferentes não teria sentido para quem
+    lê, e faria `formatar_bloco_evolucao` receber dois valores para o mesmo
+    estado "não há evolução".
+    """
+    if texto is None:
+        return None
+    limpo = texto.strip()
+    return limpo or None
+
+
+# Teto do texto de evolução aceito pela API, em caracteres.
+#
+# O campo entra em TODA mensagem da pasta (ver `evolucao_da_pasta`), então o
+# tamanho dele é custo recorrente, não custo único. 8000 caracteres ≈ 2500
+# tokens — folgado para uma evolução clínica e restritivo o bastante para
+# impedir que um prontuário inteiro colado aqui encareça cada pergunta.
+#
+# O limite vive aqui, e não no banco (a coluna é TEXT), para que um texto longo
+# receba um 422 explicando o limite em vez de um 500 vindo do driver.
+MAX_CHARS_EVOLUCAO = 8000
+
+
 class FolderCreate(BaseModel):
     name: str
+    # Opcional: o médico é perguntado na criação, mas uma pasta que é só
+    # organização por tema não tem evolução nenhuma para declarar.
+    clinical_context: str | None = Field(default=None, max_length=MAX_CHARS_EVOLUCAO)
 
 
 class FolderRename(BaseModel):
     name: str
+    # `None` aqui significa "não mexa", e NÃO "apague".
+    #
+    # Este endpoint era só rename. Se o campo ausente virasse `NULL` na coluna,
+    # qualquer cliente que ainda mande apenas `{"name": ...}` — a versão atual
+    # do frontend, entre eles — apagaria a evolução do paciente ao renomear a
+    # pasta, sem pedir nada e sem aviso.
+    #
+    # Para LIMPAR de propósito, o cliente manda string vazia: ela é distinguível
+    # de ausente e é tratada em `rename_folder`.
+    clinical_context: str | None = Field(default=None, max_length=MAX_CHARS_EVOLUCAO)
 
 
 class ConversationMoveBody(BaseModel):
@@ -54,7 +92,11 @@ async def create_folder(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    folder = Folder(user_id=current_user.id, name=body.name.strip())
+    folder = Folder(
+        user_id=current_user.id,
+        name=body.name.strip(),
+        clinical_context=_limpar_evolucao(body.clinical_context),
+    )
     db.add(folder)
     await db.flush()
     await db.commit()
@@ -78,6 +120,9 @@ async def rename_folder(
     if not folder:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pasta não encontrada")
     folder.name = body.name.strip()
+    # Ausente = não mexa. String vazia = limpar. Ver `FolderRename`.
+    if body.clinical_context is not None:
+        folder.clinical_context = _limpar_evolucao(body.clinical_context)
     await db.commit()
     await db.refresh(folder)
     return folder

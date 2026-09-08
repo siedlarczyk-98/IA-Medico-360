@@ -28,7 +28,7 @@ from app.services.context_budget import (
     turns_to_messages,
 )
 from app.services.conversation_history import load_history
-from app.services.folder_context_service import contexto_da_pasta
+from app.services.folder_context_service import contexto_da_pasta, evolucao_da_pasta
 from app.services.integracoes.ai_providers import OpenAIProvider
 from app.services.orquestrador_modes import (
     PHARMA_CHECK_MIN_CONFIDENCE,
@@ -97,7 +97,26 @@ async def load_context_messages(
 
     # Orçamentos separados: o texto de um exame anexado não disputa espaço com
     # a conversa. Ver `context_budget.fit_turns_with_attachment_budget`.
-    return turns_to_messages(fit_turns_with_attachment_budget(turns, budget_tokens))
+    mensagens = turns_to_messages(fit_turns_with_attachment_budget(turns, budget_tokens))
+
+    # A evolução é acrescentada DEPOIS do corte por orçamento, e é o único
+    # bloco que não o disputa.
+    #
+    # Se ela entrasse junto com os outros turnos, uma conversa longa dentro da
+    # pasta acabaria descartando justamente o texto que o médico escreveu para
+    # ser sempre considerado — e ele não teria como perceber. O contrato deste
+    # campo é "está em toda mensagem desta pasta"; um orçamento que às vezes o
+    # remove é outro contrato.
+    #
+    # O custo é limitado na origem: `MAX_CHARS_EVOLUCAO` recusa textos grandes
+    # na API, e `formatar_bloco_evolucao` trunca o que já estiver gravado.
+    bloco_evolucao = await evolucao_da_pasta(
+        db, user_id, conversation_id, folder_id=folder_id
+    )
+    if bloco_evolucao:
+        mensagens = [{"role": "user", "content": bloco_evolucao}, *mensagens]
+
+    return mensagens
 
 
 async def ensure_conversation(

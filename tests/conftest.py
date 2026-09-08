@@ -184,8 +184,10 @@ async def user(user_factory) -> User:
 @pytest_asyncio.fixture
 async def folder_factory(db):
     """Pasta pertencente a um usuário — base dos testes de isolamento."""
-    async def _create(dono: User, name: str = "Pasta") -> Folder:
-        folder = Folder(user_id=dono.id, name=name)
+    async def _create(
+        dono: User, name: str = "Pasta", clinical_context: str | None = None
+    ) -> Folder:
+        folder = Folder(user_id=dono.id, name=name, clinical_context=clinical_context)
         db.add(folder)
         await db.flush()
         await db.refresh(folder)

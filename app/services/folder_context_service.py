@@ -422,3 +422,83 @@ async def contexto_da_pasta(
     trechos = await recuperar_trechos(db, user_id, pasta, conversation_id, pergunta)
     agendar_indexacao(user_id, pasta)
     return formatar_bloco(trechos)
+
+
+# Teto do texto de evolução injetado no prompt, em caracteres.
+#
+# Ele é enviado em TODA mensagem da pasta — é essa a decisão de produto: o
+# médico escreveu, ele espera que o modelo saiba. O custo disso é linear no
+# tamanho do campo, então o teto existe.
+#
+# 8000 caracteres ≈ 2500 tokens pela razão medida em `context_budget`, o que
+# cabe folgado ao lado do histórico (6000) e dos anexos (12000) sem que a soma
+# se aproxime da janela de qualquer modelo em uso. É também mais espaço do que
+# uma evolução clínica costuma ocupar — o limite é rede de segurança contra um
+# prontuário inteiro colado no campo, não um orçamento a ser disputado.
+#
+# A API recusa acima disto com 422 (`MAX_CHARS_EVOLUCAO` em `folders.py`), então
+# um texto maior só chega aqui vindo de dado gravado antes do limite existir.
+MAX_CHARS_EVOLUCAO_NO_PROMPT = 8000
+
+
+def formatar_bloco_evolucao(clinical_context: str | None) -> str:
+    """
+    Formata a evolução declarada pelo médico como bloco de contexto.
+
+    A marcação é o ponto, e é DELIBERADAMENTE diferente da de
+    `formatar_bloco`. Aquele bloco avisa "pode ser de outro paciente, não trate
+    como parte do caso atual", porque traz trechos recuperados por similaridade
+    de outras conversas. Este é o contrário: foi o médico que escreveu, sobre o
+    paciente desta pasta, e vale como parte do caso.
+
+    Reaproveitar a marcação de apoio entregaria ao modelo um texto autoritativo
+    com um aviso dizendo para não confiar nele — e o modelo obedeceria.
+    """
+    if not clinical_context or not clinical_context.strip():
+        return ""
+
+    texto = clinical_context.strip()
+    if len(texto) > MAX_CHARS_EVOLUCAO_NO_PROMPT:
+        texto = (
+            texto[:MAX_CHARS_EVOLUCAO_NO_PROMPT]
+            + "\n[...evolução truncada por limite de tamanho]"
+        )
+
+    return (
+        "[Evolução do paciente / contexto do caso — informada pelo médico nesta "
+        "pasta. Vale como parte do caso atual.]\n"
+        f"{texto}"
+    )
+
+
+async def evolucao_da_pasta(
+    db: AsyncSession,
+    user_id: UUID,
+    conversation_id: UUID | None,
+    folder_id: UUID | None = None,
+) -> str:
+    """
+    Devolve o bloco de evolução da pasta em que a mensagem está, ou vazio.
+
+    Usa o mesmo `_resolver_pasta` do contexto por similaridade — inclusive o
+    caso da conversa NOVA, em que a pasta vem do corpo da requisição e ainda
+    não há `conversation_id`. A checagem de posse mora lá.
+
+    Vazio é o caminho normal: conversa fora de pasta, ou pasta sem evolução
+    preenchida (que é o caso da maioria — uma pasta pode ser só organização
+    por tema).
+    """
+    pasta = await _resolver_pasta(db, user_id, conversation_id, folder_id)
+    if pasta is None:
+        return ""
+
+    # O filtro por `user_id` é redundante com `_resolver_pasta`, e fica: é uma
+    # leitura de dado clínico de paciente, e uma segunda barreira aqui custa
+    # nada e protege de um caminho futuro que resolva a pasta de outro jeito.
+    resultado = await db.execute(
+        select(Folder.clinical_context).where(
+            Folder.id == pasta,
+            Folder.user_id == user_id,
+        )
+    )
+    return formatar_bloco_evolucao(resultado.scalar_one_or_none())

@@ -173,6 +173,12 @@ class Folder(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Evolução do paciente / contexto do caso, escrita pelo médico. Diferente
+    # do contexto recuperado por similaridade em `folder_context_service`:
+    # aquele é material de APOIO e pode ser de outro paciente; este é o caso
+    # atual, é declarado, e entra na íntegra em toda mensagem da pasta.
+    # Nulo é o caso normal — uma pasta pode ser só organização por tema.
+    clinical_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
