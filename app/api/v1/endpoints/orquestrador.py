@@ -42,7 +42,7 @@ class OrquestradorRequest(BaseModel):
     )
     mode: str | None = Field(
         default=None,
-        description="Modo explícito (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PHARMA_BULA, PHARMA_RECEITA, PHARMA_GENERICO, PRODUCTIVITY). Se informado, pula a triagem automática.",
+        description="Modo explícito (QUICK_SEARCH, CLINICAL_REASONING, PHARMA_CHECK, PHARMA_BULA, PHARMA_RECEITA, PHARMA_GENERICO, PRODUCTIVITY, EXAM_REVIEW, DATA_OCEAN). Se informado, pula a triagem automática. DATA_OCEAN só chega por aqui: a triagem nunca o escolhe.",
     )
     folder_id: UUID | None = Field(
         default=None,
@@ -89,6 +89,10 @@ async def orquestrador_query(
     - PHARMA_RECEITA → PharmaDB (receituário e dispensação — Portaria 344)
     - PHARMA_GENERICO → PharmaDB (genéricos e similares intercambiáveis)
     - PRODUCTIVITY → GPT-5.4 Nano (tarefas não clínicas)
+    - DATA_OCEAN → Sabiá 4 Thinking (bases públicas brasileiras: DATASUS, CNES,
+      ANVISA, InfoDengue, IBGE). Só por escolha explícita do médico. Não
+      streama de verdade e pode levar dezenas de segundos: o fluxo agêntico
+      roda inteiro na Maritaca antes de devolver a resposta.
     """
     await check_limit(db, user)
     prompt, images, extractions = await resolve_files_context(body.prompt, body.anexos(), user.id, db)

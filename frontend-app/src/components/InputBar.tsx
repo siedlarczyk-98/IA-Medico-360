@@ -5,7 +5,7 @@ import { chipNeutral, iconButtonBase } from '../lib/styles';
 import { tratarEnterParaEnviar, DICA_ENVIO } from '../lib/enterParaEnviar';
 
 export type Effort = 'rápido' | 'detalhado';
-export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY' | 'EXAM_REVIEW';
+export type OrchestratorMode = 'QUICK_SEARCH' | 'CLINICAL_REASONING' | 'PHARMA_CHECK' | 'PRODUCTIVITY' | 'EXAM_REVIEW' | 'DATA_OCEAN';
 
 export interface Attachment {
   fileId: string;
@@ -21,6 +21,9 @@ const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }
   { key: 'PHARMA_CHECK',       label: 'Farmacológico',        shortLabel: 'Farmácia' },
   { key: 'PRODUCTIVITY',       label: 'Produtividade',        shortLabel: 'Produt.' },
   { key: 'EXAM_REVIEW',        label: 'Exames',               shortLabel: 'Exames' },
+  // Só por escolha explícita: a triagem nunca roteia para cá (é lento e
+  // cobrado por uso de ferramenta). Ver MODOS_NAO_TRIADOS no backend.
+  { key: 'DATA_OCEAN',         label: 'Dados do Brasil',      shortLabel: 'Dados' },
 ];
 
 // Teto por mensagem, espelhando MAX_ANEXOS_POR_MENSAGEM no backend. Repetido

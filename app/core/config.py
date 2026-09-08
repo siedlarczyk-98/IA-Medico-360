@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     google_ai_api_key: str = ""
     perplexity_api_key: str = ""
+    # Maritaca (Sabiá + Data Ocean). Sem ela, o modo Data Ocean fica
+    # indisponível — e é isso que se quer: melhor falhar no health check do que
+    # devolver ao médico um erro de autenticação no meio de uma consulta.
+    maritaca_api_key: str = ""
     pharmadb_api_key: str = ""
     pubmed_api_key: str = ""
     

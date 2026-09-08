@@ -278,6 +278,7 @@ class OrquestradorService:
             ir.extra_metadata = build_response_metadata(
                 pubmed=pubmed,
                 citations=agent_response.get("citations"),
+                tool_usage=agent_response.get("tool_usage"),
             )
 
             # 11. Audit log
@@ -394,6 +395,9 @@ class OrquestradorService:
                 "tokens_in": response.tokens_in,
                 "tokens_out": response.tokens_out,
                 "is_fallback": False,
+                # Consumo de ferramentas integradas (Data Ocean). Vai para
+                # `extra_metadata` — ver `build_response_metadata`.
+                "tool_usage": response.tool_usage,
             }
         except Exception as e:
             logger.warning(f"Falha no {model_id}: {e}. Tentando fallback...")

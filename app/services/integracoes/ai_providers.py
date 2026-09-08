@@ -41,6 +41,16 @@ class ProviderResponse:
     provider: str = ""
     citations: list[str] | None = None
     search_cost_usd: float = 0.0
+    # Consumo de ferramentas integradas, quando o provider as executa do lado
+    # dele (hoje, só a Maritaca). `search_cost_usd` acima não serve: ele é um
+    # valor JÁ convertido em dólar, com preço fixo por busca, enquanto aqui o
+    # custo depende de GB processados, páginas lidas e minutos de execução —
+    # grandezas diferentes, cada uma com sua tabela.
+    #
+    # Guardar o dado CRU (e não o dólar) é deliberado: a conversão depende de
+    # uma tabela de preços que muda, e um custo calculado com a tabela errada
+    # é pior que um custo não calculado, porque parece certo.
+    tool_usage: dict | None = None
 
 
 @dataclass
@@ -52,6 +62,8 @@ class StreamToken:
     tokens_out: int | None = None
     citations: list[str] | None = None
     search_cost_usd: float = 0.0
+    # Ver `ProviderResponse.tool_usage`. Só vem no token final (`done=True`).
+    tool_usage: dict | None = None
 
 
 def normalize_images(image_content: dict | list | None) -> list[dict]:
@@ -708,6 +720,180 @@ class PerplexityProvider(BaseProvider):
             raise
 
 
+class MaritacaProvider(BaseProvider):
+    """Sabiá (Maritaca) com o Data Ocean — bases de dados públicas brasileiras.
+
+    O que o Data Ocean é, do ponto de vista desta camada: uma flag no corpo da
+    requisição que liga um fluxo AGÊNTICO do lado da Maritaca. O modelo decide
+    quais bases consultar, escreve e executa as consultas, cruza fontes e
+    devolve só a mensagem final. Nada disso roda aqui.
+
+    Três consequências que moldam esta classe:
+
+    1. `stream: true` com ferramenta integrada devolve **400**. O streaming é
+       simulado em `stream()` — mesmo caminho já trilhado pelo Perplexity.
+    2. Ligar `data_ocean` liga junto `web_search` e `code_execution`, e as três
+       são cobradas. `usage.tool_execution_details` diz quanto de cada uma foi
+       usado, e é o que permite gravar o custo real.
+    3. O fluxo agêntico demora: são várias consultas em sequência antes do
+       primeiro caractere. O timeout aqui é generoso de propósito.
+    """
+
+    BASE_URL = "https://chat.maritaca.ai/api/chat/completions"
+
+    # Modelos que aceitam `data_ocean` e `code_execution`. A doc é explícita:
+    # em modelo incompatível a API devolve 400. Falhar aqui, antes da chamada,
+    # transforma um erro de rede opaco numa mensagem que diz o que houve.
+    MODELOS_COM_FERRAMENTAS: frozenset[str] = frozenset({"sabia-4", "sabia-4-thinking"})
+
+    # Timeout do fluxo agêntico completo.
+    #
+    # Não é chute nem margem de segurança arbitrária: a resposta só volta
+    # DEPOIS de o modelo consultar várias bases, cruzar resultados e às vezes
+    # executar código. O padrão de 30s dos outros providers cortaria consultas
+    # legítimas no meio. 120s é o teto para desistir, não o tempo esperado.
+    TIMEOUT_FERRAMENTAS = 120
+
+    @staticmethod
+    def _extrair_uso_de_ferramentas(usage: dict) -> dict:
+        """Normaliza `tool_execution_details`, que só existe quando houve ferramenta.
+
+        Devolve sempre as quatro chaves, zeradas quando ausentes: quem grava
+        custo não deveria precisar saber se o campo veio ou não.
+        """
+        detalhes = usage.get("tool_execution_details") or {}
+        return {
+            "web_search_calls": detalhes.get("web_search_calls", 0) or 0,
+            "page_reads": detalhes.get("page_reads", 0) or 0,
+            "data_ocean_gb_processed": detalhes.get("data_ocean_gb_processed", 0.0) or 0.0,
+            "code_execution_minutes": detalhes.get("code_execution_minutes", 0) or 0,
+        }
+
+    async def complete(
+        self,
+        model_id: str,
+        prompt: str,
+        timeout: int = TIMEOUT_FERRAMENTAS,
+        system_prompt: str | None = None,
+        temperature: float = 1.0,
+        web_search: bool = False,
+        image_content: dict | None = None,
+        max_tokens: int = 4096,
+        history: list[dict] | None = None,
+        data_ocean: bool = True,
+    ) -> ProviderResponse:
+        if data_ocean and model_id not in self.MODELOS_COM_FERRAMENTAS:
+            raise ValueError(
+                f"O modelo {model_id} não aceita a ferramenta Data Ocean "
+                f"(disponível em: {', '.join(sorted(self.MODELOS_COM_FERRAMENTAS))})."
+            )
+
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
+        client = get_client()
+
+        corpo: dict = {
+            "model": model_id,
+            # Explícito, não omitido: com ferramenta ligada a API rejeita
+            # streaming, e deixar o default implícito esconderia essa relação.
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                *(history or []),
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if data_ocean:
+            # Uma flag só: `web_search` e `code_execution` vêm juntas por
+            # decisão da Maritaca, não por escolha nossa.
+            corpo["data_ocean"] = True
+
+        async with async_llm_span("maritaca", model_id, prompt) as span:
+            resp = await client.post(
+                self.BASE_URL,
+                headers={
+                    "Authorization": f"Bearer {settings.maritaca_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=corpo,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {}) or {}
+
+            result = ProviderResponse(
+                text=choice["message"]["content"],
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
+                model_id=model_id,
+                provider="Maritaca",
+                tool_usage=self._extrair_uso_de_ferramentas(usage) if data_ocean else None,
+            )
+            _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
+            return result
+
+    async def stream(
+        self,
+        model_id: str,
+        prompt: str,
+        timeout: int = TIMEOUT_FERRAMENTAS,
+        system_prompt: str | None = None,
+        temperature: float = 1.0,
+        web_search: bool = False,
+        image_content: dict | None = None,
+        max_tokens: int = 4096,
+        history: list[dict] | None = None,
+    ) -> AsyncIterator[StreamToken]:
+        """Streaming SIMULADO: chama `complete()` e fatia o texto.
+
+        A API devolve 400 para `stream: true` com ferramenta integrada — não é
+        uma limitação que dê para contornar aqui. O mesmo caminho já é usado
+        pelo Perplexity, por motivo diferente (lá, falta de `usage`).
+
+        O efeito visível para o médico: a resposta não aparece progressivamente
+        enquanto o modelo pensa. Ela demora e depois sai inteira, fatiada só
+        para não estourar de uma vez na tela. Quem chama precisa avisar que a
+        consulta está em andamento — sem isso, a tela parece travada por até
+        dois minutos.
+        """
+        span = start_llm_span("maritaca", model_id, prompt)
+        try:
+            response = await self.complete(
+                model_id,
+                prompt,
+                timeout=timeout,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                history=history,
+            )
+            chunk_size = 20
+            text = response.text
+            for i in range(0, len(text), chunk_size):
+                yield StreamToken(delta=text[i:i + chunk_size])
+                await asyncio.sleep(0.015)
+            token = StreamToken(
+                delta="",
+                done=True,
+                tokens_in=response.tokens_in,
+                tokens_out=response.tokens_out,
+                tool_usage=response.tool_usage,
+            )
+            if span:
+                _set_llm_output(span, response.text, response.tokens_in, response.tokens_out)
+                span.end()
+                span = None
+            yield token
+        except Exception as exc:
+            if span:
+                span.record_exception(exc)
+                span.end()
+            raise
+
+
 # ── Registry por tipo ────────────────────────────────────────
 
 PROVIDER_TYPE_REGISTRY: dict[str, BaseProvider] = {
@@ -715,6 +901,7 @@ PROVIDER_TYPE_REGISTRY: dict[str, BaseProvider] = {
     "openai": OpenAIProvider(),
     "google": GeminiProvider(),
     "perplexity": PerplexityProvider(),
+    "maritaca": MaritacaProvider(),
 }
 
 

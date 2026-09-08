@@ -52,6 +52,11 @@ const STREAMING_LABELS: Record<string, string> = {
   PHARMA_GENERICO:    'Buscando genéricos…',
   PRODUCTIVITY:       'Preparando resposta…',
   EXAM_REVIEW:        'Analisando os exames…',
+  // Mais explícito que os outros de propósito: este modo NÃO streama (a API
+  // rejeita streaming com ferramenta integrada), então a tela fica parada por
+  // dezenas de segundos enquanto o modelo consulta as bases. Sem dizer o que
+  // está acontecendo, parece travado.
+  DATA_OCEAN:         'Consultando bases de dados oficiais…',
 };
 
 interface Props {

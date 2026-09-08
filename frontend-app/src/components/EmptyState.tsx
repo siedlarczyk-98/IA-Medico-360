@@ -5,6 +5,7 @@ import type { OrchestratorMode } from './InputBar';
 const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: string }[] = [
   { icon: 'busca',         key: 'QUICK_SEARCH',       title: 'Busca rápida',            desc: 'Pergunte qualquer coisa — posologia, protocolo, critério diagnóstico. Resposta direta, sem elaboração.' },
   { icon: 'raciocinio',   key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
+  { icon: 'dados',        key: 'DATA_OCEAN',         title: 'Dados do Brasil',         desc: 'Consulta DATASUS, CNES, InfoDengue e IBGE na hora: epidemiologia, leitos e vacinação com a fonte.' },
   { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Interações, bulas, receituário e genéricos — dados oficiais vindos da ANVISA em tempo real.' },
   { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
   { icon: 'exames',       key: 'EXAM_REVIEW',        title: 'Exames',                  desc: 'Anexe laudo, imagem ou resultado laboratorial e discuta os achados — até 5 arquivos por mensagem.' },

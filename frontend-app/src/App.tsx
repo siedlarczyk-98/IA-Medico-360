@@ -36,6 +36,7 @@ const BACKEND_TO_CHIP: Record<string, string> = {
   PHARMA_GENERICO:   'farmaco',
   PRODUCTIVITY:      'produtividade',
   EXAM_REVIEW:       'exames',
+  DATA_OCEAN:        'dados',
 };
 
 // Identidade da mensagem em streaming. Contador de módulo, e não crypto.randomUUID(),

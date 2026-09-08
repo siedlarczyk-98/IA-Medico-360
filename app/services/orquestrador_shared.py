@@ -31,8 +31,10 @@ from app.services.conversation_history import load_history
 from app.services.folder_context_service import contexto_da_pasta, evolucao_da_pasta
 from app.services.integracoes.ai_providers import OpenAIProvider
 from app.services.orquestrador_modes import (
+    MODOS_NAO_TRIADOS,
     PHARMA_CHECK_MIN_CONFIDENCE,
     PHARMA_MODES,
+    OrquestradorMode,
     upgrade_mode_for_attachments,
 )
 from app.services.triage_service import triage
@@ -350,6 +352,13 @@ async def decidir_rota(
     resultado = await triage(prompt)
     mode = resultado["mode"]
     confidence = resultado["confidence"]
+
+    # A triagem não pode ESCOLHER um modo que só o médico aciona. O prompt de
+    # triagem nem lista DATA_OCEAN, mas um modelo pode devolver o que quiser —
+    # e um DATA_OCEAN vindo daqui mandaria uma pergunta clínica comum para um
+    # caminho lento e cobrado por uso de ferramenta, sem que ninguém pedisse.
+    if mode in MODOS_NAO_TRIADOS:
+        mode = OrquestradorMode.QUICK_SEARCH.value
 
     # A triagem classificou o TEXTO sozinho, sem saber do anexo. Promove de
     # novo com essa informação antes de qualquer gate.

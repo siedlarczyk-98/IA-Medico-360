@@ -23,6 +23,7 @@ def build_response_metadata(
     *,
     pubmed: Any = None,
     citations: list[str] | None = None,
+    tool_usage: dict | None = None,
 ) -> dict | None:
     """
     Monta o `extra_metadata` de uma InteractionResponse.
@@ -37,6 +38,16 @@ def build_response_metadata(
 
     if citations:
         meta["citations"] = list(citations)
+
+    # Consumo de ferramentas integradas (hoje só o Data Ocean/Maritaca).
+    #
+    # Guardado CRU — GB processados, páginas lidas, minutos de execução — e não
+    # convertido em dólar. A tabela de preços dessas ferramentas ainda não está
+    # no projeto, e um custo calculado com preço chutado é pior que custo
+    # nenhum: ele parece certo nos relatórios. Com o dado bruto gravado desde o
+    # primeiro dia, a conversão pode ser feita depois, retroativamente.
+    if tool_usage:
+        meta["tool_usage"] = dict(tool_usage)
 
     if pubmed is not None:
         cited = [

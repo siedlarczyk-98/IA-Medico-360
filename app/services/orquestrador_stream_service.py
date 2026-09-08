@@ -308,6 +308,9 @@ class OrquestradorStreamService:
                 tokens_in: int | None = None
                 tokens_out: int | None = None
                 perplexity_citations: list[str] | None = None
+                # Consumo de ferramentas integradas (Data Ocean), que só chega
+                # no token final do stream.
+                tool_usage: dict | None = None
                 is_fallback = False
 
                 try:
@@ -327,6 +330,7 @@ class OrquestradorStreamService:
                             tokens_in = token.tokens_in
                             tokens_out = token.tokens_out
                             perplexity_citations = token.citations
+                            tool_usage = token.tool_usage
 
                 except Exception as e:
                     logger.warning(f"Stream falhou em {model_id}: {e}. Tentando fallback completo...")
@@ -457,6 +461,7 @@ class OrquestradorStreamService:
                 ir.extra_metadata = build_response_metadata(
                     pubmed=pubmed,
                     citations=perplexity_citations,
+                    tool_usage=tool_usage,
                 )
 
                 # Reatribuição, e não mutação in-place: a coluna é JSON comum,
