@@ -1038,7 +1038,18 @@ erDiagram
         varchar crm_state
         varchar role
         varchar med_status
-        varchar specialty
+        varchar specialty "rotulo legado, casa por string com news"
+        varchar specialty_slug "chave canonica (007)"
+        varchar specialty_source "de onde veio: decide precedencia"
+        timestamptz specialty_updated_at
+        varchar specialty_rqe
+        jsonb specialties "todas as especialidades do CFM"
+        varchar profissao
+        varchar crm_status
+        timestamptz crm_verified_at
+        jsonb cfm_payload
+        varchar cadastro_externo_id
+        varchar waid_uuid "identidade estavel na Waid (008)"
         date enrollment_date
         boolean onboarding_complete
         boolean status
@@ -1072,6 +1083,8 @@ erDiagram
         uuid id PK
         uuid user_id FK
         varchar name
+        varchar folder_kind "clinical ou general (CHECK, default clinical)"
+        text clinical_context "evolucao declarada pelo medico"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -1368,7 +1381,10 @@ erDiagram
 - **`users.email`**, **`company.slug`**, **`model_pricing.model_id`**, **`invite_tokens.token`**, **`specialties.slug`**, **`calculator_definitions.slug`**: todos `UNIQUE`.
 - **`user_preferences.user_id`** e **`user_weekly_usage.user_id`**: `UNIQUE` (1:1 com `users`).
 - **Cascades explícitos**: `file_extractions.user_id`, `user_weekly_usage.user_id`, `calculator_favorites.user_id/calculator_id`, `calculator_fields.calculator_id`, `calculator_versions.calculator_id`, `message_embeddings.*`, `landing_pages.*_answers.submission_id` → `ON DELETE CASCADE`. `conversations.folder_id`, `file_extractions.interaction_id`, `landing_pages.submissions.user_id` → `ON DELETE SET NULL`.
-- **Sem enums nativos e sem triggers** — validação de valores categóricos e regras de workflow vivem na camada de aplicação.
+- **`folders.folder_kind`**: `CHECK (folder_kind IN ('clinical','general'))`, criado como `NOT VALID` na `010` — o CHECK vale para toda escrita nova imediatamente, e as linhas existentes são cobertas pelo `DEFAULT 'clinical'`, que só produz valores válidos. É a **única** CHECK constraint do schema (ver o item abaixo).
+- **`audit_logs`**: `ix_audit_logs_action_created_at (action, created_at)` e `ix_audit_logs_user_id (user_id)`, da `011`. A tabela é escrita **uma vez por interação** em três serviços e não tinha índice nenhum; a vigilância fazia `max(created_at) WHERE action = ...` a cada 6h, e a anonimização da LGPD um `UPDATE ... WHERE user_id`, ambos em Seq Scan.
+- **`interactions`**: `ix_interactions_conversation_status_started_at (conversation_id, status, started_at)`, da `011`. Os índices anteriores cobriam o WHERE de `load_history` mas nenhum cobria o `ORDER BY started_at` — o Postgres ordenava o histórico inteiro da conversa em memória para pegar 40 linhas, **em toda mensagem**.
+- **Sem enums nativos e sem triggers** — validação de valores categóricos e regras de workflow vivem na camada de aplicação. A exceção é `folders.folder_kind`: ali o conjunto é fechado, pequeno, e um valor inválido mudaria a marcação enviada ao modelo (§6.3). Ainda assim é `VARCHAR`+CHECK e não `CREATE TYPE`, porque a lista de tipos tende a crescer e um ENUM exigiria `ALTER TYPE` a cada valor novo.
 - **Isolamento lógico, não físico**: os três schemas no mesmo database; FKs cruzam livremente (`calculator_favorites.user_id → public.users`, `calculator_executions.interaction_id → public.interactions`, `landing_pages.submissions.user_id → public.users`).
 
 ---
