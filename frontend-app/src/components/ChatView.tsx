@@ -261,26 +261,86 @@ function PubmedSection({ validation }: { validation: PubmedValidation }) {
   );
 }
 
+// Modos cuja espera é longa o bastante para exigir mais que três pontinhos.
+//
+// Medição em produção (2026-09-08): uma consulta ao Data Ocean levou 97,9s. O
+// fluxo agêntico roda inteiro do lado da Maritaca — decide quais bases
+// consultar, executa, cruza — e a API não aceita streaming com a ferramenta
+// ligada. Ou seja: não há como mostrar texto parcial, e a demora não é do
+// nosso código.
+//
+// O que dá para mudar é a EXPECTATIVA. Uma frase estática por 98 segundos é
+// indistinguível de uma tela travada; um cronômetro correndo e etapas que
+// avançam dizem "está trabalhando" sem prometer o que não se pode cumprir.
+const MODOS_DE_ESPERA_LONGA: Record<string, { etapas: string[]; avisoSegundos: number }> = {
+  DATA_OCEAN: {
+    // As etapas são ILUSTRATIVAS, não o progresso real: o fluxo agêntico é
+    // interno à Maritaca e não expõe em que passo está. Elas descrevem o que
+    // a ferramenta de fato faz, na ordem em que faz — o médico entende o que
+    // está acontecendo, e nenhuma delas afirma um estado que não sabemos.
+    etapas: [
+      'Escolhendo as bases de dados…',
+      'Consultando fontes oficiais…',
+      'Cruzando os dados encontrados…',
+      'Montando a resposta com as fontes…',
+    ],
+    // A partir daqui, dizer explicitamente que é normal demorar.
+    avisoSegundos: 25,
+  },
+};
+
 function ThinkingIndicator({ mode }: { mode?: string }) {
-  const label = (mode && STREAMING_LABELS[mode]) ?? 'Processando…';
+  const longo = mode ? MODOS_DE_ESPERA_LONGA[mode] : undefined;
+  const [segundos, setSegundos] = useState(0);
+
+  useEffect(() => {
+    if (!longo) return;
+    const id = setInterval(() => setSegundos(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [longo]);
+
+  // Uma etapa a cada 8s, parando na última: o contador continua correndo, mas
+  // as etapas não voltam ao início nem inventam progresso que não existe.
+  const etapa = longo
+    ? longo.etapas[Math.min(Math.floor(segundos / 8), longo.etapas.length - 1)]
+    : undefined;
+  const label = etapa ?? (mode && STREAMING_LABELS[mode]) ?? 'Processando…';
+
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
       <AssistantAvatar />
-      <div style={{ paddingTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-        {[0, 1, 2].map(i => (
-          <div key={i} style={{
-            width: 5, height: 5, borderRadius: '50%', background: 'var(--green)',
-            animation: 'pulse 1.2s ease-in-out infinite',
-            animationDelay: `${i * 0.2}s`,
-          }} />
-        ))}
-        <span style={{ fontSize: 12, color: 'var(--pen2)', fontWeight: 500 }}>
-          {label}
-        </span>
+      <div style={{ paddingTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 5, height: 5, borderRadius: '50%', background: 'var(--green)',
+              animation: 'pulse 1.2s ease-in-out infinite',
+              animationDelay: `${i * 0.2}s`,
+            }} />
+          ))}
+          <span style={{ fontSize: 12, color: 'var(--pen2)', fontWeight: 500 }}>
+            {label}
+          </span>
+          {longo && segundos > 0 && (
+            // O cronômetro é o que mais separa "trabalhando" de "travado":
+            // um número que muda prova que a página está viva.
+            <span style={{ fontSize: 11, color: 'var(--pen3)', fontVariantNumeric: 'tabular-nums' }}>
+              {segundos}s
+            </span>
+          )}
+        </div>
+        {longo && segundos >= longo.avisoSegundos && (
+          <p style={{ fontSize: 11.5, color: 'var(--pen3)', margin: '6px 0 0', lineHeight: 1.45, maxWidth: 420 }}>
+            Consultas a bases oficiais levam mais tempo que uma busca comum —
+            normalmente entre 1 e 2 minutos. A resposta vem com os números e a
+            fonte de cada um.
+          </p>
+        )}
       </div>
     </div>
   );
 }
+
 
 // Nota de rodapé, não indicador de carregamento: a resposta já está completa
 // acima e o médico pode seguir. Isto só avisa que as referências ainda chegam.
