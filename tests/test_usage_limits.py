@@ -156,3 +156,41 @@ async def test_endpoint_de_uso_responde(client, user):
 
     assert resp.status_code == 200
     assert resp.json()["has_limit"] is True
+
+
+# ── O limite precisa comportar o modo mais caro ──────────────────────────────
+# O teto era US$ 1,00, calibrado quando a pergunta mais cara custava ~US$ 0,03.
+# O DATA_OCEAN custou US$ 0,647945 na primeira consulta real (medido em
+# produção, 2026-09-08): cabia UMA VEZ E MEIA por semana, e na segunda o médico
+# perdia todos os modos — inclusive os que custam centavos.
+
+
+# Custo real medido da primeira consulta DATA_OCEAN em produção.
+# Não é estimativa: 147.862 tokens de entrada, 2.773 de saída e 25,2 GB
+# processados, com os preços da Maritaca de 2026-09.
+CUSTO_MEDIDO_DATA_OCEAN = Decimal("0.647945")
+
+
+def test_o_limite_comporta_mais_de_uma_consulta_do_modo_mais_caro():
+    """Um limite que derruba a plataforma inteira por causa de duas perguntas
+    não protege orçamento: impede o uso.
+
+    O piso de 3 é o mínimo para o recurso ser utilizável — abaixo disso o
+    médico gasta a semana inteira em duas perguntas.
+    """
+    cabem = BETA_WEEKLY_LIMIT / CUSTO_MEDIDO_DATA_OCEAN
+
+    assert cabem >= 3, (
+        f"o limite de US$ {BETA_WEEKLY_LIMIT} comporta só {cabem:.1f} consultas "
+        f"do modo mais caro (US$ {CUSTO_MEDIDO_DATA_OCEAN}) — o médico bate o "
+        "teto e perde TODOS os modos, inclusive os baratos"
+    )
+
+
+def test_o_limite_nao_e_alto_demais_para_um_piloto():
+    """A contrapartida: o teto existe para que um bug de laço ou um uso
+    inesperado não gerem fatura surpresa."""
+    assert BETA_WEEKLY_LIMIT <= Decimal("20.00"), (
+        "teto alto demais para a fase de piloto — 18 usuários no limite "
+        f"gastariam US$ {BETA_WEEKLY_LIMIT * 18} por semana"
+    )

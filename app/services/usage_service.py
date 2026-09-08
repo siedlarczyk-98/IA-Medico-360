@@ -7,7 +7,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AuditLog, User, UserWeeklyUsage
 
-BETA_WEEKLY_LIMIT = Decimal("1.00")
+# Teto de gasto semanal por usuário beta, em USD.
+#
+# Era 1,00, calibrado quando a pergunta mais cara custava ~US$ 0,03 — trinta
+# perguntas por semana, folgado para um piloto.
+#
+# O DATA_OCEAN mudou a escala. Medição da primeira consulta real em produção
+# (2026-09-08): US$ 0,647945 — 22× uma pergunta clínica comum. Não é o modelo:
+# são os 25,2 GB que a ferramenta processa e os 147 mil tokens que ela injeta
+# no contexto do lado da Maritaca.
+#
+# Com o teto de 1,00, cabia UMA VEZ E MEIA por semana. Na segunda consulta o
+# médico batia o limite e perdia TODOS os modos — inclusive a busca rápida, que
+# custa centavos. Um limite que derruba a plataforma inteira por causa de duas
+# perguntas não protege orçamento: impede o uso.
+#
+# 5,00 comporta ~7 consultas Data Ocean, ou ~170 perguntas clínicas comuns, ou
+# qualquer mistura. Com 18 usuários, o pior caso absoluto é US$ 90/semana — e
+# ninguém chega perto, porque o consumo real medido é de dezenas de interações
+# por mês, não por semana.
+#
+# QUANDO REVISAR: se o custo médio por interação subir de novo (um modo novo
+# mais caro, ou a Maritaca reajustar), ou quando a base sair da escala de
+# piloto. `vigilancia_service.medir_custo` mostra o gasto por período.
+BETA_WEEKLY_LIMIT = Decimal("5.00")
 BETA_ROLE = "beta_user"
 
 
