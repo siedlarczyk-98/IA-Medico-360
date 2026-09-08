@@ -59,6 +59,31 @@ class Settings(BaseSettings):
     invite_token_expire_hours: int = 72
     otp_expire_minutes: int = 10
     allow_public_registration: bool = False
+
+    # Cache semântico: DESLIGADO por decisão de produto, não por defeito.
+    #
+    # Medição em produção (2026-09-08, 90 dias): 0 acertos em 240 interações,
+    # com 6 entradas gravadas. A causa não é threshold nem índice — é que
+    # AQUILO QUE SE REPETE NÃO PODE SER CACHEADO, e o que pode não se repete:
+    #
+    #   - as perguntas repetidas são casos clínicos com dado de paciente
+    #     ("mulher 34a, cefaleia thunderclap", 6× por 3 médicos). O guardrail
+    #     as recusa CORRETAMENTE — cachear isso entre médicos é o vazamento
+    #     que `contexto_tem_dado_de_paciente` veio fechar;
+    #   - as 6 entradas gravadas são perguntas genéricas, cada uma sobre um
+    #     assunto diferente (aftas, transplante cardíaco, semaglutida).
+    #     Nenhuma se repetiu.
+    #
+    # Com 18 usuários ativos, a chance de dois médicos fazerem a mesma pergunta
+    # genérica é baixa por construção. Enquanto isso o cache cobra ~500-1150ms
+    # por pergunta em duas chamadas sequenciais à OpenAI (normalização +
+    # embedding), ANTES do primeiro token.
+    #
+    # QUANDO RELIGAR: quando a base chegar a algumas centenas de médicos
+    # ativos, a probabilidade de coincidência muda de patamar.
+    # `scripts/medir_cache_semantico.py` responde se já vale a pena — ele mede
+    # taxa de acerto real e a distribuição das entradas.
+    semantic_cache_enabled: bool = False
     cookie_domain: str | None = None
 
     # --- Embed SSO ---

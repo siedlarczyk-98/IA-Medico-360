@@ -34,6 +34,16 @@ class ProviderFake:
 
 @pytest.fixture(autouse=True)
 def sem_dependencias(monkeypatch):
+    # O cache semântico está DESLIGADO por padrão (`semantic_cache_enabled`,
+    # ver o comentário da flag em `core/config`). Estes testes protegem a
+    # invariante de que o CONTEXTO não contamina a chave — que continua valendo
+    # e volta a importar assim que ele for religado. Ligamos a flag aqui para
+    # exercitar o caminho.
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.get_settings",
+        lambda: type("S", (), {"semantic_cache_enabled": True})(),
+    )
+
     async def _triagem(*a, **k):
         return {"mode": "QUICK_SEARCH", "confidence": 0.99}
 

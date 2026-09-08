@@ -340,3 +340,38 @@ do modo DATA_OCEAN passar a ser material no total da plataforma.
 `InteractionResponse.extra_metadata` (`tool_usage`), em unidades, não em dinheiro.
 Recalcular o histórico inteiro com outra taxa é possível a qualquer momento —
 nenhum dado se perde por causa desta aproximação.
+
+---
+
+## 16. Cache semântico desligado — o produto ainda não tem volume para ele
+
+**O que é.** `semantic_cache_enabled` é `False` (`app/core/config.py`). O código
+do cache continua inteiro, com as correções de segurança de 2026-09-08.
+
+**Por quê.** Medição em produção (2026-09-08, janela de 90 dias): **0 acertos em
+240 interações**, com 6 entradas gravadas.
+
+A causa não é threshold nem índice — nada chegou a ser comparado. É que **o que
+se repete não pode ser cacheado, e o que pode não se repete**:
+
+- As perguntas repetidas são casos clínicos com dado de paciente — *"mulher 34a,
+  cefaleia thunderclap + fotofobia"* apareceu 6× entre 3 médicos. O guardrail as
+  recusa **corretamente**: cachear isso entre médicos é exatamente o vazamento
+  que `contexto_tem_dado_de_paciente` veio fechar.
+- As 6 entradas gravadas são perguntas genéricas, cada uma sobre um assunto
+  diferente (aftas, transplante cardíaco, semaglutida). Nenhuma se repetiu.
+
+Com 18 usuários ativos, a chance de dois médicos fazerem a mesma pergunta
+genérica é baixa por construção. Enquanto isso o cache cobrava ~500-1150ms por
+pergunta, em duas chamadas sequenciais à OpenAI (normalização + embedding),
+**antes do primeiro token**.
+
+**O que resolve.** Volume. Não há conserto de código pendente.
+
+**Quando revisitar.** Algumas centenas de médicos ativos — aí a probabilidade de
+coincidência muda de patamar. `scripts/medir_cache_semantico.py` responde se já
+vale: ele mede taxa de acerto real e a distribuição das entradas.
+
+**Cuidado ao religar.** A decisão de cacheabilidade vive em
+`orquestrador_shared.pode_usar_cache`, que junta as três condições (flag, modo,
+contexto sem paciente). Religar é mudar a flag — não mexer nas outras duas.

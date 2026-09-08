@@ -21,6 +21,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 
 from app.core import circuit_breaker
+from app.core.config import get_settings
 from app.core.prompts import SYSTEM_PROMPT_CLARIFICATION
 from app.models.models import (
     Conversation,
@@ -41,6 +42,7 @@ from app.services.integracoes.ai_providers import get_provider_by_type
 from app.services.integracoes.pubmed_service import validate_with_pubmed
 from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
+    MODOS_CACHEAVEIS,
     MODOS_NAO_TRIADOS,
     PHARMA_CHECK_MIN_CONFIDENCE,
     PHARMA_MODES,
@@ -150,6 +152,27 @@ async def load_context_messages(
 # paciente ou só a conversa. Este prefixo é o sinal — os dois blocos que
 # carregam dado de paciente (`formatar_bloco` e `formatar_bloco_evolucao`)
 # começam com "[", e são os únicos turnos sintéticos da lista.
+def pode_usar_cache(mode: str, mensagens: list[dict]) -> bool:
+    """Decide se esta pergunta pode ler E gravar no cache semântico.
+
+    Três condições, todas necessárias:
+
+    1. O cache está ligado (`semantic_cache_enabled`). Hoje é `False` — ver o
+       comentário da flag em `core/config`: medição mostrou 0 acertos em 240
+       interações, e o custo é ~1s por pergunta antes do primeiro token.
+    2. O modo é cacheável (`MODOS_CACHEAVEIS`).
+    3. O contexto não carrega dado de paciente — ver
+       `contexto_tem_dado_de_paciente`.
+
+    Existe como função única porque a decisão precisa ser a MESMA na leitura e
+    na gravação, nos dois caminhos do orquestrador. Quatro pontos que poderiam
+    divergir passam a ler daqui.
+    """
+    if not get_settings().semantic_cache_enabled:
+        return False
+    return mode in MODOS_CACHEAVEIS and not contexto_tem_dado_de_paciente(mensagens)
+
+
 def contexto_tem_dado_de_paciente(mensagens: list[dict]) -> bool:
     """Diz se o contexto montado carrega material específico de um paciente.
 

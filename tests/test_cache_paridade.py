@@ -140,11 +140,29 @@ def test_os_dois_caminhos_aplicam_o_gate_na_leitura_e_na_gravacao():
         # A CHAMADA, não o import: um `import` órfão continua no arquivo depois
         # de alguém remover a checagem, e o teste passaria por engano — foi o
         # que aconteceu na primeira versão deste teste.
-        assert "not contexto_tem_dado_de_paciente(history_messages)" in fonte, (
-            f"{nome} não checa o contexto de paciente antes de cachear"
+        #
+        # As três condições (flag, modo cacheável, contexto sem paciente) foram
+        # unificadas em `pode_usar_cache`, para que leitura e gravação não
+        # possam divergir.
+        assert "pode_usar_cache(mode, history_messages)" in fonte, (
+            f"{nome} não usa o gate único de cacheabilidade"
         )
         # `pode_cachear` precisa aparecer três vezes: definição, gate da
         # leitura e gate da gravação.
         assert fonte.count("pode_cachear") >= 3, (
             f"{nome} não aplica o gate na leitura E na gravação"
         )
+
+
+def test_o_gate_unico_respeita_a_flag_de_desligamento():
+    """`pode_usar_cache` é o único lugar que decide, e a flag entra nele.
+
+    Medição em produção mostrou 0 acertos em 240 interações: o que se repete são
+    casos clínicos com dado de paciente (que o guardrail recusa corretamente), e
+    o que é cacheável não se repete com 18 usuários. Ver o comentário da flag em
+    `core/config`.
+    """
+    from app.services.orquestrador_shared import pode_usar_cache
+
+    # Com a flag desligada (o padrão hoje), nem o caso mais favorável passa.
+    assert pode_usar_cache("QUICK_SEARCH", []) is False

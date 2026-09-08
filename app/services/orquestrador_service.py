@@ -31,16 +31,15 @@ from app.services.orquestrador_modes import (
     GREETING_REPLY,
     MODE_MODEL_MAP,
     MODE_TEMPERATURE_MAP,
-    MODOS_CACHEAVEIS,
 )
 from app.services.orquestrador_shared import (
     MENSAGEM_PRECISA_REFINAR,
     check_clarification,
-    contexto_tem_dado_de_paciente,
     decidir_rota,
     ensure_conversation,
     link_attachments,
     load_context_messages,
+    pode_usar_cache,
     pos_processar_interacao,
     resolve_clarification_prompt,
 )
@@ -174,7 +173,7 @@ class OrquestradorService:
             # gerada com a evolução da pasta junto: servi-la a outro médico
             # entregaria conduta calibrada para um paciente que não é o dele.
             # Ver `contexto_tem_dado_de_paciente`.
-            pode_cachear = mode in MODOS_CACHEAVEIS and not contexto_tem_dado_de_paciente(history_messages)
+            pode_cachear = pode_usar_cache(mode, history_messages)
             if pode_cachear:
                 cached, _cache_normalized, _cache_embedding = await get_cached_response(
                     self.db, mode, sanitized_prompt
