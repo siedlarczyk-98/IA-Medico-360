@@ -52,7 +52,7 @@ from app.services.response_metadata import build_metadata_from_cached, build_res
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import is_off_topic_greeting
-from app.services.usage_service import add_interaction_audit
+from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +289,20 @@ class OrquestradorService:
             interaction.response_time_ms = elapsed_ms
             interaction.token_cost_usd = cost
             interaction.completed_at = datetime.now(UTC)
+
+            # Soma o custo ao medidor semanal do usuário.
+            #
+            # ISTO FALTAVA. `check_limit` é chamado nos dois endpoints e lê
+            # `UserWeeklyUsage.total_cost_usd` — mas só o `/stream` incrementava
+            # esse contador. O `/query` era o único produtor de custo do projeto
+            # que não registrava: o agregador registra nos dois caminhos, o
+            # upload de imagem registra, o stream registra.
+            #
+            # Efeito: um `beta_user` consumindo pelo `/query` — que é o caminho
+            # de TODOS os modos PharmaDB — nunca batia o limite semanal. O custo
+            # ficava gravado em `interaction.token_cost_usd` (auditoria) e fora
+            # do medidor, e a divergência só apareceria na fatura.
+            await record_cost(self.db, self.user_id, cost)
 
             # 8-10. Pós-processamento independente em paralelo: especialidade/tema,
             # medicamentos e validação PubMed (apenas modos clínicos; timeout 15s com

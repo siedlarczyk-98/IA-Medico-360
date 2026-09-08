@@ -227,6 +227,13 @@ class Interaction(Base):
         Index("ix_interactions_conversation_feature", "conversation_id", "feature"),
         Index("ix_interactions_conversation_user_status", "conversation_id", "user_id", "status"),
         Index("ix_interactions_user_created_at", "user_id", "created_at"),
+        # `load_history` roda em toda mensagem: filtra por conversa + status e
+        # ordena por `started_at` desc. Sem a terceira coluna o Postgres ordena
+        # em memória o histórico inteiro para pegar os 40 mais recentes.
+        Index(
+            "ix_interactions_conversation_status_started_at",
+            "conversation_id", "status", "started_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -339,6 +346,13 @@ class PubmedValidation(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        # `vigilancia_service` faz `max(created_at) WHERE action = ...` a cada
+        # 6h; esta tabela é escrita uma vez por interação. Ver migration 011.
+        Index("ix_audit_logs_action_created_at", "action", "created_at"),
+        # Anonimização no fluxo de exclusão de conta (LGPD).
+        Index("ix_audit_logs_user_id", "user_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

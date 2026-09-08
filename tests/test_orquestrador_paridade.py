@@ -353,3 +353,41 @@ async def test_fallback_do_stream_nao_perde_a_imagem(monkeypatch):
     assert capturador.image_content == IMAGEM, (
         "o fallback do /stream chamou o modelo secundário sem a imagem"
     )
+
+
+# ── Custo entra no medidor semanal nos DOIS caminhos ─────────────────────────
+# O quarto bug desta família: `record_cost` existia só no `/stream`. Como
+# `check_limit` é chamado nos dois endpoints e lê o contador que só um deles
+# incrementava, um beta_user consumindo pelo `/query` — o caminho de todos os
+# modos PharmaDB — nunca batia o limite semanal. O custo ficava na auditoria
+# (`interaction.token_cost_usd`) e fora do medidor.
+
+
+def test_os_dois_caminhos_registram_custo_no_medidor_semanal():
+    """`check_limit` lê o que `record_cost` escreve. Um caminho que cobra sem
+    registrar torna o limite inaplicável — e a divergência só aparece na fatura.
+    """
+    for modulo in ("orquestrador_service", "orquestrador_stream_service"):
+        fonte = (pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / f"{modulo}.py").read_text(encoding="utf-8")
+        assert "await record_cost(" in fonte, (
+            f"{modulo} calcula custo mas não o soma ao medidor semanal"
+        )
+
+
+def test_todo_produtor_de_custo_registra():
+    """Varredura mais ampla: qualquer serviço que calcule custo tem de somá-lo.
+
+    Pega o caso de um serviço NOVO que copie o cálculo e esqueça o registro —
+    que foi exatamente como o `/query` ficou para trás.
+    """
+    raiz = pathlib.Path(__file__).resolve().parents[1] / "app"
+    faltando: list[str] = []
+    for arquivo in raiz.rglob("*.py"):
+        texto = arquivo.read_text(encoding="utf-8")
+        # `calculate_cost` é o cálculo; `record_cost` é o registro no medidor.
+        if "await calculate_cost(" in texto and "record_cost" not in texto:
+            faltando.append(str(arquivo.relative_to(raiz)))
+
+    assert not faltando, (
+        "serviço calcula custo sem registrar no medidor semanal: " + ", ".join(faltando)
+    )

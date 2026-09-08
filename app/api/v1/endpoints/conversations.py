@@ -75,13 +75,29 @@ async def get_conversation(
     # interação daria uma query por mensagem numa conversa longa.
     anexos_por_interacao: dict = {}
     if interactions:
+        # Projeção explícita, e NÃO `select(FileExtraction)`.
+        #
+        # A entidade inteira traz `image_base64` (uma imagem de 5 MB vira ~7 MB
+        # em base64) e `extracted_text` (até 50 mil caracteres) — colunas que
+        # esta rota não usa: `AttachmentOut` tem três campos, e o docstring dele
+        # já dizia que "o base64 da imagem não deve trafegar de volta na
+        # listagem da conversa". A intenção estava escrita, mas o SELECT trazia
+        # tudo do banco assim mesmo, e o Pydantic descartava depois.
+        #
+        # Abrir uma conversa com cinco imagens transferia dezenas de MB do
+        # Postgres para a aplicação, para jogá-los fora.
         anexos_result = await db.execute(
-            select(FileExtraction).where(
+            select(
+                FileExtraction.id,
+                FileExtraction.file_name,
+                FileExtraction.file_type,
+                FileExtraction.interaction_id,
+            ).where(
                 FileExtraction.interaction_id.in_([i.id for i in interactions]),
                 FileExtraction.user_id == current_user.id,
             )
         )
-        for extraction in anexos_result.scalars().all():
+        for extraction in anexos_result:
             anexos_por_interacao.setdefault(extraction.interaction_id, []).append(
                 AttachmentOut(
                     id=extraction.id,
