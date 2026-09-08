@@ -140,7 +140,25 @@ pharmadb = Disjuntor("pharmadb", limite_falhas=5, descanso_segundos=30)
 pubmed = Disjuntor("pubmed", limite_falhas=5, descanso_segundos=30)
 curseduca = Disjuntor("curseduca", limite_falhas=10, descanso_segundos=15)
 
-_TODOS = (pharmadb, pubmed, curseduca)
+# Chamadas AUXILIARES ao gpt-5.4-nano: triagem, verificação de clarificação e
+# normalização do cache semântico.
+#
+# O modelo que RESPONDE ao médico fica de fora de propósito: quando ele falha
+# não há alternativa a oferecer, e já existe a cadeia de `FALLBACK_MODELS`. As
+# auxiliares são o oposto — todas as três já degradam graciosamente (a triagem
+# cai para QUICK_SEARCH, a clarificação assume "suficiente", o cache vira miss),
+# e as três estão no caminho ANTES do primeiro token.
+#
+# Sem disjuntor, uma degradação da OpenAI custava 10s (triagem) + 8s
+# (clarificação) + 10s (normalização) = 28 segundos de timeouts sequenciais para
+# chegar exatamente ao mesmo resultado que o fallback daria em zero. É o cenário
+# que o docstring deste módulo descreve: "o problema é a integração ficar lenta".
+#
+# Um disjuntor só para as três porque a causa é comum — se a OpenAI está
+# degradada, está para todas.
+openai_auxiliares = Disjuntor("openai_auxiliares", limite_falhas=5, descanso_segundos=30)
+
+_TODOS = (pharmadb, pubmed, curseduca, openai_auxiliares)
 
 
 def estado_geral() -> dict[str, str]:

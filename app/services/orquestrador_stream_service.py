@@ -26,13 +26,9 @@ from app.core.prompts import (
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Interaction,
-    InteractionMedication,
     InteractionResponse,
-    PubmedValidation,
 )
 from app.services.integracoes.ai_providers import get_provider_by_type
-from app.services.integracoes.pubmed_service import validate_with_pubmed
-from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
     EFFORT_MAX_TOKENS,
     FALLBACK_MODELS,
@@ -50,12 +46,12 @@ from app.services.orquestrador_shared import (
     ensure_conversation,
     link_attachments,
     load_context_messages,
+    pos_processar_interacao,
     resolve_clarification_prompt,
 )
 from app.services.pricing import calcular_custo_ferramentas, calculate_cost, get_model_pricing
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
-from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit, record_cost
 
@@ -162,12 +158,28 @@ class OrquestradorStreamService:
                 # O parâmetro `history` da requisição é ignorado de propósito —
                 # ver `conversation_history.load_history`. O cache continua
                 # usando `sanitized_prompt`, sem histórico.
-                history_messages = await load_context_messages(db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
-
-                # 3. Roteamento — regras compartilhadas com o /query
-                # (`orquestrador_shared.decidir_rota`). Aqui muda so a forma de
+                # 2c+3. Histórico e roteamento EM PARALELO.
+                #
+                # `decidir_rota` chama a triagem (uma ida ao gpt-5.4-nano, ~400-900ms
+                # quando não está no cache do Redis) e recebe apenas prompt, modo e a
+                # flag de anexo — não depende do histórico. `load_context_messages`
+                # faz queries e, dentro de pasta, um embedding na OpenAI (~150-400ms).
+                #
+                # Eram sequenciais sem motivo: o tempo de um era somado ao do outro
+                # antes do primeiro token. Medição em produção mostrou p50 de 33s em
+                # CLINICAL_REASONING, e todo o `asyncio.gather` do arquivo estava no
+                # pós-processamento — que já não bloqueia nada.
+                #
+                # As regras de roteamento são compartilhadas com o /query
+                # (`orquestrador_shared.decidir_rota`); aqui muda só a forma de
                 # comunicar: evento SSE em vez de corpo de resposta.
-                decisao = await decidir_rota(sanitized_prompt, mode, bool(attachment_ids))
+                history_messages, decisao = await asyncio.gather(
+                    load_context_messages(
+                        db, self.user_id, conversation_id,
+                        pergunta_atual=sanitized_prompt, folder_id=folder_id,
+                    ),
+                    decidir_rota(sanitized_prompt, mode, bool(attachment_ids)),
+                )
                 mode, confidence = decisao.mode, decisao.confidence
 
                 if decisao.precisa_refinar:
@@ -423,46 +435,16 @@ class OrquestradorStreamService:
                     "is_fallback": is_fallback,
                 })
 
-                # 8. Pós-processamento independente roda em paralelo (specialty, meds, PubMed)
-                # — cortando segundos da latência até o evento `done`. O PubMed usa o
-                # próprio texto da resposta como fallback de tópico (topic=""), evitando
-                # depender da detecção de especialidade para iniciar.
-                classification, medications, pubmed = await asyncio.gather(
-                    detect_specialty_and_topic(sanitized_prompt),
-                    extract_from_interaction(sanitized_prompt, [full_text]),
-                    validate_with_pubmed(agent_response=full_text, mode=mode, topic=""),
+                # 8. Pós-processamento: especialidade, medicamentos e PubMed
+                # em paralelo, e a persistência do que apuram. Vive no shared
+                # porque o `/query` faz exatamente o mesmo — ver
+                # `pos_processar_interacao`.
+                pos = await pos_processar_interacao(
+                    db, interaction, sanitized_prompt, full_text, mode,
                 )
-
-                interaction.specialty_detected = classification["specialty"]
-                interaction.topic_detected = classification["topic"]
-
-                for med in medications:
-                    db.add(InteractionMedication(
-                        interaction_id=interaction.id,
-                        medication_raw=med["medication_raw"],
-                        medication_normalized=med["medication_normalized"],
-                        source=med["source"],
-                    ))
-
-                interaction.confidence_score = pubmed.confidence_score
-
-                for c in pubmed.cited_guidelines_verified:
-                    if c.pmid:
-                        db.add(PubmedValidation(
-                            interaction_id=interaction.id,
-                            pmid=c.pmid,
-                            article_title=c.title,
-                            abstract_snippet=None,
-                            relevance_score=1.0 if c.verified else 0.0,
-                        ))
-                for a in pubmed.newer_guidelines_found:
-                    db.add(PubmedValidation(
-                        interaction_id=interaction.id,
-                        pmid=a.pmid,
-                        article_title=a.article_title,
-                        abstract_snippet=a.abstract_snippet or None,
-                        relevance_score=0.0,
-                    ))
+                classification, medications, pubmed = (
+                    pos.classification, pos.medications, pos.pubmed,
+                )
 
                 # Referências junto da resposta. Sem isto elas só existiam no
                 # evento SSE `done` e sumiam ao reabrir a conversa — o "as

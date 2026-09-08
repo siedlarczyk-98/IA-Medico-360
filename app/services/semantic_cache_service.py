@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import circuit_breaker
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.services import cache_service
@@ -60,49 +61,55 @@ async def _normalize_prompt(
         else ""
     )
 
-    resp = await client.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {settings.openai_api_key}",
-            "Content-Type": "application/json",
-        },
-        timeout=10,
-        json={
-            "model": "gpt-5.4-nano",
-            # `max_completion_tokens`, não `max_tokens`: a família gpt-5 recusa
-            # o parâmetro antigo com HTTP 400. Como o erro era engolido pelo
-            # `except` de `get_cached_response`, a normalização falhava em TODA
-            # requisição e o cache nunca chegava a ser escrito nem lido — a
-            # tabela `semantic_cache` ficou vazia em produção sem um único erro
-            # visível. `temperature: 0` é aceito por este modelo (a triagem já
-            # usava assim); só o nome do limite de tokens estava errado.
-            "max_completion_tokens": 200,
-            "temperature": 0,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a medical query classifier and normalizer. "
-                        "Given a medical query in Portuguese, determine if it is a generic medical question "
-                        "(cacheable) or contains patient-specific data (not cacheable). "
-                        "Generic questions ask about medications, dosages, guidelines, or clinical concepts "
-                        "without specific patient data. "
-                        "Also expand Brazilian medical abbreviations: "
-                        "PAC=pneumonia adquirida na comunidade, IC=insuficiência cardíaca, "
-                        "ICFEr=insuficiência cardíaca com fração de ejeção reduzida, "
-                        "HAS=hipertensão arterial sistêmica, DM=diabetes mellitus, "
-                        "DRC=doença renal crônica, DPOC=doença pulmonar obstrutiva crônica, "
-                        "IAM=infarto agudo do miocárdio, AVC=acidente vascular cerebral, "
-                        "FA=fibrilação atrial, TEP=tromboembolismo pulmonar, TVP=trombose venosa profunda."
-                        + clinical_reasoning_extra
-                        + " Return JSON only: "
-                        '{"cacheable": true/false, "normalized_prompt": "expanded query in Portuguese"}'
-                    ),
-                },
-                {"role": "user", "content": prompt[:1000]},
-            ],
-        },
-    )
+    # Sob o disjuntor das auxiliares: com a OpenAI degradada isto falha
+    # na hora em vez de gastar o timeout, e quem chama já trata o erro
+    # como cache miss. Ver `circuit_breaker.openai_auxiliares`.
+    async def _chamar():
+        return await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+            json={
+                "model": "gpt-5.4-nano",
+                # `max_completion_tokens`, não `max_tokens`: a família gpt-5 recusa
+                # o parâmetro antigo com HTTP 400. Como o erro era engolido pelo
+                # `except` de `get_cached_response`, a normalização falhava em TODA
+                # requisição e o cache nunca chegava a ser escrito nem lido — a
+                # tabela `semantic_cache` ficou vazia em produção sem um único erro
+                # visível. `temperature: 0` é aceito por este modelo (a triagem já
+                # usava assim); só o nome do limite de tokens estava errado.
+                "max_completion_tokens": 200,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a medical query classifier and normalizer. "
+                            "Given a medical query in Portuguese, determine if it is a generic medical question "
+                            "(cacheable) or contains patient-specific data (not cacheable). "
+                            "Generic questions ask about medications, dosages, guidelines, or clinical concepts "
+                            "without specific patient data. "
+                            "Also expand Brazilian medical abbreviations: "
+                            "PAC=pneumonia adquirida na comunidade, IC=insuficiência cardíaca, "
+                            "ICFEr=insuficiência cardíaca com fração de ejeção reduzida, "
+                            "HAS=hipertensão arterial sistêmica, DM=diabetes mellitus, "
+                            "DRC=doença renal crônica, DPOC=doença pulmonar obstrutiva crônica, "
+                            "IAM=infarto agudo do miocárdio, AVC=acidente vascular cerebral, "
+                            "FA=fibrilação atrial, TEP=tromboembolismo pulmonar, TVP=trombose venosa profunda."
+                            + clinical_reasoning_extra
+                            + " Return JSON only: "
+                            '{"cacheable": true/false, "normalized_prompt": "expanded query in Portuguese"}'
+                        ),
+                    },
+                    {"role": "user", "content": prompt[:1000]},
+                ],
+            },
+        )
+
+    resp = await circuit_breaker.openai_auxiliares.chama(_chamar)
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"] or "{}"
     try:
@@ -115,15 +122,21 @@ async def _normalize_prompt(
 # ── Embedding ─────────────────────────────────────────────────
 
 async def _embed(client: httpx.AsyncClient, text_: str) -> list[float]:
-    resp = await client.post(
-        "https://api.openai.com/v1/embeddings",
-        headers={
-            "Authorization": f"Bearer {settings.openai_api_key}",
-            "Content-Type": "application/json",
-        },
-        json={"model": EMBEDDING_MODEL, "input": text_[:8000]},
-        timeout=10,
-    )
+    # Sob o disjuntor das auxiliares: com a OpenAI degradada isto falha
+    # na hora em vez de gastar o timeout, e quem chama já trata o erro
+    # como cache miss. Ver `circuit_breaker.openai_auxiliares`.
+    async def _chamar():
+        return await client.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": EMBEDDING_MODEL, "input": text_[:8000]},
+            timeout=10,
+        )
+
+    resp = await circuit_breaker.openai_auxiliares.chama(_chamar)
     resp.raise_for_status()
     return resp.json()["data"][0]["embedding"]
 

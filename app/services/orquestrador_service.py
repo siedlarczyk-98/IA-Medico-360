@@ -21,15 +21,11 @@ from app.core.prompts import (
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Interaction,
-    InteractionMedication,
     InteractionResponse,
     ModelPricing,
     PharmaAlert,
-    PubmedValidation,
 )
 from app.services.integracoes.ai_providers import get_provider_by_type
-from app.services.integracoes.pubmed_service import validate_with_pubmed
-from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
     FALLBACK_MODELS,
     GREETING_REPLY,
@@ -45,12 +41,12 @@ from app.services.orquestrador_shared import (
     ensure_conversation,
     link_attachments,
     load_context_messages,
+    pos_processar_interacao,
     resolve_clarification_prompt,
 )
 from app.services.pricing import calcular_custo_ferramentas, calculate_cost
 from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
-from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit, record_cost
 
@@ -110,16 +106,26 @@ class OrquestradorService:
                     conversation_id, sanitized_prompt, dlp_result, folder_id, start_time
                 )
 
-            # 2b. Histórico lido do BANCO, não do que o cliente mandou. O
-            # parâmetro `history` da requisição é ignorado de propósito —
-            # ver `conversation_history.load_history`.
-            history_messages = await load_context_messages(self.db, self.user_id, conversation_id, pergunta_atual=sanitized_prompt, folder_id=folder_id)
-
-            # 3. Triagem
-            # As regras de roteamento sao compartilhadas com o /stream
-            # (`orquestrador_shared.decidir_rota`): so a forma de comunicar o
-            # pedido de reformulacao muda entre os dois.
-            decisao = await decidir_rota(sanitized_prompt, mode, bool(attachment_ids))
+            # 2b+3. Histórico e roteamento EM PARALELO.
+            #
+            # O histórico vem do BANCO, não do que o cliente mandou — o parâmetro
+            # `history` da requisição é ignorado de propósito, ver
+            # `conversation_history.load_history`.
+            #
+            # `decidir_rota` chama a triagem (uma ida ao gpt-5.4-nano) e recebe
+            # só prompt, modo e a flag de anexo: não depende do histórico. Eram
+            # sequenciais sem motivo, somando os dois tempos antes de responder.
+            #
+            # As regras de roteamento são compartilhadas com o /stream
+            # (`orquestrador_shared.decidir_rota`): só a forma de comunicar o
+            # pedido de reformulação muda entre os dois.
+            history_messages, decisao = await asyncio.gather(
+                load_context_messages(
+                    self.db, self.user_id, conversation_id,
+                    pergunta_atual=sanitized_prompt, folder_id=folder_id,
+                ),
+                decidir_rota(sanitized_prompt, mode, bool(attachment_ids)),
+            )
             mode, confidence = decisao.mode, decisao.confidence
 
             if decisao.precisa_refinar:
@@ -304,51 +310,15 @@ class OrquestradorService:
             # do medidor, e a divergência só apareceria na fatura.
             await record_cost(self.db, self.user_id, cost)
 
-            # 8-10. Pós-processamento independente em paralelo: especialidade/tema,
-            # medicamentos e validação PubMed (apenas modos clínicos; timeout 15s com
-            # fallback). O PubMed usa o próprio texto da resposta como fallback de tópico.
-            response_texts = [agent_response.get("text", "")]
-            classification, medications, pubmed = await asyncio.gather(
-                detect_specialty_and_topic(sanitized_prompt),
-                extract_from_interaction(sanitized_prompt, response_texts),
-                validate_with_pubmed(
-                    agent_response=agent_response.get("text", ""),
-                    mode=mode,
-                    topic="",
-                ),
+            # 8-10. Pós-processamento: especialidade, medicamentos e PubMed em
+            # paralelo, e a persistência do que eles apuram. Vive no shared
+            # porque o `/stream` faz exatamente o mesmo — ver
+            # `pos_processar_interacao`.
+            pos = await pos_processar_interacao(
+                self.db, interaction, sanitized_prompt,
+                agent_response.get("text", ""), mode,
             )
-
-            interaction.specialty_detected = classification["specialty"]
-            interaction.topic_detected = classification["topic"]
-
-            for med in medications:
-                self.db.add(InteractionMedication(
-                    interaction_id=interaction.id,
-                    medication_raw=med["medication_raw"],
-                    medication_normalized=med["medication_normalized"],
-                    source=med["source"],
-                ))
-
-            interaction.confidence_score = pubmed.confidence_score
-            # persiste citações verificadas
-            for c in pubmed.cited_guidelines_verified:
-                if c.pmid:
-                    self.db.add(PubmedValidation(
-                        interaction_id=interaction.id,
-                        pmid=c.pmid,
-                        article_title=c.title,
-                        abstract_snippet=None,
-                        relevance_score=1.0 if c.verified else 0.0,
-                    ))
-            # persiste guidelines novas (pós-cutoff)
-            for a in pubmed.newer_guidelines_found:
-                self.db.add(PubmedValidation(
-                    interaction_id=interaction.id,
-                    pmid=a.pmid,
-                    article_title=a.article_title,
-                    abstract_snippet=a.abstract_snippet or None,
-                    relevance_score=0.0,
-                ))
+            classification, medications, pubmed = pos.classification, pos.medications, pos.pubmed
 
             # Referências junto da resposta, para sobreviverem ao reload.
             # `citations` vem só do caminho de streaming (Perplexity); aqui

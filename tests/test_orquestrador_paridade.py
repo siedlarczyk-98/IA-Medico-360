@@ -391,3 +391,30 @@ def test_todo_produtor_de_custo_registra():
     assert not faltando, (
         "serviço calcula custo sem registrar no medidor semanal: " + ", ".join(faltando)
     )
+
+
+# ── O pós-processamento vive num lugar só ────────────────────────────────────
+# Eram ~45 linhas idênticas nos dois serviços: o `gather` de especialidade,
+# medicamentos e PubMed, mais os três laços de persistência. É a forma exata
+# dos quatro bugs de divergência que este projeto já teve — alguém corrige um
+# campo de um lado e o outro caminho segue gravando dado diferente para a
+# mesma interação.
+
+
+def test_os_dois_caminhos_usam_o_pos_processamento_compartilhado():
+    for modulo in ("orquestrador_service", "orquestrador_stream_service"):
+        fonte = (pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / f"{modulo}.py").read_text(encoding="utf-8")
+        assert "pos_processar_interacao(" in fonte, f"{modulo} não usa o shared"
+
+
+def test_a_persistencia_do_pos_processamento_nao_voltou_a_ser_duplicada():
+    """Trava a extração: se alguém recolar os laços de persistência num dos
+    serviços, a divergência volta a ser possível."""
+    for modulo in ("orquestrador_service", "orquestrador_stream_service"):
+        fonte = (pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / f"{modulo}.py").read_text(encoding="utf-8")
+        assert "PubmedValidation(" not in fonte, (
+            f"{modulo} voltou a persistir PubmedValidation por conta própria"
+        )
+        assert "InteractionMedication(" not in fonte, (
+            f"{modulo} voltou a persistir InteractionMedication por conta própria"
+        )

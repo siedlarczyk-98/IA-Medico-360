@@ -185,5 +185,9 @@ async def test_curseduca_traduz_circuito_aberto_para_fail_closed():
 
 def test_estado_geral_lista_as_integracoes():
     estado = circuit_breaker.estado_geral()
-    assert set(estado) == {"pharmadb", "pubmed", "curseduca"}
+    # `openai_auxiliares` cobre triagem, verificação de clarificação e
+    # normalização do cache — as três chamadas ao gpt-5.4-nano que ficam ANTES
+    # do primeiro token. Sem ele, uma degradação da OpenAI custava 28s de
+    # timeouts sequenciais para chegar ao mesmo fallback.
+    assert set(estado) == {"pharmadb", "pubmed", "curseduca", "openai_auxiliares"}
     assert all(v == "fechado" for v in estado.values())

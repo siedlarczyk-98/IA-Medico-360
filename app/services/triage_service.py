@@ -4,6 +4,7 @@ import logging
 import re
 import unicodedata
 
+from app.core import circuit_breaker
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.services import cache_service
@@ -125,22 +126,30 @@ async def triage(prompt: str) -> dict:
 
     try:
         client = get_client()
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "gpt-5.4-nano",
-                "messages": [
-                    {"role": "user", "content": TRIAGE_PROMPT.format(prompt=prompt)},
-                ],
-                "max_completion_tokens": 30,
-                "temperature": 0,
-            },
-            timeout=10,
-        )
+
+        # Sob o disjuntor das auxiliares: se a OpenAI estiver degradada, esta
+        # chamada falha na hora em vez de esperar os 10s do timeout, e o
+        # `except` abaixo já entrega o fallback QUICK_SEARCH que ela daria de
+        # qualquer forma. Ver `circuit_breaker.openai_auxiliares`.
+        async def _chamar():
+            return await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-5.4-nano",
+                    "messages": [
+                        {"role": "user", "content": TRIAGE_PROMPT.format(prompt=prompt)},
+                    ],
+                    "max_completion_tokens": 30,
+                    "temperature": 0,
+                },
+                timeout=10,
+            )
+
+        resp = await circuit_breaker.openai_auxiliares.chama(_chamar)
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"].strip()

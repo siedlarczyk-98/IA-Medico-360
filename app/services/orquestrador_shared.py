@@ -12,6 +12,7 @@ Aqui as funções recebem `db` e `user_id` como argumentos em vez de lerem
 `self`, que era a única diferença real entre as duas versões.
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -19,8 +20,15 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 
+from app.core import circuit_breaker
 from app.core.prompts import SYSTEM_PROMPT_CLARIFICATION
-from app.models.models import Conversation, FileExtraction, Interaction
+from app.models.models import (
+    Conversation,
+    FileExtraction,
+    Interaction,
+    InteractionMedication,
+    PubmedValidation,
+)
 from app.services.context_budget import (
     DEFAULT_HISTORY_TOKEN_BUDGET,
     Turn,
@@ -30,6 +38,8 @@ from app.services.context_budget import (
 from app.services.conversation_history import load_history
 from app.services.folder_context_service import contexto_da_pasta, evolucao_da_pasta
 from app.services.integracoes.ai_providers import get_provider_by_type
+from app.services.integracoes.pubmed_service import validate_with_pubmed
+from app.services.medication_extractor import extract_from_interaction
 from app.services.orquestrador_modes import (
     MODOS_NAO_TRIADOS,
     PHARMA_CHECK_MIN_CONFIDENCE,
@@ -37,6 +47,7 @@ from app.services.orquestrador_modes import (
     OrquestradorMode,
     upgrade_mode_for_attachments,
 )
+from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import triage
 
 logger = logging.getLogger(__name__)
@@ -314,13 +325,19 @@ async def check_clarification(prompt: str, contexto: list[dict] | None = None) -
     com perguntas que ninguém gerou.
     """
     try:
-        response = await _clarification_provider.complete(
-            model_id=_CLARIFICATION_MODEL,
-            prompt=_prompt_com_contexto(prompt, contexto),
-            system_prompt=SYSTEM_PROMPT_CLARIFICATION,
-            temperature=0.0,
-            timeout=8,
-        )
+        # Sob o disjuntor das auxiliares: com a OpenAI degradada isto falha na
+        # hora em vez de gastar os 8s do timeout, e o `except` abaixo já assume
+        # "suficiente" — o mesmo resultado, sem a espera.
+        async def _chamar():
+            return await _clarification_provider.complete(
+                model_id=_CLARIFICATION_MODEL,
+                prompt=_prompt_com_contexto(prompt, contexto),
+                system_prompt=SYSTEM_PROMPT_CLARIFICATION,
+                temperature=0.0,
+                timeout=8,
+            )
+
+        response = await circuit_breaker.openai_auxiliares.chama(_chamar)
         raw = response.text.strip()
         # Remove possível markdown ```json ... ```
         if raw.startswith("```"):
@@ -427,3 +444,78 @@ async def decidir_rota(
         mode = "QUICK_SEARCH"
 
     return DecisaoDeRota(mode=mode, confidence=confidence)
+
+
+@dataclass
+class PosProcessamento:
+    """O que o pós-processamento apurou, para quem precisa montar o payload."""
+
+    classification: dict
+    medications: list
+    pubmed: object
+
+
+async def pos_processar_interacao(
+    db,
+    interaction,
+    sanitized_prompt: str,
+    texto_resposta: str,
+    mode: str,
+) -> PosProcessamento:
+    """
+    Roda especialidade, medicamentos e PubMed em paralelo e persiste o resultado.
+
+    Estas ~45 linhas viviam duplicadas em `orquestrador_service` e
+    `orquestrador_stream_service`, diferindo apenas na origem do texto da
+    resposta. É a forma exata dos quatro bugs de divergência que este projeto
+    já teve: alguém corrige um campo de um lado, o outro caminho segue gravando
+    dado diferente para a mesma interação, e nada compara os dois.
+
+    O `topic=""` no PubMed é deliberado: usar o próprio texto da resposta como
+    fallback de tópico evita esperar a detecção de especialidade para começar,
+    e as três chamadas ficam de fato independentes dentro do `gather`.
+    """
+    classification, medications, pubmed = await asyncio.gather(
+        detect_specialty_and_topic(sanitized_prompt),
+        extract_from_interaction(sanitized_prompt, [texto_resposta]),
+        validate_with_pubmed(agent_response=texto_resposta, mode=mode, topic=""),
+    )
+
+    interaction.specialty_detected = classification["specialty"]
+    interaction.topic_detected = classification["topic"]
+    interaction.confidence_score = pubmed.confidence_score
+
+    for med in medications:
+        db.add(InteractionMedication(
+            interaction_id=interaction.id,
+            medication_raw=med["medication_raw"],
+            medication_normalized=med["medication_normalized"],
+            source=med["source"],
+        ))
+
+    # Citações que o modelo alegou e o PubMed conferiu.
+    for c in pubmed.cited_guidelines_verified:
+        if c.pmid:
+            db.add(PubmedValidation(
+                interaction_id=interaction.id,
+                pmid=c.pmid,
+                article_title=c.title,
+                abstract_snippet=None,
+                relevance_score=1.0 if c.verified else 0.0,
+            ))
+
+    # Diretrizes mais recentes que o corte de treino do modelo.
+    for a in pubmed.newer_guidelines_found:
+        db.add(PubmedValidation(
+            interaction_id=interaction.id,
+            pmid=a.pmid,
+            article_title=a.article_title,
+            abstract_snippet=a.abstract_snippet or None,
+            relevance_score=0.0,
+        ))
+
+    return PosProcessamento(
+        classification=classification,
+        medications=medications,
+        pubmed=pubmed,
+    )

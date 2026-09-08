@@ -353,7 +353,10 @@ async def test_text_done_precede_o_pos_processamento(
         await asyncio.sleep(3600)
 
     monkeypatch.setattr(
-        "app.services.orquestrador_stream_service.validate_with_pubmed",
+        # O pós-processamento passou a viver em `orquestrador_shared`
+        # (`pos_processar_interacao`), que é onde o `/query` e o `/stream`
+        # deixaram de ter cópias divergentes dele.
+        "app.services.orquestrador_shared.validate_with_pubmed",
         _pubmed_que_nunca_responde,
     )
 
@@ -390,7 +393,10 @@ async def test_abort_depois_do_text_done_nao_perde_a_resposta(
         await asyncio.sleep(3600)
 
     monkeypatch.setattr(
-        "app.services.orquestrador_stream_service.validate_with_pubmed",
+        # O pós-processamento passou a viver em `orquestrador_shared`
+        # (`pos_processar_interacao`), que é onde o `/query` e o `/stream`
+        # deixaram de ter cópias divergentes dele.
+        "app.services.orquestrador_shared.validate_with_pubmed",
         _pubmed_que_nunca_responde,
     )
 
