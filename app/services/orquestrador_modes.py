@@ -104,6 +104,15 @@ FALLBACK_MODELS: dict[str, list[str]] = {
     OrquestradorMode.EXAM_REVIEW: ["gpt-4o", "gemini-2.5-flash"],
 }
 
+# Modos que um anexo promove a EXAM_REVIEW. `QUICK_SEARCH` está aqui porque é
+# o que a triagem devolve para "e esse aqui?" — texto curto que só faz sentido
+# junto do exame anexado — e roteá-lo mandaria o exame a um modelo cego.
+_MODOS_PROMOVIVEIS_POR_ANEXO: frozenset[str] = frozenset({
+    OrquestradorMode.CLINICAL_REASONING,
+    OrquestradorMode.QUICK_SEARCH,
+})
+
+
 def upgrade_mode_for_attachments(mode: str | None, tem_anexos: bool) -> str | None:
     """
     Promove CLINICAL_REASONING para EXAM_REVIEW quando há exame anexado.
@@ -113,17 +122,24 @@ def upgrade_mode_for_attachments(mode: str | None, tem_anexos: bool) -> str | No
     tomografia junto e a mesma frase sem anexo pedem modos diferentes, e a
     triagem não tem como distinguir.
 
-    Por que só a partir de CLINICAL_REASONING: anexar um documento e pedir
-    "resuma isto" é PRODUCTIVITY, e continua sendo. A promoção só acontece
-    quando a pergunta já era de raciocínio clínico — aí o anexo é o exame que
-    se quer discutir.
+    Por que não a partir de PRODUCTIVITY: anexar um documento e pedir "resuma
+    isto" é produtividade, e continua sendo. O mesmo vale para os modos de
+    pharma, onde o anexo costuma ser uma receita a transcrever, não um exame.
+
+    QUICK_SEARCH TAMBÉM promove, e este é o caso que mais aparece na prática.
+    No meio de uma discussão, o médico anexa um exame e escreve "e esse aqui?".
+    A triagem lê quatro palavras sem ver o anexo, classifica como busca rápida
+    — e QUICK_SEARCH roteia para um modelo SEM VISÃO (`sonar-pro`). O exame
+    nunca chegava ao modelo, que respondia com confiança sobre um exame que o
+    médico via na tela e ele não. Um anexo somado a uma pergunta curta não é
+    busca rápida: é leitura de exame com a pergunta encurtada pelo contexto.
 
     Um modo explícito vindo da interface nunca é promovido: se o médico
     escolheu, ele mandou.
     """
     if not tem_anexos:
         return mode
-    if mode == OrquestradorMode.CLINICAL_REASONING:
+    if mode in _MODOS_PROMOVIVEIS_POR_ANEXO:
         return OrquestradorMode.EXAM_REVIEW.value
     return mode
 

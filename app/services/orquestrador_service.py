@@ -397,11 +397,28 @@ class OrquestradorService:
             }
         except Exception as e:
             logger.warning(f"Falha no {model_id}: {e}. Tentando fallback...")
-            return await self._try_fallback(mode, prompt, system_prompt, str(e), history=history)
+            return await self._try_fallback(
+                mode, prompt, system_prompt, str(e), history=history, image_content=image_content
+            )
 
     # ── Fallback ─────────────────────────────────────────────
 
-    async def _try_fallback(self, mode: str, prompt: str, system_prompt: str, original_error: str, history: list[dict] | None = None) -> dict:
+    async def _try_fallback(
+        self,
+        mode: str,
+        prompt: str,
+        system_prompt: str,
+        original_error: str,
+        history: list[dict] | None = None,
+        image_content: dict | list | None = None,
+    ) -> dict:
+        """Tenta a cadeia de fallback do modo.
+
+        `image_content` é repassado: sem isso, uma leitura de exame que caísse
+        no fallback perdia a imagem no caminho e o modelo secundário respondia
+        sobre um exame que nunca recebeu — com o médico vendo o anexo na tela e
+        nenhum aviso de que ele não chegou.
+        """
         for fallback_model in FALLBACK_MODELS.get(mode, []):
             result = await self.db.execute(
                 select(ModelPricing).where(
@@ -415,7 +432,13 @@ class OrquestradorService:
 
             try:
                 provider = get_provider_by_type(model_info.provider_type)
-                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt, history=history)
+                response = await provider.complete(
+                    fallback_model,
+                    prompt,
+                    system_prompt=system_prompt,
+                    history=history,
+                    image_content=image_content,
+                )
                 return {
                     "text": response.text,
                     "model_id": fallback_model,

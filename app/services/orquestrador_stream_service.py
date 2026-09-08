@@ -332,7 +332,12 @@ class OrquestradorStreamService:
                     logger.warning(f"Stream falhou em {model_id}: {e}. Tentando fallback completo...")
                     is_fallback = True
                     fallback_result = await self._fallback_complete(
-                        db, mode, sanitized_prompt, system_prompt, history=history_messages
+                        db,
+                        mode,
+                        sanitized_prompt,
+                        system_prompt,
+                        history=history_messages,
+                        image_content=image_content,
                     )
                     full_text = fallback_result.get("text", "")
                     tokens_in = fallback_result.get("tokens_in")
@@ -553,15 +558,33 @@ class OrquestradorStreamService:
                 yield _sse("error", {"message": "Erro interno. Tente novamente."})
 
     async def _fallback_complete(
-        self, db, mode: str, prompt: str, system_prompt: str, history: list[dict] | None = None
+        self,
+        db,
+        mode: str,
+        prompt: str,
+        system_prompt: str,
+        history: list[dict] | None = None,
+        image_content: dict | list | None = None,
     ) -> dict:
+        """Cadeia de fallback do modo, quando o streaming do primário falha.
+
+        `image_content` é repassado: sem isso, uma leitura de exame que caísse
+        no fallback perdia a imagem e o modelo secundário respondia sobre um
+        exame que nunca recebeu — sem que o médico soubesse.
+        """
         for fallback_model in FALLBACK_MODELS.get(mode, []):
             model_info = await get_model_pricing(db, fallback_model)
             if not model_info:
                 continue
             try:
                 provider = get_provider_by_type(model_info.provider_type)
-                response = await provider.complete(fallback_model, prompt, system_prompt=system_prompt, history=history)
+                response = await provider.complete(
+                    fallback_model,
+                    prompt,
+                    system_prompt=system_prompt,
+                    history=history,
+                    image_content=image_content,
+                )
                 return {
                     "text": response.text,
                     "model_id": fallback_model,

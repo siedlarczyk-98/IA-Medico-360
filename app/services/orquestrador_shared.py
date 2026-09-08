@@ -24,7 +24,7 @@ from app.models.models import Conversation, FileExtraction, Interaction
 from app.services.context_budget import (
     DEFAULT_HISTORY_TOKEN_BUDGET,
     Turn,
-    fit_turns_to_budget,
+    fit_turns_with_attachment_budget,
     turns_to_messages,
 )
 from app.services.conversation_history import load_history
@@ -95,7 +95,9 @@ async def load_context_messages(
         # comportamento certo (o caso atual vale mais que casos vizinhos).
         turns = [Turn(role="user", content=bloco_pasta), *turns]
 
-    return turns_to_messages(fit_turns_to_budget(turns, budget_tokens))
+    # Orçamentos separados: o texto de um exame anexado não disputa espaço com
+    # a conversa. Ver `context_budget.fit_turns_with_attachment_budget`.
+    return turns_to_messages(fit_turns_with_attachment_budget(turns, budget_tokens))
 
 
 async def ensure_conversation(
@@ -309,9 +311,16 @@ async def decidir_rota(
     3. ...EXCETO `PHARMA_CHECK`, que ainda passa pela triagem para descobrir o
        sub-modo (bula, receita, genérico, interação). O gate de confiança baixa
        é ignorado nesse caso: o usuário já escolheu o modo.
-    4. Confiança abaixo do piso vira pedido de reformulação.
+    4. Confiança abaixo do piso vira pedido de reformulação — MENOS quando há
+       anexo, porque aí a informação que falta veio no arquivo, não no texto.
     5. Sub-modos de pharma com confiança insuficiente caem para busca rápida —
        responder bula errada é pior que responder de forma genérica.
+
+    A promoção por anexo acontece DUAS vezes de propósito: antes da triagem,
+    para o modo explícito, e de novo depois dela, para o modo que a triagem
+    escolheu. Só a primeira existia, e por isso uma mensagem sem modo explícito
+    ("e esse aqui?" com um exame junto) escapava — a triagem devolvia
+    QUICK_SEARCH e o exame ia para um modelo sem visão.
     """
     mode = upgrade_mode_for_attachments(mode, tem_anexos)
     explicit_pharma = mode == "PHARMA_CHECK"
@@ -323,7 +332,15 @@ async def decidir_rota(
     mode = resultado["mode"]
     confidence = resultado["confidence"]
 
-    if confidence < CONFIANCA_MINIMA_TRIAGEM and not explicit_pharma:
+    # A triagem classificou o TEXTO sozinho, sem saber do anexo. Promove de
+    # novo com essa informação antes de qualquer gate.
+    mode = upgrade_mode_for_attachments(mode, tem_anexos)
+
+    # Com anexo, confiança baixa não é sinal de pergunta mal formulada: é o
+    # texto sendo curto porque o conteúdo está no arquivo. Mandar o médico
+    # reescrever "e esse aqui?" depois de ele anexar o exame é pedir que ele
+    # repita o que já enviou.
+    if confidence < CONFIANCA_MINIMA_TRIAGEM and not explicit_pharma and not tem_anexos:
         return DecisaoDeRota(mode=mode, confidence=confidence, precisa_refinar=True)
 
     if mode == "PHARMA_CHECK" and confidence < PHARMA_CHECK_MIN_CONFIDENCE:

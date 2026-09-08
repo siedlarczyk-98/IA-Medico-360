@@ -222,3 +222,134 @@ def test_o_limiar_de_confianca_existe_num_lugar_so():
         assert "0.7" not in caminho.read_text(encoding="utf-8"), (
             f"{fonte} voltou a ter o limiar escrito à mão"
         )
+
+
+# ── Anexo no meio da conversa ────────────────────────────────────────────────
+# O médico está discutindo um caso, anexa um exame e escreve "e esse aqui?".
+# Sem modo explícito na UI, a triagem lê quatro palavras SEM o anexo e sem o
+# histórico, e devolve QUICK_SEARCH — que roteia para um modelo SEM VISÃO.
+# O exame nunca chega ao modelo, e o médico recebe uma resposta confiante
+# construída sobre um exame que ele viu na tela e o modelo não.
+
+
+@pytest.mark.asyncio
+async def test_anexo_sem_modo_explicito_nao_cai_em_modelo_cego(monkeypatch):
+    """O caso real: anexo no meio da conversa, sem modo escolhido na UI.
+
+    A triagem classifica o texto curto como busca rápida. Sem tratamento, o
+    roteamento manda um exame para um modelo que não enxerga imagem.
+    """
+    async def _triagem(_):
+        return {"mode": "QUICK_SEARCH", "confidence": 0.95}
+
+    monkeypatch.setattr(orquestrador_shared, "triage", _triagem)
+    decisao = await orquestrador_shared.decidir_rota("e esse aqui?", None, True)
+
+    assert decisao.mode == "EXAM_REVIEW", (
+        "anexo sem modo explícito caiu em "
+        f"{decisao.mode}, que não garante visão"
+    )
+
+
+@pytest.mark.asyncio
+async def test_anexo_com_confianca_baixa_nao_pede_reformulacao(monkeypatch):
+    """"E esse aqui?" é vago como TEXTO, mas o anexo é a informação que falta.
+
+    Pedir reformulação de uma mensagem que já veio com um exame anexado manda
+    o médico reescrever uma pergunta que estava completa.
+    """
+    async def _triagem(_):
+        return {"mode": "CLINICAL_REASONING", "confidence": 0.3}
+
+    monkeypatch.setattr(orquestrador_shared, "triage", _triagem)
+    decisao = await orquestrador_shared.decidir_rota("e esse aqui?", None, True)
+
+    assert decisao.precisa_refinar is False
+    assert decisao.mode == "EXAM_REVIEW"
+
+
+# ── O exame sobrevive ao fallback ────────────────────────────────────────────
+# `MODES_REQUIRING_VISION` existia com um comentário afirmando que cair num
+# modelo cego "devolveria uma leitura de exame feita sem o exame" — mas a
+# constante não era lida por ninguém, e as duas cadeias de fallback chamavam
+# `provider.complete` SEM `image_content`. A garantia estava documentada e não
+# implementada: quando o modelo primário falhava, a imagem ficava para trás e o
+# secundário respondia sobre um exame que nunca viu.
+
+
+class _ProviderQueCapturaImagem:
+    """Registra o que recebeu, para provar que a imagem atravessou o fallback."""
+
+    def __init__(self):
+        self.image_content = "NUNCA CHAMADO"
+
+    async def complete(self, model_id, prompt, **kwargs):
+        self.image_content = kwargs.get("image_content")
+
+        class _R:
+            text = "ok"
+            tokens_in = 1
+            tokens_out = 1
+        return _R()
+
+
+IMAGEM = [{"base64": "x", "media_type": "image/png", "file_name": "tc.png"}]
+
+
+@pytest.mark.asyncio
+async def test_fallback_do_query_nao_perde_a_imagem(monkeypatch):
+    capturador = _ProviderQueCapturaImagem()
+
+    class _Pricing:
+        provider_type = "anthropic"
+
+    async def _execute(_query):
+        class _Res:
+            def scalar_one_or_none(self):
+                return _Pricing()
+        return _Res()
+
+    monkeypatch.setattr(
+        orquestrador_service, "get_provider_by_type", lambda _t: capturador
+    )
+
+    servico = orquestrador_service.OrquestradorService.__new__(
+        orquestrador_service.OrquestradorService
+    )
+    servico.db = type("DB", (), {"execute": staticmethod(_execute)})()
+
+    await servico._try_fallback(
+        "EXAM_REVIEW", "leia o exame", "sys", "erro original", image_content=IMAGEM
+    )
+
+    assert capturador.image_content == IMAGEM, (
+        "o fallback do /query chamou o modelo secundário sem a imagem"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fallback_do_stream_nao_perde_a_imagem(monkeypatch):
+    capturador = _ProviderQueCapturaImagem()
+
+    class _Pricing:
+        provider_type = "anthropic"
+
+    async def _pricing(_db, _model):
+        return _Pricing()
+
+    monkeypatch.setattr(orquestrador_stream_service, "get_model_pricing", _pricing)
+    monkeypatch.setattr(
+        orquestrador_stream_service, "get_provider_by_type", lambda _t: capturador
+    )
+
+    servico = orquestrador_stream_service.OrquestradorStreamService.__new__(
+        orquestrador_stream_service.OrquestradorStreamService
+    )
+
+    await servico._fallback_complete(
+        None, "EXAM_REVIEW", "leia o exame", "sys", image_content=IMAGEM
+    )
+
+    assert capturador.image_content == IMAGEM, (
+        "o fallback do /stream chamou o modelo secundário sem a imagem"
+    )

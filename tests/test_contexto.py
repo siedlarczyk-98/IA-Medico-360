@@ -11,15 +11,19 @@ Três garantias, nesta ordem de importância:
 3. O corte por tokens preserva o que é recente.
 """
 
+import pathlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.models.models import Interaction, InteractionResponse
 from app.services.context_budget import (
+    DEFAULT_ATTACHMENT_TOKEN_BUDGET,
     Turn,
     estimate_tokens,
     fit_turns_to_budget,
+    fit_turns_with_attachment_budget,
+    separar_anexo,
     truncate_to_tokens,
     turns_to_messages,
 )
@@ -262,3 +266,157 @@ def test_estimativa_bate_com_caso_real_de_texto_clinico_denso():
     assert 0.7 <= estimado / real <= 1.5, (
         f"estimou {estimado} para um texto que custou {real} tokens de verdade"
     )
+
+
+# ── Orçamento separado para anexos ───────────────────────────────────────────
+# Com um orçamento único, o texto de um exame anexado disputava espaço com a
+# conversa e ganhava por tamanho: um laboratorial completo (~4700 tokens) comia
+# 78% do orçamento de 6000 e expulsava a discussão do caso. O médico anexava um
+# exame e, três mensagens depois, o modelo tinha o exame e havia esquecido o
+# caso — a mesma dor de "ele não entende contexto", pelo outro lado.
+
+SEPARADOR = "\n\n---\n\n"
+
+
+def _turno_com_anexo(texto_anexo: str, pergunta: str) -> Turn:
+    return Turn(role="user", content=f"[Arquivo: exame.pdf]\n{texto_anexo}{SEPARADOR}{pergunta}")
+
+
+def test_separar_anexo_divide_no_marcador_do_extrator():
+    anexo, pergunta = separar_anexo("[Arquivo: lab.pdf]\nHb 9.2" + SEPARADOR + "e esse aqui?")
+    assert anexo == "[Arquivo: lab.pdf]\nHb 9.2"
+    assert pergunta == "e esse aqui?"
+
+
+def test_separar_anexo_deixa_intacta_a_mensagem_sem_anexo():
+    """O caso comum: a maioria das mensagens não tem anexo nenhum."""
+    anexo, pergunta = separar_anexo("qual a dose de amoxicilina?")
+    assert anexo == ""
+    assert pergunta == "qual a dose de amoxicilina?"
+
+
+def test_separar_anexo_nao_se_confunde_com_texto_que_so_parece_anexo():
+    """Sem o separador do extrator, não é um anexo — é o médico escrevendo."""
+    texto = "[Arquivo: x.pdf] foi o que o paciente trouxe, mas não consegui abrir"
+    anexo, pergunta = separar_anexo(texto)
+    assert anexo == ""
+    assert pergunta == texto
+
+
+def test_o_formato_do_anexo_casa_com_o_extrator():
+    """Trava os dois lados do acoplamento.
+
+    A separação depende do formato que `resolve_files_context` escreve. Se
+    aquele formato mudar, o anexo passa a ser contado como conversa e o
+    orçamento volta a se comportar como o antigo — silenciosamente. Aqui a
+    mudança falha no teste, não em produção.
+    """
+    from app.services import file_extractor_service
+
+    fonte = pathlib.Path(file_extractor_service.__file__).read_text(encoding="utf-8")
+    for marcador in ("[Arquivo: ", "[Imagem anexada: ", "[Descrição da imagem "):
+        assert marcador in fonte, (
+            f"o extrator não escreve mais {marcador!r}; "
+            "atualize _MARCADORES_DE_ANEXO em context_budget"
+        )
+    assert '"\\n\\n".join([*blocos_texto, "---", prompt])' in fonte, (
+        "o extrator mudou como junta anexo e pergunta; "
+        "atualize _SEPARADOR_ANEXO em context_budget"
+    )
+
+
+def test_anexo_grande_nao_expulsa_mais_a_conversa():
+    """O ganho central: com orçamentos separados, cabe exame E discussão."""
+    lab = "Hemograma completo com valores. " * 470  # ~4700 tokens
+    conversa = [
+        Turn(role="user" if i % 2 == 0 else "assistant", content=f"Discussão do caso, parte {i}. " * 120)
+        for i in range(20)
+    ]
+    turns = [*conversa, _turno_com_anexo(lab, "e esse aqui?")]
+
+    antigo = fit_turns_to_budget(turns, 6000)
+    novo = fit_turns_with_attachment_budget(turns, 6000, 12000)
+
+    assert len(novo) > len(antigo), (
+        "a separação de orçamentos deveria preservar MAIS turnos de conversa"
+    )
+    assert any("Hemograma" in t.content for t in novo), "o exame se perdeu"
+
+
+def test_anexo_que_passava_no_orcamento_unico_continua_passando():
+    """Piso do orçamento de anexos — trava uma regressão real já cometida.
+
+    O primeiro valor tentado para `DEFAULT_ATTACHMENT_TOKEN_BUDGET` foi 4000, e
+    ele DERRUBAVA um laboratorial completo (~4700 tokens) que passava folgado
+    pelo orçamento único de 6000. O sintoma seria "o modelo parou de ver meu
+    exame" — exatamente o bug que esta separação veio consertar.
+    """
+    lab = "Hemograma completo com valores. " * 470
+    turns = [
+        Turn(role="user", content="Paciente 62a, dispneia progressiva"),
+        Turn(role="assistant", content="Considere ICC, TEP, DPOC."),
+        _turno_com_anexo(lab, "e esse aqui?"),
+    ]
+
+    resultado = fit_turns_with_attachment_budget(turns)
+
+    assert any("Hemograma" in t.content for t in resultado), (
+        f"anexo de {estimate_tokens(lab)} tokens foi descartado; "
+        f"DEFAULT_ATTACHMENT_TOKEN_BUDGET={DEFAULT_ATTACHMENT_TOKEN_BUDGET} "
+        "está abaixo do que o orçamento único já aceitava"
+    )
+
+
+def test_anexo_que_nao_cabe_vira_aviso_e_nao_some():
+    """Um anexo omitido em silêncio faz o modelo responder como se ele nunca
+    tivesse existido — enquanto o médico continua vendo o arquivo na tela."""
+    enorme = "valor laboratorial detalhado. " * 3000
+    turns = [_turno_com_anexo(enorme, "e esse aqui?")]
+
+    resultado = fit_turns_with_attachment_budget(turns, 6000, 1000)
+
+    assert len(resultado) == 1
+    assert "omitido do contexto" in resultado[0].content
+    assert "e esse aqui?" in resultado[0].content, "a pergunta do médico se perdeu junto"
+
+
+def test_anexo_recente_sobrevive_ao_antigo_quando_o_espaco_acaba():
+    """Quando o espaço acaba, quem se perde é o exame mais velho."""
+    grande = "conteudo do exame. " * 1200  # ~7000 tokens cada
+    turns = [
+        _turno_com_anexo(grande, "primeiro exame"),
+        Turn(role="assistant", content="analisado."),
+        _turno_com_anexo(grande, "segundo exame"),
+    ]
+
+    resultado = fit_turns_with_attachment_budget(turns, 6000, 12000)
+
+    texto_primeiro = next(t.content for t in resultado if "primeiro exame" in t.content)
+    texto_segundo = next(t.content for t in resultado if "segundo exame" in t.content)
+    assert "omitido do contexto" in texto_primeiro, "o exame ANTIGO deveria ser o descartado"
+    assert "conteudo do exame" in texto_segundo, "o exame RECENTE deveria ser preservado"
+
+
+def test_pergunta_do_medico_nunca_e_descartada_junto_com_o_anexo():
+    """A pergunta é barata e é o que dá sentido ao turno."""
+    enorme = "linha de laudo. " * 4000
+    turns = [
+        Turn(role="user", content="caso inicial"),
+        Turn(role="assistant", content="resposta"),
+        _turno_com_anexo(enorme, "compare com o anterior por favor"),
+    ]
+
+    resultado = fit_turns_with_attachment_budget(turns, 6000, 500)
+
+    assert any("compare com o anterior por favor" in t.content for t in resultado)
+
+
+def test_conversa_sem_anexo_nao_muda_de_comportamento():
+    """A separação não pode alterar o caso comum, que é a maioria das conversas."""
+    turns = [
+        Turn(role="user", content="pergunta " * 50),
+        Turn(role="assistant", content="resposta " * 50),
+        Turn(role="user", content="outra pergunta " * 50),
+    ]
+
+    assert fit_turns_with_attachment_budget(turns, 6000) == fit_turns_to_budget(turns, 6000)
