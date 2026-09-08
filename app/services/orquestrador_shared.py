@@ -29,7 +29,7 @@ from app.services.context_budget import (
 )
 from app.services.conversation_history import load_history
 from app.services.folder_context_service import contexto_da_pasta, evolucao_da_pasta
-from app.services.integracoes.ai_providers import OpenAIProvider
+from app.services.integracoes.ai_providers import get_provider_by_type
 from app.services.orquestrador_modes import (
     MODOS_NAO_TRIADOS,
     PHARMA_CHECK_MIN_CONFIDENCE,
@@ -41,7 +41,18 @@ from app.services.triage_service import triage
 
 logger = logging.getLogger(__name__)
 
-_clarification_provider = OpenAIProvider()
+# Via `get_provider_by_type`, e NÃO `OpenAIProvider()` direto.
+#
+# Este era o único provider do projeto instanciado fora do registry — e por
+# isso o único que escapava do `DlpEnforcingProvider`. O verificador de
+# clarificação recebe o histórico da conversa E o bloco de evolução da pasta
+# (ver `_prompt_com_contexto`), ou seja, o texto mais sensível do produto: ele
+# saía para a OpenAI sem passar pelo DLP.
+#
+# `tests/test_dlp_enforcement.py` varre o `PROVIDER_TYPE_REGISTRY` e garante
+# que todo provider DE LÁ sai embrulhado — mas esta instância nunca entrava no
+# registry, então o teste passava com o furo aberto.
+_clarification_provider = get_provider_by_type("openai")
 _CLARIFICATION_MODEL = "gpt-5.4-nano"
 
 
@@ -119,6 +130,39 @@ async def load_context_messages(
         mensagens = [{"role": "user", "content": bloco_evolucao}, *mensagens]
 
     return mensagens
+
+
+# Marcador de contexto de paciente numa mensagem do histórico montado.
+#
+# `load_context_messages` devolve uma lista de dicts pronta para o provider, e
+# quem chama não tem como saber se ali dentro há material específico de um
+# paciente ou só a conversa. Este prefixo é o sinal — os dois blocos que
+# carregam dado de paciente (`formatar_bloco` e `formatar_bloco_evolucao`)
+# começam com "[", e são os únicos turnos sintéticos da lista.
+def contexto_tem_dado_de_paciente(mensagens: list[dict]) -> bool:
+    """Diz se o contexto montado carrega material específico de um paciente.
+
+    Serve para decidir CACHEABILIDADE, e é por isso que erra para o lado
+    seguro: qualquer bloco injetado conta.
+
+    O problema que isto resolve: a chave do cache semântico é
+    `(modo, prompt_sanitizado)` — sem usuário, sem pasta, sem histórico. Mas a
+    RESPOSTA é gerada com a evolução do paciente e os trechos da pasta
+    injetados. "Qual anti-hipertensivo escolher?" dentro da pasta de um
+    paciente com DRC produz uma conduta calibrada para aquela função renal; a
+    mesma pergunta de outro médico daria HIT e devolveria aquela conduta.
+
+    São dois danos ao mesmo tempo: vazamento de dado clínico de terceiro, e
+    risco clínico direto — uma recomendação derivada de um paciente que não é
+    o da pergunta.
+
+    O guardrail de cacheabilidade que já existia não cobre isto: ele avalia
+    apenas o TEXTO da pergunta, que por construção não contém o contexto.
+    """
+    return any(
+        m.get("role") == "user" and str(m.get("content", "")).lstrip().startswith("[")
+        for m in mensagens
+    )
 
 
 async def ensure_conversation(

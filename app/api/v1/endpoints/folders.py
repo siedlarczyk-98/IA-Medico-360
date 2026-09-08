@@ -9,23 +9,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import Conversation, Folder, User
 from app.schemas.conversations import FolderOut
 
 router = APIRouter(prefix="/folders", tags=["folders"])
 
 
-def _limpar_evolucao(texto: str | None) -> str | None:
-    """Normaliza o texto de evolução: vazio ou só espaço vira `None`.
+async def _limpar_evolucao(texto: str | None) -> str | None:
+    """Normaliza e SANITIZA o texto de evolução antes de gravar.
 
-    Guardar `""` e `None` como coisas diferentes não teria sentido para quem
-    lê, e faria `formatar_bloco_evolucao` receber dois valores para o mesmo
-    estado "não há evolução".
+    Vazio ou só espaço vira `None`: guardar `""` e `None` como coisas
+    diferentes não teria sentido para quem lê, e faria
+    `formatar_bloco_evolucao` receber dois valores para o mesmo estado.
+
+    O DLP roda AQUI, na escrita, e não na leitura, por dois motivos:
+
+    1. O dado identificável deixa de existir no banco. Sanitizar na leitura
+       deixaria o CPF do paciente gravado em `folders.clinical_context`
+       indefinidamente, esperando o próximo caminho de leitura que esquecesse
+       de aplicar o filtro.
+    2. Custo: uma vez por edição, em vez de uma vez por mensagem — e este
+       campo é injetado em TODA mensagem da pasta.
+
+    Este campo era o único texto clínico que entrava no banco sem passar pelo
+    DLP. O `DlpEnforcingProvider` salvava os outros caminhos na saída para os
+    provedores, mas `check_clarification` escapava dele (ver
+    `orquestrador_shared`), e o dado gravado seguia identificável.
     """
     if texto is None:
         return None
     limpo = texto.strip()
-    return limpo or None
+    if not limpo:
+        return None
+    return (await sanitize_prompt_async(limpo)).sanitized_text
 
 
 # Teto do texto de evolução aceito pela API, em caracteres.
@@ -103,7 +120,7 @@ async def create_folder(
         user_id=current_user.id,
         name=body.name.strip(),
         folder_kind=body.folder_kind,
-        clinical_context=_limpar_evolucao(body.clinical_context),
+        clinical_context=await _limpar_evolucao(body.clinical_context),
     )
     db.add(folder)
     await db.flush()
@@ -130,7 +147,7 @@ async def rename_folder(
     folder.name = body.name.strip()
     # Ausente = não mexa. String vazia = limpar. Ver `FolderRename`.
     if body.clinical_context is not None:
-        folder.clinical_context = _limpar_evolucao(body.clinical_context)
+        folder.clinical_context = await _limpar_evolucao(body.clinical_context)
     if body.folder_kind is not None:
         folder.folder_kind = body.folder_kind
     await db.commit()

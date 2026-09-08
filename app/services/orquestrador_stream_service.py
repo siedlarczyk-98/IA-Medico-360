@@ -45,6 +45,7 @@ from app.services.orquestrador_modes import (
 from app.services.orquestrador_shared import (
     MENSAGEM_PRECISA_REFINAR,
     check_clarification,
+    contexto_tem_dado_de_paciente,
     decidir_rota,
     ensure_conversation,
     link_attachments,
@@ -217,7 +218,12 @@ class OrquestradorStreamService:
                 # 6. Cache lookup
                 _cache_normalized: str = ""
                 _cache_embedding: list = []
-                if mode in MODOS_CACHEAVEIS:
+                # Conversa com material de paciente no contexto NÃO usa cache —
+                # nem lê, nem grava. Ver `contexto_tem_dado_de_paciente`: a
+                # chave do cache é `(modo, prompt)`, mas a resposta foi gerada
+                # com a evolução da pasta junto.
+                pode_cachear = mode in MODOS_CACHEAVEIS and not contexto_tem_dado_de_paciente(history_messages)
+                if pode_cachear:
                     cached, _cache_normalized, _cache_embedding = await get_cached_response(
                         db, mode, sanitized_prompt
                     )
@@ -483,9 +489,15 @@ class OrquestradorStreamService:
                     "pubmed_newer_found": len(pubmed.newer_guidelines_found),
                 }
 
-                # Store no cache
+                # Store no cache.
+                #
+                # `pode_cachear` no lugar do literal de modos que estava aqui:
+                # a lista duplicada divergiria de `MODOS_CACHEAVEIS`, e o gate
+                # de contexto de paciente precisa valer na GRAVAÇÃO também —
+                # senão a resposta condicionada entra no cache e vaza na
+                # próxima leitura de outro médico.
                 if (
-                    mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}
+                    pode_cachear
                     and not is_fallback
                     and _cache_embedding
                     and _cache_normalized

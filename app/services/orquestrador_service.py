@@ -40,6 +40,7 @@ from app.services.orquestrador_modes import (
 from app.services.orquestrador_shared import (
     MENSAGEM_PRECISA_REFINAR,
     check_clarification,
+    contexto_tem_dado_de_paciente,
     decidir_rota,
     ensure_conversation,
     link_attachments,
@@ -47,7 +48,7 @@ from app.services.orquestrador_shared import (
     resolve_clarification_prompt,
 )
 from app.services.pricing import calcular_custo_ferramentas, calculate_cost
-from app.services.response_metadata import build_response_metadata
+from app.services.response_metadata import build_metadata_from_cached, build_response_metadata
 from app.services.semantic_cache_service import get_cached_response, store_response
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.triage_service import is_off_topic_greeting
@@ -162,12 +163,70 @@ class OrquestradorService:
             # 5. Cache semântico (apenas modos clínicos)
             _cache_normalized: str = ""
             _cache_embedding: list = []
-            if mode in MODOS_CACHEAVEIS:
+            # Conversa com material de paciente no contexto NÃO usa cache — nem
+            # lê, nem grava. A chave é `(modo, prompt)`, mas a resposta foi
+            # gerada com a evolução da pasta junto: servi-la a outro médico
+            # entregaria conduta calibrada para um paciente que não é o dele.
+            # Ver `contexto_tem_dado_de_paciente`.
+            pode_cachear = mode in MODOS_CACHEAVEIS and not contexto_tem_dado_de_paciente(history_messages)
+            if pode_cachear:
                 cached, _cache_normalized, _cache_embedding = await get_cached_response(
                     self.db, mode, sanitized_prompt
                 )
                 if cached is not None:
-                    return {**cached, "cache_hit": True}
+                    # A resposta do cache TAMBÉM entra no histórico, e os ids
+                    # devolvidos precisam ser os DESTE usuário.
+                    #
+                    # Antes este caminho retornava o dicionário do cache cru.
+                    # Como o cache é global por modo, `conversation_id` e
+                    # `interaction_id` de lá são da interação que o POPULOU —
+                    # de outro médico. O cliente gravava esse id e o mandava na
+                    # mensagem seguinte; `ensure_conversation` filtra por
+                    # `user_id` e criava outra conversa, então não havia IDOR,
+                    # mas a mensagem saía do histórico do médico e ele ficava
+                    # com um identificador de outro titular.
+                    #
+                    # O `/stream` já corrigia isso desde sempre. Os dois
+                    # caminhos tinham divergido — de novo.
+                    conv_id = await ensure_conversation(
+                        self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id
+                    )
+                    cached_interaction = Interaction(
+                        conversation_id=conv_id,
+                        user_id=self.user_id,
+                        company_id=self.company_id,
+                        feature="ORQUESTRADOR",
+                        mode=mode,
+                        prompt_text=sanitized_prompt,
+                        prompt_sanitized=dlp_result.was_sanitized,
+                        triage_confidence=confidence,
+                        triage_category=mode,
+                        # Sem isto, `vigilancia_service.medir_cache_semantico`
+                        # ficava cega para o `/query`: ela conta hits por
+                        # `Interaction.cache_hit`, e este caminho não criava
+                        # Interaction nenhuma.
+                        cache_hit=True,
+                        confidence_score=cached.get("confidence_score"),
+                        specialty_detected=cached.get("specialty_detected"),
+                        topic_detected=cached.get("topic_detected"),
+                        started_at=datetime.now(UTC),
+                        completed_at=datetime.now(UTC),
+                    )
+                    self.db.add(cached_interaction)
+                    await self.db.flush()
+                    self.db.add(InteractionResponse(
+                        interaction_id=cached_interaction.id,
+                        model_used=cached.get("model_used") or "cache",
+                        response_text=cached.get("response_text") or "",
+                        cost_usd=Decimal("0"),
+                        extra_metadata=build_metadata_from_cached(cached),
+                    ))
+                    return {
+                        **cached,
+                        "cache_hit": True,
+                        "conversation_id": str(conv_id),
+                        "interaction_id": str(cached_interaction.id),
+                    }
 
             # 4. Conversation
             conv_id = await ensure_conversation(self.db, self.user_id, conversation_id, sanitized_prompt, folder_id=folder_id)
@@ -353,8 +412,12 @@ class OrquestradorService:
             }
 
             # 12. Armazenar no cache semântico (apenas se não fallback e temos embedding)
+            # `pode_cachear` no lugar do literal que estava aqui: a lista de
+            # modos duplicada divergiria de `MODOS_CACHEAVEIS`, e o gate de
+            # contexto de paciente precisa valer na GRAVAÇÃO também — senão a
+            # resposta condicionada entra no cache e vaza na próxima leitura.
             if (
-                mode in {"QUICK_SEARCH", "CLINICAL_REASONING"}
+                pode_cachear
                 and not agent_response.get("is_fallback")
                 and _cache_embedding
                 and _cache_normalized

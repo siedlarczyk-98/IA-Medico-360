@@ -113,3 +113,80 @@ async def test_sanitizacao_e_idempotente():
     await provider.complete("modelo-x", uma_vez)
 
     assert espiao.prompt_recebido == uma_vez
+
+
+# ── O furo que os testes acima não pegavam ───────────────────────────────────
+# Os testes deste arquivo varrem o `PROVIDER_TYPE_REGISTRY` e garantem que todo
+# provider DE LÁ sai embrulhado pelo DLP. Mas `orquestrador_shared` instanciava
+# `OpenAIProvider()` DIRETAMENTE para o verificador de clarificação — uma
+# instância que nunca passava pelo registry, e portanto nunca pelo wrapper.
+#
+# O verificador recebe o histórico da conversa E o bloco de evolução da pasta.
+# Ou seja: o texto mais sensível do produto saía para a OpenAI em claro,
+# enquanto a suíte de DLP passava inteira.
+
+
+def test_nenhum_provider_e_instanciado_fora_do_registry():
+    """Instanciar um provider direto contorna o `DlpEnforcingProvider`.
+
+    A única construção legítima é dentro do próprio `ai_providers`, que é onde
+    o registry é montado. Qualquer outro módulo do `app/` que faça
+    `XProvider()` está abrindo um caminho de saída sem sanitização.
+    """
+    import pathlib
+    import re
+
+    raiz = pathlib.Path(__file__).resolve().parents[1] / "app"
+    padrao = re.compile(r"\b(\w+Provider)\s*\(\s*\)")
+
+    infratores: list[str] = []
+    for arquivo in raiz.rglob("*.py"):
+        # `ai_providers` é onde o registry vive: as instâncias de lá são as
+        # que o `get_provider_by_type` embrulha.
+        if arquivo.name == "ai_providers.py":
+            continue
+        for n, linha in enumerate(arquivo.read_text(encoding="utf-8").splitlines(), 1):
+            if linha.lstrip().startswith("#"):
+                continue
+            for m in padrao.finditer(linha):
+                nome = m.group(1)
+                if nome == "DlpEnforcingProvider":
+                    continue  # é o wrapper, não um provider de saída
+                infratores.append(f"{arquivo.relative_to(raiz)}:{n} — {nome}()")
+
+    assert not infratores, (
+        "provider instanciado fora do registry (escapa do DLP): "
+        + "; ".join(infratores)
+        + ". Use get_provider_by_type()."
+    )
+
+
+@pytest.mark.asyncio
+async def test_verificador_de_clarificacao_passa_pelo_dlp():
+    """O caminho concreto que estava aberto."""
+    from app.services import orquestrador_shared
+
+    assert isinstance(
+        orquestrador_shared._clarification_provider, DlpEnforcingProvider
+    ), "o verificador de clarificação voltou a falar direto com o provedor"
+
+
+@pytest.mark.asyncio
+async def test_evolucao_da_pasta_e_sanitizada_antes_de_gravar():
+    """`clinical_context` era o único texto clínico que entrava no banco cru.
+
+    Sanitizar na ESCRITA, e não na leitura, faz o dado identificável deixar de
+    existir no banco — em vez de ficar lá esperando o próximo caminho de
+    leitura que esqueça de filtrar.
+    """
+    from app.api.v1.endpoints.folders import _limpar_evolucao
+
+    limpo = await _limpar_evolucao(
+        "Jorge Almeida, CPF 123.456.789-00, 58 anos, HAS em acompanhamento"
+    )
+
+    assert "123.456.789-00" not in limpo
+    assert "Jorge Almeida" not in limpo
+    # O conteúdo clínico precisa sobreviver: sanitizar não é apagar.
+    assert "58 anos" in limpo
+    assert "HAS" in limpo
