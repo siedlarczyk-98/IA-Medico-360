@@ -2,13 +2,21 @@ import type { ReactElement } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { OrchestratorMode } from './InputBar';
 
+// A ordem deste array é a ordem da grade de duas colunas: cada par de itens
+// forma uma linha. Agrupado por natureza da tarefa, não por frequência de uso:
+// as duas perguntas gerais primeiro, depois as duas ferramentas de trabalho
+// (dados e produtividade), e por último as duas especializadas em material
+// clínico concreto — exame anexado e medicamento.
 const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: string }[] = [
+  // Linha 1 — perguntar
   { icon: 'busca',         key: 'QUICK_SEARCH',       title: 'Busca rápida',            desc: 'Pergunte qualquer coisa — posologia, protocolo, critério diagnóstico. Resposta direta, sem elaboração.' },
-  { icon: 'raciocinio',   key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
-  { icon: 'dados',        key: 'DATA_OCEAN',         title: 'Dados do Brasil',         desc: 'Consulta DATASUS, CNES, InfoDengue e IBGE na hora: epidemiologia, leitos e vacinação com a fonte.' },
-  { icon: 'farmaco',      key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Interações, bulas, receituário e genéricos — dados oficiais vindos da ANVISA em tempo real.' },
+  { icon: 'raciocinio',    key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
+  // Linha 2 — trabalhar
+  { icon: 'dados',         key: 'DATA_OCEAN',         title: 'Data Ocean Brasileiro',   desc: 'Dados oficiais brasileiros consultados na hora, com a fonte: saúde, população, economia, clima, educação e mais.' },
   { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
-  { icon: 'exames',       key: 'EXAM_REVIEW',        title: 'Exames',                  desc: 'Anexe laudo, imagem ou resultado laboratorial e discuta os achados — até 5 arquivos por mensagem.' },
+  // Linha 3 — material clínico concreto
+  { icon: 'exames',        key: 'EXAM_REVIEW',        title: 'Exames',                  desc: 'Anexe laudo, imagem ou resultado laboratorial e discuta os achados — até 5 arquivos por mensagem.' },
+  { icon: 'farmaco',       key: 'PHARMA_CHECK',       title: 'Checagem farmacológica',  desc: 'Interações, bulas, receituário e genéricos — dados oficiais vindos da ANVISA em tempo real.' },
 ];
 
 const icons: Record<string, ReactElement> = {
@@ -42,6 +50,13 @@ const icons: Record<string, ReactElement> = {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
       <rect x="2.5" y="3" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
       <path d="M5 6 H11 M5 8.5 H11 M5 11 H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  dados: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <ellipse cx="8" cy="4" rx="5.5" ry="2" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M2.5 4 V12 C2.5 13.1 5 14 8 14 C11 14 13.5 13.1 13.5 12 V4" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M2.5 8 C2.5 9.1 5 10 8 10 C11 10 13.5 9.1 13.5 8" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   ),
 };
