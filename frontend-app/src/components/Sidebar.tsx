@@ -409,6 +409,30 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         >
           <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Nova consulta
         </button>
+
+        {/* Secundário de propósito: criar pasta é ação frequente o bastante
+            para merecer alvo grande, mas abrir uma consulta continua sendo a
+            ação principal — dois botões sólidos disputariam a atenção.
+            Antes isto era um "+" de 11px no cabeçalho PASTAS, que só existia
+            como botão largo enquanto não houvesse nenhuma pasta: a ação
+            encolhia justamente para quem já mostrou que usa o recurso. */}
+        <button
+          onClick={() => setFolderModal('new')}
+          style={{
+            width: '100%', marginTop: 6,
+            background: 'none', color: 'var(--pen)',
+            border: '1px solid var(--line2)', borderRadius: 10, padding: '8px 12px',
+            fontSize: 12.5, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+            <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M8 8 V12 M6 10 H10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          Nova pasta
+        </button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
@@ -416,19 +440,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         {/* Seção de pastas */}
         {folders.length > 0 && (
           <div style={{ marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px' }}>
+            <div style={{ padding: '6px 10px' }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)' }}>
                 Pastas
               </span>
-              <button
-                onClick={() => setFolderModal('new')}
-                title="Nova pasta"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '1px 3px', borderRadius: 4, display: 'flex', alignItems: 'center' }}
-              >
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 3 V13 M3 8 H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
-              </button>
             </div>
 
             {folders.map(folder => (
@@ -451,26 +466,6 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 onDropConv={handleDrop}
               />
             ))}
-          </div>
-        )}
-
-        {/* Botão criar primeira pasta */}
-        {folders.length === 0 && (
-          <div style={{ padding: '0 10px 10px' }}>
-            <button
-              onClick={() => setFolderModal('new')}
-              style={{
-                width: '100%', background: 'none', border: '1px dashed var(--line2)',
-                borderRadius: 7, padding: '6px 10px', fontSize: 11.5,
-                color: 'var(--pen3)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-                <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-                <path d="M8 8 V12 M6 10 H10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              </svg>
-              Nova pasta
-            </button>
           </div>
         )}
 
