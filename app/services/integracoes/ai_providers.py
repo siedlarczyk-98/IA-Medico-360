@@ -10,6 +10,7 @@ continua sendo aplicado por-requisição.
 
 import asyncio
 import json as json_lib
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
 from app.core.telemetry import _set_llm_output, async_llm_span, start_llm_span
 from app.middleware.dlp import sanitize_prompt_async
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -696,20 +698,107 @@ class PerplexityProvider(BaseProvider):
             _set_llm_output(span, result.text, result.tokens_in, result.tokens_out)
             return result
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 15, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
-        # Perplexity não retorna usage no modo streaming — usamos complete() para
-        # garantir contagem de tokens e custo corretos, emitindo o texto em chunks.
+    async def stream(self, model_id: str, prompt: str, timeout: int = 45, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
+        """Streaming REAL, com `usage` pedido explicitamente.
+
+        Antes isto chamava `complete()` e fatiava o texto em pedaços de 20
+        caracteres. O comentário justificava assim: "Perplexity não retorna
+        usage no modo streaming — usamos complete() para garantir contagem de
+        tokens e custo corretos".
+
+        A justificativa deixou de valer: a API é compatível com a da OpenAI e
+        aceita `stream_options: {"include_usage": True}`, que faz o `usage`
+        chegar no último evento. É o mesmo mecanismo que `OpenAIProvider.stream`
+        já usa neste arquivo.
+
+        O que se ganha: QUICK_SEARCH é o modo mais usado da plataforma e o que
+        se chama "busca rápida". Com o fatiamento, o médico não via nada até a
+        Perplexity terminar de buscar e gerar — tipicamente 3 a 15 segundos de
+        tela parada — e só então o texto aparecia de uma vez.
+
+        O que se protege: se o `usage` não vier (mudança de API, erro do
+        provedor), `tokens_in`/`tokens_out` ficam `None` — e é isso que
+        `calculate_cost` já trata como zero. Um custo zerado em silêncio era o
+        risco que a versão antiga evitava, então ele é REGISTRADO em log de
+        aviso, com o modelo, para aparecer no Sentry em vez de sumir.
+        """
+        prompt = self._apply_image_fallback(prompt, image_content)
+        sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
+        client = get_client()
         span = start_llm_span("perplexity", model_id, prompt)
+        full_text: list[str] = []
+        tokens_in = None
+        tokens_out = None
+        citations = None
+
         try:
-            response = await self.complete(model_id, prompt, timeout=45, system_prompt=system_prompt, temperature=temperature, image_content=image_content, max_tokens=max_tokens, history=history)
-            chunk_size = 20
-            text = response.text
-            for i in range(0, len(text), chunk_size):
-                yield StreamToken(delta=text[i:i + chunk_size])
-                await asyncio.sleep(0.015)
-            token = StreamToken(delta="", done=True, tokens_in=response.tokens_in, tokens_out=response.tokens_out, citations=response.citations)
+            async with client.stream(
+                "POST",
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.perplexity_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        *(history or []),
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "search_domain_filter": PERPLEXITY_TRUSTED_DOMAINS,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                },
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    event = json_lib.loads(payload)
+
+                    usage = event.get("usage")
+                    if usage:
+                        tokens_in = usage.get("prompt_tokens")
+                        tokens_out = usage.get("completion_tokens")
+
+                    # As citações chegam em algum evento do meio, não no último.
+                    # Sobrescrever a cada ocorrência mantém a lista mais completa.
+                    if event.get("citations"):
+                        citations = event["citations"]
+
+                    choices = event.get("choices", [])
+                    if choices:
+                        content = choices[0].get("delta", {}).get("content", "")
+                        if content:
+                            full_text.append(content)
+                            yield StreamToken(delta=content)
+
+            if tokens_out is None:
+                # Não interrompe a resposta — o médico já a recebeu. Mas o custo
+                # desta interação vai para o banco como zero, e isso precisa ser
+                # visível em vez de virar buraco silencioso na contabilidade.
+                logger.warning(
+                    "Perplexity não devolveu usage no streaming (modelo %s): "
+                    "o custo desta interação será gravado como zero.",
+                    model_id,
+                )
+
+            token = StreamToken(
+                delta="",
+                done=True,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                citations=citations,
+            )
             if span:
-                _set_llm_output(span, response.text, response.tokens_in, response.tokens_out)
+                _set_llm_output(span, "".join(full_text), tokens_in, tokens_out)
                 span.end()
                 span = None
             yield token
