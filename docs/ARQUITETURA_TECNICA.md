@@ -1,7 +1,7 @@
 # Arquitetura Técnica — Médico 360
 
-> Levantamento estático do código em **2026-09-02** (commit `14496b0`). Referências `arquivo:linha` apontam para a raiz do repositório.
-> Substitui a versão de 2026-08-28 — o que mudou desde então está no §1.
+> Levantamento estático do código em **2026-09-08** (commit `4fd6475`). Referências `arquivo:linha` apontam para a raiz do repositório.
+> Substitui a versão de 2026-09-02 — o que mudou desde então está no §1.
 
 ## 0. Como ler este documento
 
@@ -22,14 +22,64 @@ Documentos irmãos, que este aqui não duplica:
 |---|---|
 | `docs/regras-de-negocio-v2.2.md` | Regras de negócio numeradas (RN-*) |
 | `docs/Calculadoras_Cientificas_Regras_de_Arquitetura_v1.0.md` | Contrato de arquitetura do módulo de calculadoras |
-| `docs/debitos.md` | 14 débitos técnicos, com status e justificativa de cada um |
+| `docs/debitos.md` | 16 débitos técnicos, com status e justificativa de cada um |
 | `docs/runbook.md` | Operação: incidentes, rotação de segredos, backup/restore (com números medidos), retenção |
-| `docs/teste-e2e.md` | Como rodar o E2E das calculadoras |
+| `docs/teste-e2e.md` | Roteiro manual de E2E + como rodar o E2E automatizado com chamada real aos provedores |
 | `README.md` | Setup local |
 
 ---
 
-## 1. O que mudou desde o levantamento anterior (28 de agosto → 2 de setembro)
+## 1. O que mudou desde o levantamento anterior (2 → 8 de setembro)
+
+Vinte commits em um dia, em cinco frentes. As duas primeiras são produto; as três últimas saíram de revisões que encontraram defeitos **abertos em produção**.
+
+### 1.1 Contexto de anexos — o exame no meio da conversa
+
+O médico discutia um caso, anexava um exame e escrevia "e esse aqui?" — e recebia uma resposta confiante construída **sem o exame**. Três causas independentes, com o mesmo sintoma:
+
+1. A triagem só vê o TEXTO. Para "e esse aqui?" ela devolvia `QUICK_SEARCH`, que roteia para `sonar-pro` — **um modelo sem visão**. A promoção para `EXAM_REVIEW` existia, mas rodava só *antes* da triagem, então nunca via o modo que ela escolheu.
+2. O gate de confiança baixa pedia reformulação de uma pergunta que estava completa: o texto é curto porque o conteúdo está no arquivo.
+3. As duas cadeias de fallback chamavam `provider.complete` **sem `image_content`** — quando o primário falhava, a imagem ficava para trás. `MODES_REQUIRING_VISION` documentava essa garantia e não era lida por ninguém.
+
+Junto veio o **orçamento separado para anexos** (§6.2): com teto único de 6000 tokens, um laboratorial completo (~4700) ocupava 78% do espaço e expulsava a discussão do caso.
+
+### 1.2 Pastas com evolução do paciente
+
+`folders.clinical_context` — texto que o médico escreve e que entra **na íntegra em toda mensagem daquela pasta**, e `folders.folder_kind` (`clinical` | `general`), que decide a marcação com que esse texto é injetado. Ver §6.3.
+
+A distinção não é cosmética: o contexto por similaridade que já existia chega ao modelo marcado como *"material de APOIO, pode ser de outro paciente"*. A evolução é o oposto — é o caso atual e é autoritativa. Numa pasta de estudos, porém, anunciá-la como "evolução do paciente" faz o modelo inventar um paciente que não existe.
+
+### 1.3 Modo `DATA_OCEAN` (Maritaca)
+
+Bases de dados públicas brasileiras — DATASUS, CNES, ANVISA, InfoDengue, IBGE — consultadas no momento da pergunta, com a fonte junto. Ver §5.3.
+
+É uma ferramenta **agêntica que roda do lado da Maritaca**: o Sabiá decide quais bases consultar, executa, cruza e devolve só a resposta final. Isso impõe restrições que nenhum outro modo tem — sem streaming, sem fallback, sem cache, sem triagem.
+
+### 1.4 Revisão de segurança — quatro achados corrigidos
+
+Varredura do código inteiro (não só do diff), em quatro frentes paralelas. Injeção/upload e config/frontend saíram limpos. Os quatro achados:
+
+| Achado | Gravidade |
+|---|---|
+| `orquestrador_shared` instanciava `OpenAIProvider()` direto — **o único provider fora do registry**, e portanto o único que escapava do `DlpEnforcingProvider`. O verificador de clarificação mandava histórico e evolução da pasta em claro para a OpenAI. `clinical_context` também não passava por DLP em lugar nenhum | HIGH |
+| O cache semântico servia resposta **condicionada a um paciente**: a chave é `(modo, prompt)`, mas a resposta era gerada com a evolução da pasta injetada | HIGH |
+| O `/query` devolvia `conversation_id` de **outro médico** no cache hit. O `/stream` já corrigia isso, com comentário explicando o risco — a correção nunca foi propagada | HIGH |
+| CSRF em `/uploads/extract`, a única rota multipart do projeto e por isso a única sem preflight CORS | MEDIUM |
+
+### 1.5 Revisão de performance e manutenção
+
+Medição contra o banco de produção, não intuição:
+
+- **Latência real por modo** (§5.4). `CLINICAL_REASONING` tem p50 de 32,8s e p95 de 56,7s. O gargalo é LLM, não banco: as tabelas têm centenas de linhas.
+- **O cache semântico nunca acertou** — 0 hits em 240 interações. A causa não é threshold nem índice: *o que se repete não pode ser cacheado, e o que pode não se repete*. Desligado por flag, com a análise registrada (§6.4, débito 16).
+- **`record_cost` não existia no `/query`** — o quarto bug da família de divergência `/query` ↔ `/stream`. `check_limit` lia um contador que só o `/stream` incrementava, e o limite semanal era inaplicável no caminho de todos os modos PharmaDB.
+- **`DlpEnforcingProvider` anulava o timeout de todos os providers** — declarava `timeout: int = 30` e repassava sempre, sobrescrevendo os 120s do Maritaca e os 45s do Perplexity. Foi o que derrubou a primeira consulta real ao Data Ocean.
+- **`PerplexityProvider` não streamava** — chamava `complete()` e fatiava o texto pronto. O médico esperava 3 a 15 segundos em tela parada no modo mais usado.
+- **Extração para o `shared`**: `pos_processar_interacao` e `registrar_hit_de_cache`. As construções de modelo que estavam duplicadas nos dois serviços (`PubmedValidation`, `InteractionMedication`, a `Interaction` do cache hit) agora existem **num lugar só**, com testes que falham se voltarem.
+
+> **A divergência `/query` ↔ `/stream` é o problema estrutural nº 1 deste projeto.** Quatro bugs distintos vieram dela num único dia. `orquestrador_shared` existe para consolidar o que é comum, e os testes em `tests/test_orquestrador_paridade.py` e `tests/test_cache_paridade.py` travam o que já foi consolidado.
+
+### 1.6 Levantamento anterior (28 de agosto → 2 de setembro)
 
 Duas frentes: o módulo de notícias e a identidade profissional do médico.
 
@@ -99,7 +149,7 @@ flowchart LR
     end
 
     subgraph Externos["Servicos externos"]
-        LLM["Anthropic - OpenAI - Google - Perplexity"]
+        LLM["Anthropic - OpenAI - Google - Perplexity - Maritaca"]
         PHARMA["PharmaDB"]
         PUBMED["PubMed"]
         CURSE["Curseduca (SSO / membros)"]
@@ -492,13 +542,16 @@ flowchart TD
 | `CLINICAL_REASONING` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` | 0.0 |
 | `EXAM_REVIEW` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` (todos com visão) | 0.0 |
 | `PRODUCTIVITY` | `gpt-5.4-nano` | `gemini-2.5-flash` | 0.7 |
+| `DATA_OCEAN` | `sabia-4-thinking` (Maritaca) | **nenhum, de propósito** | 0.0 |
 | `PHARMA_CHECK` / `PHARMA_BULA` / `PHARMA_RECEITA` / `PHARMA_GENERICO` | PharmaDB (sem LLM) | — | — |
 | `OFF_TOPIC` | atalho local | — | — |
 
 Detalhes que não são óbvios:
 
 - **`EXAM_REVIEW` só pode cair em modelo com visão** (`MODES_REQUIRING_VISION`). Rotear para Perplexity entregaria ao médico uma leitura de exame feita sem o exame — baseada só na descrição textual gerada por outro modelo, sem ele saber.
-- **A promoção `CLINICAL_REASONING → EXAM_REVIEW` acontece por anexo, não por triagem** (`upgrade_mode_for_attachments`). A triagem só vê o texto; "o que você acha disso?" com uma tomografia junto e a mesma frase sem anexo pedem modos diferentes. Um modo escolhido explicitamente na interface **nunca** é promovido. Anexar um documento e pedir "resuma isto" continua sendo `PRODUCTIVITY`.
+- **A promoção para `EXAM_REVIEW` acontece por anexo, não por triagem** (`upgrade_mode_for_attachments`), e roda **duas vezes**: antes da triagem, para o modo explícito, e depois dela, para o modo que a triagem escolheu. Só a primeira existia, e por isso "e esse aqui?" com um exame junto escapava — a triagem devolvia `QUICK_SEARCH` e o exame ia para um modelo **sem visão**. `QUICK_SEARCH` também promove, e é o caso mais frequente na prática. Um modo escolhido explicitamente na interface **nunca** é promovido; anexar um documento e pedir "resuma isto" continua sendo `PRODUCTIVITY`.
+- **Com anexo, confiança baixa não pede reformulação.** O texto é curto porque o conteúdo está no arquivo — mandar o médico reescrever "e esse aqui?" é pedir que ele reenvie o que já enviou.
+- **`MODOS_NAO_TRIADOS`**: modos que a triagem nunca pode devolver, só a interface. Hoje contém `DATA_OCEAN` (§5.3). O prompt de triagem nem o lista, mas um LLM pode devolver qualquer string, e `decidir_rota` descarta.
 - **`PHARMA_CHECK` exige confiança ≥ 0.90** (`PHARMA_CHECK_MIN_CONFIDENCE`). Um modo explícito ainda passa pela triagem, para resolver o sub-modo (bula / receita / genérico / interação), mas ignora o gate de confiança.
 - **`ModeEnum` em `app/models/models.py` NÃO é a fonte dos modos** — é resíduo do ERD original (BIZU, SHERLOCK, FARMACIA…), com valores que nunca corresponderam aos modos reais e que nenhum código do orquestrador lê. Mexer nele é mudança de schema, não de serviço.
 - O toggle Rápido/Detalhado só limita o tamanho da resposta (`EFFORT_MAX_TOKENS`: 700 / 4096) — o que reduz tempo de geração e custo de saída.
@@ -507,11 +560,73 @@ Detalhes que não são óbvios:
 
 `app/middleware/dlp.py` + `ner.py` (RN-SEC-001). Mascara antes de qualquer envio externo: nomes com palavra-gatilho → `[PACIENTE]`/`[MÉDICO]` (regex), nomes sem gatilho → `[NOME]` (NER spaCy), CPF/RG/Cartão SUS → `[DOCUMENTO]`, telefone/e-mail → `[CONTATO]`, endereço → `[ENDEREÇO]`.
 
-Não há re-identificação: o placeholder vai ao modelo e volta no texto. Um falso positivo apaga o termo em definitivo — por isso o passo de NER é conservador, e os filtros anti-epônimo em `ner._is_person` existem por medição real. **Não simplifique sem ler a justificativa.** `DlpEnforcingProvider` (`ai_providers.py:721`) é a rede de segurança: envolve o provider e recusa o envio se o texto não passou pela sanitização.
+Não há re-identificação: o placeholder vai ao modelo e volta no texto. Um falso positivo apaga o termo em definitivo — por isso o passo de NER é conservador, e os filtros anti-epônimo em `ner._is_person` existem por medição real. **Não simplifique sem ler a justificativa.** `DlpEnforcingProvider` é a rede de segurança: `get_provider_by_type` envolve **todo** provider nele, e ele sanitiza o prompt e cada mensagem do histórico antes de repassar.
+
+Duas coisas aprendidas em 2026-09-08, ambas corrigidas:
+
+- **A rede tinha exatamente um furo.** `orquestrador_shared` instanciava `OpenAIProvider()` direto para o verificador de clarificação — a única instância fora do registry, e portanto a única sem o wrapper. Ela recebe o histórico da conversa **e o bloco de evolução da pasta**. `tests/test_dlp_enforcement.py` varria o `PROVIDER_TYPE_REGISTRY` e passava inteiro, porque essa instância nunca entrava lá. Hoje um teste varre o **código-fonte** atrás de `XProvider()` fora de `ai_providers.py`.
+- **`folders.clinical_context` era o único texto clínico que entrava no banco sem DLP.** Passa a ser sanitizado **na escrita** (`folders.py`), não na leitura: o dado identificável deixa de existir no banco, em vez de ficar lá esperando o próximo caminho de leitura que esqueça de filtrar.
+
+**O wrapper não decide timeout.** Ele declarava `timeout: int = 30` e repassava sempre — como envolve todos os providers, 30 s virava o timeout efetivo de todos, anulando os 120 s do Maritaca e os 45 s do Perplexity. Foi o que derrubou a primeira consulta ao Data Ocean, com um `httpx.ReadTimeout` cujo `str()` é vazio: o log saiu como `"Stream falhou em sabia-4-thinking: ."`, sem dizer a causa. Hoje `timeout=None` omite a chave e cada provider usa o seu.
 
 O modelo de NER é carregado no boot (`ner.warmup()`), fora do caminho da primeira requisição — custava ~1s ao primeiro usuário.
 
 ---
+
+### 5.3 `DATA_OCEAN` — bases públicas brasileiras (Maritaca)
+
+Modo que consulta dezenas de bases oficiais no momento da pergunta — DATASUS, CNES, ANVISA, InfoDengue, IBGE, e outras não clínicas — devolvendo números com a fonte junto. Atendido pelo Sabiá (`sabia-4-thinking`) com a flag `data_ocean`.
+
+**O que ele é, do ponto de vista desta arquitetura:** uma flag no corpo da requisição que liga um **fluxo agêntico do lado da Maritaca**. O modelo decide quais bases consultar, escreve e executa as consultas, cruza fontes e devolve só a mensagem final. Nada disso roda aqui, e nada disso é observável daqui.
+
+Quatro restrições que nenhum outro modo tem, todas consequência disso:
+
+| Restrição | Por quê |
+|---|---|
+| **Sem streaming** | `stream: true` com ferramenta integrada devolve HTTP 400. `MaritacaProvider.stream()` é simulado a partir de `complete()` — mesmo caminho que o Perplexity usou até 2026-09-08, por outro motivo |
+| **Sem fallback** | Nenhum outro modelo consulta essas bases. Cair para o Claude devolveria uma resposta fluente, construída da memória de treino, com números possivelmente inventados e **a mesma aparência** de uma consulta real ao DATASUS. Falhar visivelmente é melhor |
+| **Sem cache** | Alerta epidemiológico, leito livre e cobertura vacinal mudam por dia. Servir do cache entregaria número velho com cara de atual |
+| **Sem triagem** | É lento e cobrado por uso de ferramenta; só o médico o aciona (`MODOS_NAO_TRIADOS`) |
+
+**Custo — a diferença é de ordem de grandeza.** `data_ocean: true` liga junto `web_search` e `code_execution`, e as três são cobradas por **uso**, não por token: GB processados, páginas lidas, minutos de execução. A API reporta isso em `usage.tool_execution_details`, que o projeto guarda cru em `InteractionResponse.extra_metadata` e converte em `pricing.calcular_custo_ferramentas`.
+
+Medição da primeira consulta real em produção (2026-09-08):
+
+| | |
+|---|---|
+| Tempo | 97,9 s |
+| Tokens de entrada | 147 862 |
+| Dados processados | 25,2 GB |
+| Custo em tokens | US$ 0,1635 |
+| **Custo em ferramentas** | **US$ 0,4844** |
+| **Total** | **US$ 0,6479** — 22× uma pergunta clínica comum |
+
+Os 147 mil tokens de entrada **não vêm do prompt do projeto** (que tem 574): vêm do que a ferramenta leu das bases e injetou no contexto do modelo, do lado da Maritaca. Não há controle sobre isso daqui.
+
+Foi essa medição que forçou a subida do teto beta de US$ 1,00 para US$ 5,00 (§9): com o teto antigo cabia **uma vez e meia** por semana, e na segunda consulta o médico perdia todos os modos, inclusive os que custam centavos.
+
+**Os preços da Maritaca são em BRL e o sistema calcula em USD.** A conversão usa `pricing.BRL_POR_USD`, **fixo em 5,20** — gap conhecido e aceito, registrado como débito 15, com a faixa de dólar que dispara revisão (R$ 4,80–5,60). Os preços ficam guardados em reais (`PRECOS_FERRAMENTAS_BRL`) porque é o número que dá para conferir contra a fatura; a conversão acontece num lugar só.
+
+**Espera na interface.** Como não há streaming e a resposta leva ~1,5 minuto, `ChatView` mostra cronômetro e etapas que avançam (§10.1). As etapas são **ilustrativas e o código diz isso**: o fluxo é interno à Maritaca e não expõe em que passo está.
+
+### 5.4 Latência real por modo
+
+Medido em produção (`Interaction.response_time_ms`, janela de 90 dias, 2026-09-08):
+
+| Modo | n | p50 | p95 |
+|---|---|---|---|
+| `CLINICAL_REASONING` | 35 | **32,8 s** | **56,7 s** |
+| `QUICK_SEARCH` | 107 | 13,3 s | 28,5 s |
+| `EXAM_REVIEW` | 8 | 18,1 s | 25,3 s |
+| `PHARMA_*` | 66 | 2,4 – 7,8 s | 6 – 24 s |
+| `DATA_OCEAN` | 1 | 97,9 s | — |
+
+Dois fatos que orientam qualquer trabalho de performance aqui:
+
+- **O gargalo é LLM, não banco.** As tabelas têm centenas de linhas (`interactions` 38, `audit_logs` 551). Otimização de query não muda nada hoje — os índices da `011` são preventivos, não corretivos.
+- **A troca de `claude-sonnet-4-20250514` por `claude-sonnet-4-6` aumentou a latência em 56%** (p50 de 21 s para 33 s). Parte é resposta mais longa (912 → 1350 tokens de saída), mas a diferença é maior que a proporção.
+
+O caminho crítico tinha 4 a 6 chamadas de rede **sequenciais** antes do primeiro token, e todo o `asyncio.gather` do arquivo estava no pós-processamento — que já não bloqueia nada. Corrigido em parte: histórico e roteamento agora rodam em paralelo, e um disjuntor (`circuit_breaker.openai_auxiliares`) cobre as três chamadas auxiliares ao `gpt-5.4-nano` (triagem, clarificação, normalização do cache). Sem ele, uma degradação da OpenAI custava **28 segundos de timeouts sequenciais** para chegar exatamente ao mesmo fallback que daria resultado em zero.
 
 ## 6. Contexto e memória
 
@@ -525,7 +640,15 @@ Os turnos viram papéis de verdade (`user`/`assistant`), não um bloco de texto 
 
 `app/services/context_budget.py`. `DEFAULT_HISTORY_TOKEN_BUDGET = 6000`, `CHARS_PER_TOKEN = 3.2` (medido contra dados reais em 2026-08-27), `TOKEN_OVERHEAD_POR_MENSAGEM = 4`.
 
-A contagem é estimativa de propósito: `tiktoken` só vale para OpenAI e o projeto fala com quatro provedores. **Errar para menos é inofensivo aqui** — o orçamento está muito abaixo da janela de qualquer modelo em uso (200k no Sonnet); ele é controle de custo e de ruído, não proteção contra limite técnico. Isso inverte a intuição comum sobre contagem de tokens, e é por isso que a razão é calibrada pela mediana e não por um percentil pessimista.
+A contagem é estimativa de propósito: `tiktoken` só vale para OpenAI e o projeto fala com cinco provedores. **Errar para menos é inofensivo aqui** — o orçamento está muito abaixo da janela de qualquer modelo em uso (200k no Sonnet); ele é controle de custo e de ruído, não proteção contra limite técnico. Isso inverte a intuição comum sobre contagem de tokens, e é por isso que a razão é calibrada pela mediana e não por um percentil pessimista.
+
+**Anexos têm orçamento SEPARADO** — `DEFAULT_ATTACHMENT_TOKEN_BUDGET = 12000`, aplicado por `fit_turns_with_attachment_budget`.
+
+Com teto único, o texto de um exame anexado disputava espaço com a conversa e ganhava por tamanho: um laboratorial completo (~4700 tokens) ocupava 78% dos 6000, e a discussão do caso era descartada. O médico anexava um exame e, três mensagens depois, o modelo tinha o exame e havia esquecido o caso — a mesma dor de "ele não entende contexto", pelo outro lado. Numa conversa longa com exame, a separação preserva 6 turnos a mais sem perder o anexo.
+
+O valor de 12000 vem de medição contra os limites reais de `file_extractor_service` (`MAX_EXTRACTED_CHARS = 50 000` → ~15 600 tokens por anexo), não de estimativa. **Um valor abaixo de ~4700 é regressão silenciosa**: derruba anexos que o orçamento único já aceitava, e o sintoma aparece como "o modelo parou de ver meu exame". O teste `test_anexo_que_passava_no_orcamento_unico_continua_passando` trava esse piso, e `test_o_formato_do_anexo_casa_com_o_extrator` trava o acoplamento com o formato que o extrator escreve.
+
+Um anexo que não cabe vira **aviso explícito**, nunca some em silêncio: o médico continua vendo o arquivo na tela, e o modelo precisa saber que houve algo que não alcança.
 
 ### 6.3 Pastas como projetos
 
@@ -539,6 +662,24 @@ O bloco da pasta entra **antes** do histórico próprio, como turno de usuário:
 
 A indexação é agendada fora do caminho da resposta (`agendar_indexacao`), até `MAX_INDEXAR_POR_VEZ = 60` trechos por vez.
 
+#### Evolução do paciente — contexto DECLARADO (migrations 009 e 010)
+
+`folders.clinical_context` é diferente de tudo acima: não é recuperado por similaridade, é escrito pelo médico, e entra **na íntegra em toda mensagem daquela pasta**.
+
+A distinção está na marcação enviada ao modelo, e não é cosmética:
+
+| Origem | Como chega ao modelo |
+|---|---|
+| Trechos por similaridade (`formatar_bloco`) | *"material de APOIO, pode ser de outro paciente. Não trate como parte do caso atual."* |
+| Evolução, pasta `clinical` (`formatar_bloco_evolucao`) | *"Evolução do paciente — informada pelo médico nesta pasta. Vale como parte do caso atual."* |
+| Evolução, pasta `general` | *"Contexto desta pasta — objetivo e escopo declarados. **NÃO é um caso clínico** nem descreve um paciente."* |
+
+Reusar a marcação de apoio para a evolução entregaria ao modelo um texto autoritativo carimbado com "não confie nisto" — e o modelo obedeceria. Já anunciar como "evolução do paciente" o conteúdo de uma pasta de estudos faz ele inventar um paciente que não existe. Tipo desconhecido cai no cabeçalho clínico: descrever um texto como contexto do caso é menos danoso do que **negar** que um texto clínico seja clínico.
+
+**A evolução é acrescentada DEPOIS do corte por orçamento**, e é o único bloco que não o disputa. Se entrasse junto com os turnos, uma conversa longa dentro da pasta descartaria justamente o texto que o médico escreveu para ser sempre considerado — e ele não teria como perceber. O contrato do campo é "está em toda mensagem desta pasta"; um orçamento que às vezes o remove é outro contrato. O custo fica limitado na origem: `MAX_CHARS_EVOLUCAO = 8000` (~2500 tokens), recusado com 422 na API.
+
+No `PUT /folders/{id}`, **campo ausente significa "não mexa"**, e string vazia significa "limpar". O endpoint era rename puro e o frontend manda só `{"name": ...}`: tratar ausente como apagar destruiria a evolução do paciente ao corrigir um typo no nome da pasta. Travado por `test_renomear_sem_mandar_evolucao_nao_a_apaga`.
+
 ### 6.4 Cache semântico
 
 `app/services/semantic_cache_service.py`. Pipeline: guardrail + normalização por LLM (expande siglas: PAC → pneumonia adquirida na comunidade) → embedding → fast-path exato no Redis (TTL 30 dias) → busca cosine no pgvector (`SIMILARITY_THRESHOLD = 0.88`, TTL 30 dias).
@@ -546,6 +687,21 @@ A indexação é agendada fora do caminho da resposta (`agendar_indexacao`), at�
 `QUICK_SEARCH` é sempre cacheável se o guardrail passar; `CLINICAL_REASONING` só sem dados de paciente específico.
 
 A chave de cache usa o **prompt atual sem histórico** — separação deliberada, senão cada conversa teria chave própria e o cache nunca acertaria.
+
+> **DESLIGADO desde 2026-09-08** (`semantic_cache_enabled = False`). O código continua inteiro; religar é mudar a flag. A razão está três parágrafos abaixo, e **não é defeito**.
+
+**A decisão de cacheabilidade vive num lugar só:** `orquestrador_shared.pode_usar_cache(mode, mensagens)`, que junta as três condições — flag ligada, modo em `MODOS_CACHEAVEIS`, e contexto **sem dado de paciente**. Quatro pontos decidiam isso separadamente (leitura e gravação, nos dois caminhos) e podiam divergir.
+
+**A terceira condição fechou um vazamento real.** A chave é `(modo, prompt_sanitizado)` — sem usuário, sem pasta, sem histórico. Mas a resposta é gerada **com a evolução do paciente injetada**. "Qual anti-hipertensivo escolher?" dentro da pasta de alguém com DRC e alergia a IECA produz uma conduta calibrada para aquela função renal; o próximo médico com a mesma pergunta receberia aquilo. Vazamento de dado clínico de terceiro **e** risco clínico direto. O guardrail não cobria: ele avalia só o TEXTO da pergunta, que por construção não contém o contexto que ele deveria julgar. O gate vale na leitura **e** na gravação — bloquear só a leitura deixaria a resposta condicionada entrar no cache e vazar depois.
+
+**Por que 0 acertos em 240 interações — e por que isso não é bug.** Medição de 2026-09-08 (`scripts/medir_cache_semantico.py`, 90 dias): zero hits, 6 entradas gravadas. A causa é que **o que se repete não pode ser cacheado, e o que pode não se repete**:
+
+- As perguntas repetidas são casos clínicos com dado de paciente — *"mulher 34a, cefaleia thunderclap + fotofobia"* apareceu 6× entre 3 médicos. O guardrail as recusa corretamente.
+- As 6 entradas gravadas são perguntas genéricas, cada uma sobre um assunto diferente (aftas, transplante cardíaco, semaglutida). Nenhuma se repetiu.
+
+Com 18 usuários ativos, a chance de dois médicos fazerem a mesma pergunta genérica é baixa por construção. O threshold de 0,88 nunca chegou a ser testado, porque nada chegou lá. Enquanto isso, o cache cobrava **~500–1150 ms por pergunta** em duas chamadas sequenciais à OpenAI (normalização + embedding), antes do primeiro token.
+
+Débito 16, com o gatilho de revisão: algumas centenas de médicos ativos.
 
 **Histórico de defeito, vale conhecer:** o cache ficou desligado em silêncio desde sempre. `_normalize_prompt` mandava `max_tokens`, que a família gpt-5 recusa com HTTP 400, e toda escrita era pulada sem erro visível. Corrigido em `f31dd2c`. Com a tabela ainda vazia, a migration `003` aproveitou para trocar o índice ivfflat por HNSW: ivfflat calcula os centroides no momento da criação, e o índice do baseline nasceu sobre uma tabela vazia — recall degradado até alguém lembrar de reindexar, e `lists = 100` dimensionado para ~10 000 linhas que a tabela nunca teve. HNSW constrói o grafo incrementalmente e some com a classe inteira de bug. Há um script de medição: `scripts/medir_cache_semantico.py`.
 
@@ -792,8 +948,12 @@ PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco f
 000_baseline → 000a_lp_schema → 000b_lp_tables → 000c → 000d → 000e → 000f → 000g
              → 000h_lp_partners → 001_file_interaction → 002_msg_embeddings
              → 003_cache_hnsw → 004_news_monorepo → 005_news_taxonomia
-             → 006_news_keywords → 007_identidade_profissional   (head)
+             → 006_news_keywords → 007_identidade_profissional → 008_waid_uuid
+             → 009_folder_evolucao_clinica → 010_folder_tipo
+             → 011_indices_auditoria   (head)
 ```
+
+Estado em produção (Railway) em 2026-09-08: `011_indices_auditoria`.
 
 | Revisão | O que faz |
 |---|---|
@@ -806,6 +966,10 @@ PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco f
 | `005_news_taxonomia` | Seed idempotente da taxonomia de temas (`ON CONFLICT DO NOTHING`) |
 | `006_news_keywords` | `news.user_keywords` + coluna gerada `articles.busca_tsv` (tsvector, peso A/B) |
 | `007_identidade_profissional` | 10 colunas em `users` para a identidade profissional (§3.4). Todas nullable, **sem backfill** — preencher é trabalho revisável de `scripts/normalizar_especialidades.py`, não efeito colateral de um `alembic upgrade` |
+| `008_waid_uuid` | `users.waid_uuid` — identidade do aluno na Waid como chave estável, com precedência sobre o e-mail |
+| `009_folder_evolucao_clinica` | `folders.clinical_context` (TEXT, nullable) — a evolução do paciente escrita pelo médico (§6.3). Nasce nula, sem backfill: é informação que só o médico tem. O teto de tamanho vive na API (`MAX_CHARS_EVOLUCAO`), não na coluna, para que um texto longo receba 422 explicativo em vez de 500 do driver |
+| `010_folder_tipo` | `folders.folder_kind` (`clinical` \| `general`), NOT NULL com default `clinical` e CHECK. Decide a **marcação** com que o contexto é injetado no prompt. O default é deliberado: as pastas da `009` nasceram quando o campo era descrito como evolução de paciente, e assumir o contrário reclassificaria dado clínico existente. `VARCHAR`+CHECK em vez de ENUM porque a lista tende a crescer e ENUM exigiria `ALTER TYPE` a cada valor novo |
+| `011_indices_auditoria` | Três índices que faltavam: `audit_logs (action, created_at)` — a vigilância faz `max(created_at) WHERE action = ...` a cada 6h numa tabela escrita uma vez por interação; `audit_logs (user_id)` — anonimização na exclusão de conta (LGPD); `interactions (conversation_id, status, started_at)` — `load_history` roda em **toda mensagem** e ordenava o histórico inteiro em memória para pegar 40 linhas |
 
 `alembic/versions_legacy/` é histórico arquivado, **fora da cadeia ativa** — não deve ser alterado nem referenciado por migrations novas.
 
@@ -814,8 +978,11 @@ Decisões registradas nas próprias migrations, que vale ler antes de mexer:
 - `message_embeddings` é tabela nova, e não coluna vetorial em `interactions`: uma interação vira **dois** trechos indexáveis (pergunta e resposta), e uma coluna só não comportaria os dois. `content` é duplicado ali de propósito — ir buscar o texto na origem exigiria uma segunda consulta no caminho quente, por linha recuperada.
 - `message_embeddings` **não tem índice ivfflat**, ao contrário de `semantic_cache`: a busca é sempre dentro de uma pasta de um usuário, o conjunto filtrado é pequeno, e a varredura exata é mais correta e rápida o bastante (débito 11).
 - `file_extractions.interaction_id` é `SET NULL` e não CASCADE: apagar uma conversa não deve apagar o arquivo, que pode estar referenciado em outra mensagem.
+- A `011` **não** usa `CREATE INDEX CONCURRENTLY`, que seria o correto para tabelas grandes: exige rodar fora de transação, e o Alembic envolve cada migration numa. Com as tabelas no tamanho atual (centenas de linhas) o lock é de milissegundos. Se o projeto chegar a milhões de linhas antes de alguém reindexar, o índice precisará ser criado à mão.
 
-Não há `CREATE TYPE` (enums nativos) nem triggers: campos categóricos (`role`, `status`, `feature`, `engine_type`…) são `VARCHAR` validados na camada de aplicação (Pydantic), não por CHECK constraint.
+Não há `CREATE TYPE` (enums nativos) nem triggers: campos categóricos (`role`, `status`, `feature`, `engine_type`…) são `VARCHAR` validados na camada de aplicação (Pydantic). A única exceção é `folders.folder_kind`, que tem CHECK a partir da `010` — ali o conjunto é fechado e pequeno, e um valor inválido mudaria a marcação enviada ao modelo.
+
+**Todas as migrations da série 009–011 foram validadas contra Postgres real** nos quatro cenários: upgrade, downgrade, reaplicação sobre estrutura já existente (são idempotentes, com `IF NOT EXISTS`) e — no caso da `011` — `EXPLAIN` confirmando que o planner usa o índice criado.
 
 ### 11.2 Diagrama ER
 
@@ -1220,6 +1387,8 @@ erDiagram
 | JWT_ALGORITHM | HS256 | não |
 | JWT_ACCESS_TOKEN_EXPIRE_MINUTES | 60 | não |
 | ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_API_KEY / PERPLEXITY_API_KEY | "" | não |
+| MARITACA_API_KEY | "" | não — sem ela só o modo `DATA_OCEAN` fica indisponível; os demais seguem normais |
+| SEMANTIC_CACHE_ENABLED | `False` | não — desligado por decisão medida, ver §6.4 |
 | PHARMADB_API_KEY / PUBMED_API_KEY | "" | não |
 | SENDGRID_API_KEY | "" | sim |
 | SENDGRID_FROM_EMAIL | noreply@medico360.com.br | não |
@@ -1334,16 +1503,27 @@ O `.dockerignore` da raiz é obrigatório: sem ele cada build enviaria `venv/`,
 
 ### 14.1 Suíte
 
-- **Backend** — `tests/`, 46 arquivos, **811 testes**. Cobertura mínima de 50% cobrada no CI como catraca contra regressão (o número é o medido, arredondado para baixo — não é um atestado de qualidade).
+- **Backend** — `tests/`, 54 arquivos, **942 testes** (+ 4 e2e pulados por padrão), **70% de cobertura**. O piso de 50% cobrado no CI é catraca contra regressão, não atestado de qualidade — vale subi-lo agora que a medida real está bem acima.
   - Segurança/LGPD: `test_authorization`, `test_idor`, `test_lgpd`, `test_consentimento`, `test_dlp`, `test_dlp_enforcement`, `test_expurgo_agendado`, `test_calculadoras_isolamento`, `test_contexto_seguranca`
   - Orquestrador: `test_orquestrador_paridade` (garante que `/query` e `/stream` não divirjam — **leia este primeiro**, o docstring conta os dois incidentes que o motivaram), `test_orquestrador_stream`, `test_contexto`, `test_contexto_cache`, `test_folder_context`, `test_exames`, `test_conversas_referencias`, `test_response_metadata`
   - Identidade: `test_especialidades` (vocabulário, precedência, leitura dos grupos `[CFM]`), `test_reconciliacao_embed`, `test_onboarding_pendencias`, `test_prompts_contexto`, `test_normalizar_especialidades`, `test_exclusao_de_conta`
   - Notícias: `test_news_taxonomia` (coerência da taxonomia, sem banco), `test_news_feed`, `test_news_feed_multiespecialidade`, `test_news_pipeline`, `test_news_keywords`
-  - Cache: `test_cache_semantico_contrato`, `test_cache_hit_historico`
+  - Cache: `test_cache_semantico_contrato`, `test_cache_hit_historico`, `test_cache_paridade` (o gate único de cacheabilidade e o registro compartilhado do hit)
+  - Data Ocean: `test_data_ocean` (o modo, o contrato com a API da Maritaca, e as três restrições — sem fallback, sem cache, sem triagem)
+  - Segurança adicionada em 2026-09-08: `test_csrf_upload` (a única rota multipart, e por isso a única sem preflight CORS)
   - Resiliência/infra: `test_circuit_breaker`, `test_agregador_resiliencia`, `test_health`, `test_logging`, `test_error_tracking`, `test_usage_limits`, `test_harness`
   - Calculadoras: `tests/calculators/` (fórmulas + validação)
 - **frontend-app** — Vitest + Testing Library, roda no CI **antes** do build (falha de teste deve aparecer como falha de teste, não como build verde de código quebrado).
 - **calculadoras-app** — Playwright, contra backend e frontend reais (não mockados), por cima de seeds determinísticos.
+- **E2E com chamada real aos provedores** — `tests/test_e2e_pergunta_real.py`. Exercita o caminho principal (pergunta → resposta gravada) contra as APIs de verdade: app real, banco real, request HTTP real, LLM real.
+
+  ```bash
+  E2E_REDE_REAL=1 pytest tests/test_e2e_pergunta_real.py -v
+  ```
+
+  **Dois portões, e os dois são necessários:** `@pytest.mark.rede_real` desarma o bloqueio de rede do conftest, e a variável de ambiente impede que um `pytest` distraído gaste cota real. Sem ela os quatro são pulados — o CI não tem chave de API nenhuma, então lá nunca rodam.
+
+  Vale antes de um deploy, não a cada commit. Pega o que 942 unitários não pegam: contrato do provedor que mudou, campo renomeado, migration que não aplica, serialização que só quebra com dado real. As asserções são sobre **estrutura e efeito** (status, campos, o que foi gravado), nunca sobre o teor da resposta — um teste que exigisse certa redação falharia por variação normal, e alguém aprenderia a ignorá-lo.
 
 **Harness de teste** (`tests/conftest.py`): trava de banco explícita — o nome do banco precisa conter `test`, senão o pytest se recusa a rodar. O `.env` do projeto aponta para o banco hospedado; sem a trava, um `pytest` distraído roda migrations e apaga tabelas em produção. Rodar localmente exige o container pgvector:
 
@@ -1423,11 +1603,13 @@ Para quem for avaliar por onde começar. A coluna que importa é a última: o qu
 
 | Dívida | Tamanho | Risco de mexer | O que dói hoje |
 |---|---|---|---|
-| `orquestrador_service` + `_stream` — 1.100 linhas em dois métodos gigantes, com a persistência da interação ainda duplicada | semanas | **alto** — é o caminho principal do produto | Bug corrigido num não chega no outro. Já aconteceu duas vezes |
+| `orquestrador_service` + `_stream` — ~1.200 linhas em dois métodos gigantes. A persistência **já foi extraída** (`pos_processar_interacao`, `registrar_hit_de_cache`); resta o payload de resposta, o atalho de saudação e o preâmbulo | dias | **alto** — é o caminho principal do produto | Bug corrigido num não chega no outro. Aconteceu **quatro vezes**, todas em 2026-09-08: promoção de modo por anexo, imagem perdida no fallback, cache hit com id de outro usuário, e `record_cost` ausente no `/query` |
 | SQL direto em 21 services e 6 endpoints | grande, contínuo | baixo **se de carona** | Nada agudo. Vira campanha cara se tratado como projeto |
 | `services/` com 32 arquivos soltos (~9.600 linhas) | médio | baixo — é mover arquivo | Achar coisa depende de grep |
 | Taxonomia de temas de notícias sem revisão médica | não é código | — | Nasceu de rascunho de engenharia; erro ali é silencioso (o tema não é sugerido a ninguém) |
-| Backup manual, sem agendamento | pequeno | — | RPO = idade do último dump |
+| Backup manual, sem agendamento | pequeno | — | RPO = idade do último dump. Deve ser resolvido na migração para AWS, não aqui |
+| Câmbio fixo (`BRL_POR_USD = 5,20`) no custo da Maritaca | pequeno | baixo | Erro de ±8% no custo gravado desse provider. Débito 15, com faixa de revisão |
+| Cache semântico desligado | — | — | Nada: 0 acertos em 240 interações. Débito 16, revisitar com centenas de médicos |
 | Webhook de cadastro não construído | médio | baixo | O CRM não chega ao Médico 360; hoje isso é aceito de propósito (§3.4) |
 | Migração para Railway IaC | médio | médio — toca todos os serviços | Prazo real: 2026-12-01 |
 
