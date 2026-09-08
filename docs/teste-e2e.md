@@ -4,6 +4,31 @@ Cobre: Onboarding, Orquestrador, Agregador, Pastas, Contextos de Memória, Ediç
 
 ---
 
+## E2E automatizado (chamada real aos provedores)
+
+Este documento é o roteiro MANUAL. Desde 2026-09-08 há também
+`tests/test_e2e_pergunta_real.py`, que exercita o caminho principal — pergunta
+do médico até a resposta gravada — contra as APIs de verdade.
+
+```bash
+E2E_REDE_REAL=1 pytest tests/test_e2e_pergunta_real.py -v
+```
+
+**Não roda por padrão, e é de propósito.** Cada execução gasta cota real dos
+provedores, e a resposta do modelo varia. Sem `E2E_REDE_REAL=1` os testes são
+pulados; o CI não tem chave de API nenhuma, então lá eles nunca rodam.
+
+Vale rodar **antes de um deploy**, não a cada commit. Ele pega o que 936 testes
+unitários não pegam: contrato do provedor que mudou, campo renomeado, migration
+que não aplica, serialização que só quebra com dado real.
+
+As asserções são sobre ESTRUTURA e EFEITO (status HTTP, campos da resposta, o
+que foi gravado no banco), nunca sobre o TEOR do que o modelo respondeu — um
+teste que exigisse certa redação falharia por variação normal, e alguém
+aprenderia a ignorá-lo.
+
+---
+
 ## 1. Onboarding
 
 **Pré-condição:** usuário cadastrado mas sem onboarding concluído.
