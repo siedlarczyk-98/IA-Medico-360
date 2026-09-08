@@ -273,6 +273,22 @@ class Settings(BaseSettings):
         return self
 
 
+def origens_confiaveis(settings: "Settings") -> list[str]:
+    """Origens que podem fazer requisição autenticada a esta API.
+
+    Mesma lista que alimenta o CORS em `main.py`, extraída para cá porque a
+    defesa anti-CSRF (`app/api/deps.py`) precisa da mesma verdade. Duas listas
+    montadas em lugares diferentes divergiriam, e a divergência apareceria como
+    "o upload parou de funcionar" depois de alguém acrescentar um front novo só
+    no CORS.
+    """
+    origens = [settings.frontend_url, settings.calculadoras_url]
+    origens += settings.embed_allowed_origins + settings.landing_pages_origins
+    if not settings.is_production:
+        for o in [settings.frontend_url, settings.calculadoras_url, *settings.landing_pages_origins]:
+            origens += [o.replace("localhost", "127.0.0.1"), o.replace("127.0.0.1", "localhost")]
+    return list(dict.fromkeys(o for o in origens if o))
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

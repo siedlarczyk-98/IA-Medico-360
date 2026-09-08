@@ -12,7 +12,7 @@ from jwt import PyJWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import get_settings, origens_confiaveis
 from app.core.database import get_db
 from app.models.models import User
 
@@ -79,3 +79,48 @@ async def get_current_user(
         )
         
     return user
+
+async def exigir_origem_confiavel(request: Request) -> None:
+    """Barra requisição de escrita vinda de origem que não é nossa.
+
+    POR QUE ISTO EXISTE
+    `get_current_user` aceita o JWT no cookie `medico360_session`, emitido com
+    `SameSite=None` (obrigatório para os apps rodarem dentro do iframe da
+    Waid). Um cookie assim viaja em requisição cross-site — é a definição de
+    CSRF.
+
+    A maioria dos endpoints está ACIDENTALMENTE protegida: eles exigem
+    `Content-Type: application/json`, que não é um content-type "simples" de
+    CORS, então o browser dispara um preflight `OPTIONS` que a allowlist do
+    `CORSMiddleware` rejeita para origens estranhas.
+
+    `/uploads/extract` era a exceção: ele recebe `multipart/form-data`, um dos
+    três content-types simples. Um `<form>` cross-site não gera preflight, e o
+    browser mandava o cookie junto. Um médico logado que abrisse uma página
+    hostil teria a quota consumida, custo de API cobrado da conta dele (o
+    caminho de imagem chama o Haiku e faz `record_cost`) e `FileExtraction` de
+    conteúdo alheio gravado sob o `user_id` dele — material que depois aparece
+    no export LGPD como se fosse dado do titular.
+
+    O atacante não conseguia LER a resposta (o CORS bloqueia), então não era
+    vazamento; era escrita e custo dirigidos por terceiro.
+
+    POR QUE ORIGIN, E NÃO UM HEADER CUSTOMIZADO
+    Exigir `X-Requested-With` também forçaria preflight, mas depende de todo
+    cliente lembrar de enviá-lo — e um cliente que esquece falha ABERTO num
+    caso e fechado no outro, dependendo do browser. `Origin` é preenchido pelo
+    próprio navegador em toda requisição cross-site e não é falsificável por
+    script.
+
+    Ausência de `Origin` é permitida de propósito: requisição same-origin em
+    alguns browsers, e chamadas server-to-server (scripts, testes, integrações)
+    não têm origem — e também não carregam cookie de sessão de ninguém.
+    """
+    origem = request.headers.get("origin")
+    if origem is None:
+        return
+    if origem not in origens_confiaveis(settings):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Origem não autorizada.",
+        )

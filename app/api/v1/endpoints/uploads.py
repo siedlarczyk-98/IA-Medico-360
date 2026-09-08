@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import exigir_origem_confiavel, get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.models import FileExtraction, User
@@ -42,7 +42,15 @@ class ExtractResponse(BaseModel):
     warning: str | None = None
 
 
-@router.post("/extract", response_model=ExtractResponse)
+@router.post(
+    "/extract",
+    response_model=ExtractResponse,
+    # `multipart/form-data` é content-type "simples" de CORS: um `<form>`
+    # cross-site chega aqui SEM preflight, levando o cookie de sessão junto.
+    # Esta é a única rota do projeto nessa situação — ver
+    # `exigir_origem_confiavel`.
+    dependencies=[Depends(exigir_origem_confiavel)],
+)
 @limiter.limit("20/minute")
 async def extract_file(
     request: Request,
