@@ -159,7 +159,17 @@ class OnboardingRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
-    email: str | None = None
+    # `EmailStr`, como em todo o resto deste schema. Era `str`, o único ponto
+    # que aceitava qualquer texto como e-mail: a unicidade impede tomar o
+    # endereço de outra conta, e o login por OTP exige receber o código, então
+    # não havia caminho de exploração — mas gravava lixo no campo que a
+    # plataforma usa para falar com o médico.
+    #
+    # NÃO há verificação de posse do novo endereço. Trocar para um e-mail que
+    # não é seu quebra o próprio login (o OTP vai para lá), então o incentivo
+    # está do lado certo — mas se o campo continuar editável, vale um link de
+    # confirmação.
+    email: EmailStr | None = None
     # Correção do próprio médico. Grava com fonte `declarado`, que ganha de
     # todas as automáticas — ver `app/medicina/identidade.py`.
     specialty_slug: str | None = None

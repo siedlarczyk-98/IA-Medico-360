@@ -159,7 +159,3 @@ export function listarEspecialidades(): Promise<Especialidade[]> {
 export function deleteAccount(confirmName: string): Promise<void> {
   return del('/auth/me', { confirm_name: confirmName });
 }
-
-export function embedToken(email: string): Promise<TokenResponse> {
-  return post<TokenResponse>('/auth/embed/token', { email });
-}

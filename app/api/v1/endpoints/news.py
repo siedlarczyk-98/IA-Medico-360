@@ -15,7 +15,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -280,9 +280,12 @@ async def alternar_favorito(
     if atual:
         await db.execute(delete(Favorite).where(Favorite.id == atual))
     else:
-        quantos = len(list(await db.scalars(
-            select(Favorite.id).where(Favorite.user_id == user.id)
-        )))
+        # `count()` no banco, e não `len()` sobre a lista: trazer até 500 UUIDs
+        # para contá-los em Python é o caso-livro de carregar coleção inteira
+        # para saber o tamanho dela.
+        quantos = await db.scalar(
+            select(func.count()).select_from(Favorite).where(Favorite.user_id == user.id)
+        )
         if quantos >= MAX_FAVORITOS:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Limite de favoritos atingido")
         try:
@@ -345,11 +348,13 @@ async def listar_palavras(
     nada. Sem isso, palavra-chave é um ato de fé.
     """
     termos = await news_keyword_service.listar(db, user.id)
+    # Uma query para todos os termos, e não uma por termo: esta rota também
+    # responde ao adicionar e ao remover, então o N+1 era pago a cada mexida.
+    contagens = await news_keyword_service.contar_destaques_em_lote(
+        db, [k.termo for k in termos]
+    )
     return [
-        PalavraChaveOut(
-            termo=k.termo,
-            destaques=await news_keyword_service.contar_destaques(db, k.termo),
-        )
+        PalavraChaveOut(termo=k.termo, destaques=contagens.get(k.termo, 0))
         for k in termos
     ]
 

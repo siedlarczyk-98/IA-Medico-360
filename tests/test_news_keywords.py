@@ -293,3 +293,51 @@ async def test_sem_match_nenhum_continua_sem_email(db, user, enviados):
 
     assert enviados == []
     assert resumo["enviados"] == 0
+
+
+# ── Contagem em lote ─────────────────────────────────────────────────────────
+# A listagem chamava `contar_destaques` dentro de um laço: 1 + N idas ao banco,
+# cada uma com `plainto_tsquery` + `ts_rank`. Com o teto de 10 termos eram 11
+# viagens ao Postgres para desenhar uma tela — e as rotas de adicionar e remover
+# devolvem a listagem inteira, então o custo era pago a cada mexida.
+
+
+@asyncio
+async def test_lote_da_o_mesmo_resultado_que_a_contagem_individual(db):
+    """O risco de reescrever uma query é ela passar a contar outra coisa.
+
+    Este teste compara as duas implementações no mesmo dado — se divergirem, a
+    tela do médico passa a mostrar um número que não corresponde ao feed.
+    """
+    await _publicado(db, "Novo anticoagulante para fibrilação atrial")
+    await _publicado(db, "Fibrilação atrial em idosos: revisão")
+    await _publicado(db, "Rastreio de câncer colorretal")
+
+    termos = ["fibrilação", "câncer", "termo-que-nao-casa-com-nada"]
+
+    lote = await news_keyword_service.contar_destaques_em_lote(db, termos)
+    individual = {
+        t: await news_keyword_service.contar_destaques(db, t) for t in termos
+    }
+
+    assert lote == individual
+
+
+@asyncio
+async def test_lote_com_lista_vazia_nao_consulta_o_banco(db):
+    """Usuário sem palavra-chave é o caso comum de quem acabou de entrar."""
+    assert await news_keyword_service.contar_destaques_em_lote(db, []) == {}
+
+
+@asyncio
+async def test_lote_conta_cada_termo_separadamente(db):
+    """Um `count()` só para todos os termos contaria a união — o médico veria o
+    mesmo número em todas as linhas da tela."""
+    await _publicado(db, "Fibrilação atrial e AVC")
+    await _publicado(db, "Rastreio de câncer colorretal")
+    await _publicado(db, "Rastreio de câncer de mama")
+
+    lote = await news_keyword_service.contar_destaques_em_lote(db, ["fibrilação", "câncer"])
+
+    assert lote["fibrilação"] == 1
+    assert lote["câncer"] == 2

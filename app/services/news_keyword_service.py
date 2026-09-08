@@ -27,7 +27,7 @@ DUAS REGRAS QUE SUSTENTAM O RESTO
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -131,6 +131,44 @@ async def contar_destaques(db: AsyncSession, termo: str) -> int:
             *_filtro_busca(termo),
         )
     )).scalar_one()
+
+
+async def contar_destaques_em_lote(db: AsyncSession, termos: list[str]) -> dict[str, int]:
+    """
+    Mesma contagem de `contar_destaques`, para vários termos numa query só.
+
+    A listagem de palavras-chave chamava `contar_destaques` dentro de um laço:
+    1 + N idas ao banco, e cada uma delas não é um count trivial — é
+    `plainto_tsquery` + `ts_rank` sobre a coluna de busca. Com o teto de 10
+    termos eram 11 viagens ao Postgres do Railway (rede externa) para desenhar
+    uma tela — e o médico paga isso de novo a cada termo que adiciona ou remove,
+    porque essas rotas devolvem a listagem inteira.
+
+    `count().filter()` vira um `FILTER (WHERE ...)` por termo dentro de uma
+    varredura só da janela do feed.
+    """
+    if not termos:
+        return {}
+
+    settings = get_settings()
+    desde = datetime.now(UTC) - timedelta(days=settings.news_feed_janela_dias)
+
+    # O rótulo é posicional (`t0`, `t1`...) e não o termo: um termo pode conter
+    # qualquer caractere, e nome de coluna com aspas é um convite a erro.
+    colunas = [
+        func.count().filter(and_(*_filtro_busca(t))).label(f"t{i}")
+        for i, t in enumerate(termos)
+    ]
+    linha = (await db.execute(
+        select(*colunas)
+        .select_from(Article)
+        .where(
+            Article.status == ArticleStatus.PUBLISHED.value,
+            Article.visible_at >= desde,
+        )
+    )).one()
+
+    return {termo: linha[i] for i, termo in enumerate(termos)}
 
 
 async def adicionar(db: AsyncSession, user_id, termo: str) -> UserKeyword:
