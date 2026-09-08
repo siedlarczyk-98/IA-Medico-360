@@ -10,10 +10,18 @@ function authHeaders(): HeadersInit {
   };
 }
 
+/** "clinical" = pasta de um paciente; "general" = estudo, gestão, tema. */
+export type FolderKind = 'clinical' | 'general';
+
 export interface Folder {
   id: string;
   name: string;
-  /** Evolução do paciente escrita pelo médico. Entra em toda mensagem da pasta. */
+  folder_kind: FolderKind;
+  /**
+   * Contexto declarado pelo médico: a evolução do paciente numa pasta clínica,
+   * o objetivo/escopo numa pasta geral. O nome do campo vem da migration que o
+   * criou, quando só existiam pastas clínicas.
+   */
   clinical_context: string | null;
   created_at: string;
   updated_at: string;
@@ -28,11 +36,19 @@ export async function listFolders(): Promise<Folder[]> {
   return res.json();
 }
 
-export async function createFolder(name: string, clinicalContext?: string): Promise<Folder> {
+export async function createFolder(
+  name: string,
+  clinicalContext?: string,
+  folderKind: FolderKind = 'clinical',
+): Promise<Folder> {
   const res = await fetch(`${BASE}/api/v1/folders`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ name, ...(clinicalContext ? { clinical_context: clinicalContext } : {}) }),
+    body: JSON.stringify({
+      name,
+      folder_kind: folderKind,
+      ...(clinicalContext ? { clinical_context: clinicalContext } : {}),
+    }),
   });
   if (!res.ok) throw new Error('Erro ao criar pasta');
   return res.json();
@@ -61,11 +77,16 @@ export async function renameFolder(id: string, name: string): Promise<Folder> {
  * `clinicalContext` como string vazia LIMPA a evolução — é assim que o médico
  * apaga o que escreveu. Para não mexer nela, use `renameFolder`.
  */
-export async function updateFolder(id: string, name: string, clinicalContext: string): Promise<Folder> {
+export async function updateFolder(
+  id: string,
+  name: string,
+  clinicalContext: string,
+  folderKind: FolderKind,
+): Promise<Folder> {
   const res = await fetch(`${BASE}/api/v1/folders/${id}`, {
     method: 'PUT',
     headers: authHeaders(),
-    body: JSON.stringify({ name, clinical_context: clinicalContext }),
+    body: JSON.stringify({ name, clinical_context: clinicalContext, folder_kind: folderKind }),
   });
   if (!res.ok) throw new Error('Erro ao salvar pasta');
   return res.json();

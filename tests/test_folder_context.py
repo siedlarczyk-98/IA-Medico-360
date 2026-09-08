@@ -777,3 +777,61 @@ async def test_evolucao_vem_antes_do_historico(db, user, folder_factory, convers
     )
 
     assert "CONTEXTO DO PACIENTE" in mensagens[0]["content"]
+
+
+# ── Tipo da pasta: clínica ou não ────────────────────────────────────────────
+# O campo nasceu (009) supondo que toda pasta é de um paciente. Não é: uma pasta
+# pode ser "Artigos para ler" ou "Gestão do consultório". O problema não era só
+# o rótulo na tela — o bloco injetado no prompt anunciava SEMPRE "Evolução do
+# paciente ... Vale como parte do caso atual", o que faz o modelo tratar um
+# plano de leitura como a evolução de alguém.
+
+
+def test_pasta_geral_nao_anuncia_paciente_ao_modelo():
+    """O bug que o tipo veio consertar.
+
+    Numa pasta de estudos, dizer ao modelo que o texto é a "evolução do
+    paciente" faz ele inventar um paciente que não existe.
+    """
+    bloco = formatar_bloco_evolucao("Revisar artigos de cardiologia 2026", "general")
+
+    assert "Evolução do paciente" not in bloco, (
+        "o cabeçalho de pasta geral não pode anunciar uma evolução de paciente"
+    )
+    assert "Vale como parte do caso atual" not in bloco
+    assert "NÃO é um caso clínico" in bloco
+    assert "Revisar artigos de cardiologia 2026" in bloco
+
+
+def test_pasta_clinica_mantem_a_marcacao_de_caso():
+    bloco = formatar_bloco_evolucao("Jorge, 58a, HAS + DM2", "clinical")
+
+    assert "Evolução do paciente" in bloco
+    assert "Vale como parte do caso atual" in bloco
+
+
+def test_tipo_desconhecido_cai_no_cabecalho_clinico():
+    """Fallback conservador: descrever como contexto do caso é menos danoso do
+    que NEGAR que um texto clínico seja clínico."""
+    bloco = formatar_bloco_evolucao("texto qualquer", "tipo_que_nao_existe")
+
+    assert "Evolução do paciente" in bloco
+
+
+def test_default_e_clinico():
+    """As pastas da 009 foram criadas quando o campo era descrito como evolução
+    de paciente — quem preencheu, preencheu isso."""
+    assert formatar_bloco_evolucao("x") == formatar_bloco_evolucao("x", "clinical")
+
+
+async def test_bloco_segue_o_tipo_gravado_na_pasta(db, user, folder_factory):
+    pasta = await folder_factory(
+        user, name="Estudos", clinical_context="Preparação para prova de título"
+    )
+    pasta.folder_kind = "general"
+    await db.flush()
+
+    bloco = await evolucao_da_pasta(db, user.id, None, folder_id=pasta.id)
+
+    assert "NÃO é um caso clínico" in bloco
+    assert "Evolução do paciente" not in bloco

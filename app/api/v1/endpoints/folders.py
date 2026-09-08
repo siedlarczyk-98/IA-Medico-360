@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -41,8 +42,11 @@ MAX_CHARS_EVOLUCAO = 8000
 
 class FolderCreate(BaseModel):
     name: str
+    # "clinical" (paciente) ou "general" (estudo, gestão, tema). Decide o
+    # rótulo na tela e a MARCAÇÃO com que o contexto é injetado no prompt.
+    folder_kind: Literal["clinical", "general"] = "clinical"
     # Opcional: o médico é perguntado na criação, mas uma pasta que é só
-    # organização por tema não tem evolução nenhuma para declarar.
+    # organização por tema pode não ter contexto nenhum a declarar.
     clinical_context: str | None = Field(default=None, max_length=MAX_CHARS_EVOLUCAO)
 
 
@@ -58,6 +62,9 @@ class FolderRename(BaseModel):
     # Para LIMPAR de propósito, o cliente manda string vazia: ela é distinguível
     # de ausente e é tratada em `rename_folder`.
     clinical_context: str | None = Field(default=None, max_length=MAX_CHARS_EVOLUCAO)
+    # Mesma regra: ausente = não mexa. Um cliente que só renomeia não pode
+    # reclassificar a pasta como clínica sem querer.
+    folder_kind: Literal["clinical", "general"] | None = None
 
 
 class ConversationMoveBody(BaseModel):
@@ -95,6 +102,7 @@ async def create_folder(
     folder = Folder(
         user_id=current_user.id,
         name=body.name.strip(),
+        folder_kind=body.folder_kind,
         clinical_context=_limpar_evolucao(body.clinical_context),
     )
     db.add(folder)
@@ -123,6 +131,8 @@ async def rename_folder(
     # Ausente = não mexa. String vazia = limpar. Ver `FolderRename`.
     if body.clinical_context is not None:
         folder.clinical_context = _limpar_evolucao(body.clinical_context)
+    if body.folder_kind is not None:
+        folder.folder_kind = body.folder_kind
     await db.commit()
     await db.refresh(folder)
     return folder

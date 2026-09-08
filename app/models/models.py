@@ -173,10 +173,19 @@ class Folder(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    # Evolução do paciente / contexto do caso, escrita pelo médico. Diferente
-    # do contexto recuperado por similaridade em `folder_context_service`:
-    # aquele é material de APOIO e pode ser de outro paciente; este é o caso
-    # atual, é declarado, e entra na íntegra em toda mensagem da pasta.
+    # "clinical" (pasta de um paciente) ou "general" (estudo, gestão, tema).
+    # Decide o RÓTULO na tela e, o que importa mais, a marcação com que o
+    # contexto é injetado no prompt — ver `formatar_bloco_evolucao`.
+    folder_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="clinical")
+    # Contexto declarado pelo médico: a evolução do paciente numa pasta
+    # clínica, o objetivo/escopo numa pasta geral. Diferente do contexto
+    # recuperado por similaridade em `folder_context_service`: aquele é
+    # material de APOIO e pode ser de outro paciente; este é declarado e entra
+    # na íntegra em toda mensagem da pasta.
+    #
+    # O nome da coluna continua `clinical_context` por vir da 009 — renomear
+    # exigiria migration com janela de incompatibilidade entre app e banco,
+    # e o campo é o mesmo, com rótulo diferente conforme `folder_kind`.
     # Nulo é o caso normal — uma pasta pode ser só organização por tema.
     clinical_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

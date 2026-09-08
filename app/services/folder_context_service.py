@@ -441,7 +441,36 @@ async def contexto_da_pasta(
 MAX_CHARS_EVOLUCAO_NO_PROMPT = 8000
 
 
-def formatar_bloco_evolucao(clinical_context: str | None) -> str:
+FOLDER_KIND_CLINICAL = "clinical"
+FOLDER_KIND_GENERAL = "general"
+FOLDER_KINDS: frozenset[str] = frozenset({FOLDER_KIND_CLINICAL, FOLDER_KIND_GENERAL})
+
+# Cabeçalho do bloco por tipo de pasta.
+#
+# Isto não é cosmético. A primeira versão injetava SEMPRE "Evolução do paciente
+# ... Vale como parte do caso atual", porque o campo nasceu supondo que toda
+# pasta é de um paciente. Numa pasta "Artigos para ler", esse cabeçalho faz o
+# modelo tratar um plano de leitura como a evolução de alguém — e responder
+# clinicamente sobre o que não é um caso.
+#
+# O texto de `general` evita de propósito qualquer palavra que sugira paciente,
+# e diz o que aquilo É: escopo declarado pelo médico para o trabalho da pasta.
+_CABECALHO_POR_TIPO: dict[str, str] = {
+    FOLDER_KIND_CLINICAL: (
+        "[Evolução do paciente / contexto do caso — informada pelo médico nesta "
+        "pasta. Vale como parte do caso atual.]"
+    ),
+    FOLDER_KIND_GENERAL: (
+        "[Contexto desta pasta — objetivo e escopo declarados pelo médico. "
+        "NÃO é um caso clínico nem descreve um paciente.]"
+    ),
+}
+
+
+def formatar_bloco_evolucao(
+    clinical_context: str | None,
+    folder_kind: str = FOLDER_KIND_CLINICAL,
+) -> str:
     """
     Formata a evolução declarada pelo médico como bloco de contexto.
 
@@ -453,6 +482,12 @@ def formatar_bloco_evolucao(clinical_context: str | None) -> str:
 
     Reaproveitar a marcação de apoio entregaria ao modelo um texto autoritativo
     com um aviso dizendo para não confiar nele — e o modelo obedeceria.
+
+    O cabeçalho segue `folder_kind`: numa pasta não clínica, anunciar o texto
+    como "evolução do paciente" faria o modelo inventar um paciente que não
+    existe. Um tipo desconhecido cai no cabeçalho clínico — é o default da
+    coluna e o mais conservador: descreve o texto como contexto do caso em vez
+    de negar que ele seja clínico.
     """
     if not clinical_context or not clinical_context.strip():
         return ""
@@ -464,11 +499,8 @@ def formatar_bloco_evolucao(clinical_context: str | None) -> str:
             + "\n[...evolução truncada por limite de tamanho]"
         )
 
-    return (
-        "[Evolução do paciente / contexto do caso — informada pelo médico nesta "
-        "pasta. Vale como parte do caso atual.]\n"
-        f"{texto}"
-    )
+    cabecalho = _CABECALHO_POR_TIPO.get(folder_kind, _CABECALHO_POR_TIPO[FOLDER_KIND_CLINICAL])
+    return f"{cabecalho}\n{texto}"
 
 
 async def evolucao_da_pasta(
@@ -496,9 +528,12 @@ async def evolucao_da_pasta(
     # leitura de dado clínico de paciente, e uma segunda barreira aqui custa
     # nada e protege de um caminho futuro que resolva a pasta de outro jeito.
     resultado = await db.execute(
-        select(Folder.clinical_context).where(
+        select(Folder.clinical_context, Folder.folder_kind).where(
             Folder.id == pasta,
             Folder.user_id == user_id,
         )
     )
-    return formatar_bloco_evolucao(resultado.scalar_one_or_none())
+    linha = resultado.one_or_none()
+    if linha is None:
+        return ""
+    return formatar_bloco_evolucao(linha.clinical_context, linha.folder_kind)

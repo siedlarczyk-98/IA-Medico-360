@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
 import { listConversations, type ConversationSummary } from '../api/conversations';
-import { listFolders, createFolder, renameFolder, updateFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder } from '../api/folders';
+import { listFolders, createFolder, renameFolder, updateFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder, type FolderKind } from '../api/folders';
 import { FolderModal } from './FolderModal';
 import { logout } from '../lib/auth';
 import { ProfileModal } from './ProfileModal';
@@ -57,14 +57,15 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: ({ name, clinicalContext }: { name: string; clinicalContext: string }) =>
-      createFolder(name, clinicalContext),
-    onMutate: async ({ name, clinicalContext }) => {
+    mutationFn: ({ name, clinicalContext, folderKind }: { name: string; clinicalContext: string; folderKind: FolderKind }) =>
+      createFolder(name, clinicalContext, folderKind),
+    onMutate: async ({ name, clinicalContext, folderKind }) => {
       await queryClient.cancelQueries({ queryKey: ['folders'] });
       const previous = queryClient.getQueryData<Folder[]>(['folders']);
       const optimistic: Folder = {
         id: `optimistic-${Date.now()}`,
         name,
+        folder_kind: folderKind,
         clinical_context: clinicalContext || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -98,13 +99,13 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   // `clinical_context` para não tocar na evolução ao renomear inline. Esta
   // manda os dois porque veio do modal, onde o médico viu e editou o texto.
   const updateFolderMutation = useMutation({
-    mutationFn: ({ id, name, clinicalContext }: { id: string; name: string; clinicalContext: string }) =>
-      updateFolder(id, name, clinicalContext),
-    onMutate: async ({ id, name, clinicalContext }) => {
+    mutationFn: ({ id, name, clinicalContext, folderKind }: { id: string; name: string; clinicalContext: string; folderKind: FolderKind }) =>
+      updateFolder(id, name, clinicalContext, folderKind),
+    onMutate: async ({ id, name, clinicalContext, folderKind }) => {
       await queryClient.cancelQueries({ queryKey: ['folders'] });
       const previous = queryClient.getQueryData<Folder[]>(['folders']);
       queryClient.setQueryData<Folder[]>(['folders'], (old = []) =>
-        old.map(f => f.id === id ? { ...f, name, clinical_context: clinicalContext || null } : f)
+        old.map(f => f.id === id ? { ...f, name, folder_kind: folderKind, clinical_context: clinicalContext || null } : f)
       );
       return { previous };
     },
@@ -276,11 +277,11 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     return map;
   }, [folders, conversations]);
 
-  function salvarPastaDoModal(name: string, clinicalContext: string) {
+  function salvarPastaDoModal(name: string, clinicalContext: string, folderKind: FolderKind) {
     if (folderModal === 'new') {
-      createFolderMutation.mutate({ name, clinicalContext });
+      createFolderMutation.mutate({ name, clinicalContext, folderKind });
     } else if (folderModal) {
-      updateFolderMutation.mutate({ id: folderModal.id, name, clinicalContext });
+      updateFolderMutation.mutate({ id: folderModal.id, name, clinicalContext, folderKind });
     }
     setFolderModal(null);
   }

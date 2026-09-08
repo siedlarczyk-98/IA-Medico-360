@@ -130,7 +130,11 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
                   <path d="M3 2h10v12H3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
                   <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
                 </svg>
-                {folder.clinical_context ? 'Editar evolução' : 'Adicionar evolução'}
+                {/* "evolução" só faz sentido numa pasta de paciente; numa pasta
+                    de estudos o mesmo campo é o contexto do trabalho. */}
+                {folder.folder_kind === 'general'
+                  ? (folder.clinical_context ? 'Editar contexto' : 'Adicionar contexto')
+                  : (folder.clinical_context ? 'Editar evolução' : 'Adicionar evolução')}
               </button>
               <div style={{ height: 1, background: 'var(--line2)', margin: '0 8px' }} />
               {!confirmDelete ? (

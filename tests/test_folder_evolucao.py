@@ -154,3 +154,66 @@ async def test_nao_escreve_evolucao_em_pasta_alheia(client, user_factory, folder
     )
 
     assert resp.status_code == 404
+
+
+# ── Tipo da pasta ────────────────────────────────────────────────────────────
+
+async def test_cria_pasta_geral(client, user):
+    resp = await client.post(
+        "/api/v1/folders",
+        json={"name": "Artigos para ler", "folder_kind": "general",
+              "clinical_context": "Revisar guidelines de 2026"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["folder_kind"] == "general"
+
+
+async def test_pasta_nasce_clinica_por_padrao(client, user):
+    """As pastas da 009 foram criadas quando o campo era descrito como evolução
+    de paciente — o default preserva o sentido do que já está gravado."""
+    resp = await client.post(
+        "/api/v1/folders", json={"name": "Sem tipo"}, headers=auth_headers(user)
+    )
+
+    assert resp.json()["folder_kind"] == "clinical"
+
+
+async def test_tipo_invalido_e_recusado(client, user):
+    resp = await client.post(
+        "/api/v1/folders",
+        json={"name": "Pasta", "folder_kind": "qualquer_coisa"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_renomear_sem_mandar_tipo_nao_reclassifica(client, user, folder_factory):
+    """Mesma regra do `clinical_context`: um cliente que só renomeia não pode
+    reclassificar a pasta sem querer."""
+    pasta = await folder_factory(user, name="Estudos")
+    pasta.folder_kind = "general"
+
+    resp = await client.put(
+        f"/api/v1/folders/{pasta.id}",
+        json={"name": "Estudos 2026"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.json()["folder_kind"] == "general", (
+        "renomear reclassificou a pasta como clínica"
+    )
+
+
+async def test_muda_o_tipo_da_pasta(client, user, folder_factory):
+    pasta = await folder_factory(user, name="Pasta", clinical_context=EVOLUCAO)
+
+    resp = await client.put(
+        f"/api/v1/folders/{pasta.id}",
+        json={"name": "Pasta", "folder_kind": "general"},
+        headers=auth_headers(user),
+    )
+
+    assert resp.json()["folder_kind"] == "general"

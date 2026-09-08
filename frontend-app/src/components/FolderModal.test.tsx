@@ -23,6 +23,7 @@ vi.mock('../hooks/useIsMobile', () => ({ useIsMobile: () => false }));
 const PASTA = {
   id: 'f1',
   name: 'Paciente Jorge',
+  folder_kind: 'clinical' as const,
   clinical_context: 'Jorge, 58a, HAS + DM2. Alergia a dipirona.',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -36,7 +37,7 @@ describe('FolderModal', () => {
     await userEvent.type(screen.getByPlaceholderText(/Paciente Jorge, ou Cardiologia/), 'Cardiologia');
     await userEvent.click(screen.getByRole('button', { name: 'Criar pasta' }));
 
-    expect(onSave).toHaveBeenCalledWith('Cardiologia', '');
+    expect(onSave).toHaveBeenCalledWith('Cardiologia', '', 'clinical');
   });
 
   it('cria pasta com evolução', async () => {
@@ -47,7 +48,7 @@ describe('FolderModal', () => {
     await userEvent.type(screen.getByRole('textbox', { name: /Evolução do paciente/ }), 'HAS + DM2');
     await userEvent.click(screen.getByRole('button', { name: 'Criar pasta' }));
 
-    expect(onSave).toHaveBeenCalledWith('Jorge', 'HAS + DM2');
+    expect(onSave).toHaveBeenCalledWith('Jorge', 'HAS + DM2', 'clinical');
   });
 
   it('ao editar, mostra a evolução que já estava gravada', () => {
@@ -94,5 +95,52 @@ describe('FolderModal', () => {
     render(<FolderModal onClose={() => {}} onSave={() => {}} />);
 
     expect(screen.getByText(/todas as conversas desta pasta/)).toBeInTheDocument();
+  });
+
+  // ── Tipo da pasta ──────────────────────────────────────────────────────────
+  // O campo nasceu supondo que toda pasta é de um paciente. Numa pasta de
+  // estudos, "Evolução do paciente" não significa nada — e o mesmo texto era
+  // injetado no prompt anunciado como evolução de alguém.
+
+  it('pergunta se a pasta é de um paciente, e começa em clínica', () => {
+    render(<FolderModal onClose={() => {}} onSave={() => {}} />);
+
+    expect(screen.getByText('Esta pasta é sobre um paciente?')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Sim, é clínica/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('trocar para não-clínica troca o rótulo do campo', async () => {
+    render(<FolderModal onClose={() => {}} onSave={() => {}} />);
+
+    expect(screen.getByText(/Evolução do paciente/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('radio', { name: /Não/ }));
+
+    expect(screen.queryByText(/Evolução do paciente/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Contexto da pasta/)).toBeInTheDocument();
+  });
+
+  it('salva o tipo escolhido', async () => {
+    const onSave = vi.fn();
+    render(<FolderModal onClose={() => {}} onSave={onSave} />);
+
+    await userEvent.click(screen.getByRole('radio', { name: /Não/ }));
+    await userEvent.type(screen.getByPlaceholderText(/Paciente Jorge, ou Cardiologia/), 'Estudos');
+    await userEvent.click(screen.getByRole('button', { name: 'Criar pasta' }));
+
+    expect(onSave).toHaveBeenCalledWith('Estudos', '', 'general');
+  });
+
+  it('ao editar, abre com o tipo que a pasta já tem', () => {
+    render(
+      <FolderModal
+        folder={{ ...PASTA, folder_kind: 'general', clinical_context: 'Prova de título' }}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('radio', { name: /Não/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/Contexto da pasta/)).toBeInTheDocument();
   });
 });

@@ -9,6 +9,8 @@ class FolderOut(BaseModel):
 
     id: UUID
     name: str
+    # "clinical" (paciente) ou "general" (estudo, gestão, tema).
+    folder_kind: str = "clinical"
     # Evolução do paciente / contexto do caso escrito pelo médico. Devolvido
     # na íntegra para que a tela de edição mostre o que está gravado — é o
     # próprio médico lendo o que ele escreveu, não exposição de dado alheio.
