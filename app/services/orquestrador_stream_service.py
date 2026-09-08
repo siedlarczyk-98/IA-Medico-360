@@ -333,7 +333,15 @@ class OrquestradorStreamService:
                             tool_usage = token.tool_usage
 
                 except Exception as e:
-                    logger.warning(f"Stream falhou em {model_id}: {e}. Tentando fallback completo...")
+                    # `type(e).__name__` junto da mensagem: um `httpx.ReadTimeout`
+                    # tem `str()` VAZIO, e o log saía como "Stream falhou em
+                    # sabia-4-thinking: ." — sem dizer que a causa era timeout.
+                    # Foi assim que o Data Ocean falhou em produção sem deixar
+                    # pista nenhuma.
+                    logger.warning(
+                        "Stream falhou em %s: %s: %s. Tentando fallback completo...",
+                        model_id, type(e).__name__, e or "(sem mensagem)",
+                    )
                     is_fallback = True
                     fallback_result = await self._fallback_complete(
                         db,
@@ -556,7 +564,19 @@ class OrquestradorStreamService:
         no fallback perdia a imagem e o modelo secundário respondia sobre um
         exame que nunca recebeu — sem que o médico soubesse.
         """
-        for fallback_model in FALLBACK_MODELS.get(mode, []):
+        candidatos = FALLBACK_MODELS.get(mode, [])
+        if not candidatos:
+            # Ausência de fallback é decisão, não esquecimento: no DATA_OCEAN
+            # nenhum outro modelo consulta as bases brasileiras, e responder da
+            # memória de treino entregaria números inventados com a mesma cara
+            # de uma consulta real. Mas o log precisa dizer isso, senão a falha
+            # parece defeito de configuração.
+            logger.warning(
+                "Modo %s não tem fallback declarado — a falha do modelo "
+                "primário será devolvida ao médico.", mode,
+            )
+
+        for fallback_model in candidatos:
             model_info = await get_model_pricing(db, fallback_model)
             if not model_info:
                 continue
@@ -575,7 +595,14 @@ class OrquestradorStreamService:
                     "tokens_in": response.tokens_in,
                     "tokens_out": response.tokens_out,
                 }
-            except Exception:
+            except Exception as e:
+                # Sem isto, a falha de CADA modelo da cadeia desaparecia: o log
+                # tinha só o aviso do primário, e não havia como diagnosticar
+                # "por que a resposta saiu genérica" sem reproduzir.
+                logger.warning(
+                    "Fallback %s também falhou: %s: %s",
+                    fallback_model, type(e).__name__, e or "(sem mensagem)",
+                )
                 continue
         return {
             "text": "Desculpe, não foi possível processar sua consulta no momento.",

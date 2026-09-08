@@ -190,3 +190,82 @@ async def test_evolucao_da_pasta_e_sanitizada_antes_de_gravar():
     # O conteúdo clínico precisa sobreviver: sanitizar não é apagar.
     assert "58 anos" in limpo
     assert "HAS" in limpo
+
+
+# ── O wrapper não pode decidir timeout ───────────────────────────────────────
+# O `DlpEnforcingProvider` declarava `timeout: int = 30` e repassava esse valor
+# SEMPRE. Como todo provider é embrulhado por ele, 30s virava o timeout efetivo
+# de todos — anulando os que cada provider define para si.
+#
+# Em produção isso derrubou o Data Ocean: o `MaritacaProvider` pede 120s porque
+# o fluxo agêntico demora, recebia 30, e estourava. O erro era um
+# `httpx.ReadTimeout`, cujo `str()` é VAZIO — o log saiu como
+# "Stream falhou em sabia-4-thinking: ." e ninguém tinha como saber a causa.
+
+
+class _ProviderQueRegistraTimeout:
+    """Captura o timeout que de fato chegou ao provider."""
+
+    TIMEOUT_PROPRIO = 120
+
+    def __init__(self):
+        self.recebido = "NUNCA CHAMADO"
+
+    async def complete(self, model_id, prompt, timeout: int = TIMEOUT_PROPRIO, **kwargs):
+        self.recebido = timeout
+
+        class _R:
+            text = "ok"
+            tokens_in = 1
+            tokens_out = 1
+            tool_usage = None
+            citations = None
+        return _R()
+
+    async def stream(self, model_id, prompt, timeout: int = TIMEOUT_PROPRIO, **kwargs):
+        self.recebido = timeout
+        yield StreamToken(delta="", done=True)
+
+
+@pytest.mark.asyncio
+async def test_o_wrapper_nao_sobrescreve_o_timeout_do_provider():
+    """Sem timeout explícito, vale o default de quem conhece a API."""
+    interno = _ProviderQueRegistraTimeout()
+
+    await DlpEnforcingProvider(interno).complete("modelo", "prompt")
+
+    assert interno.recebido == _ProviderQueRegistraTimeout.TIMEOUT_PROPRIO, (
+        f"o wrapper impôs {interno.recebido}s no lugar do timeout do provider — "
+        "foi assim que o Data Ocean estourou em produção"
+    )
+
+
+@pytest.mark.asyncio
+async def test_o_wrapper_nao_sobrescreve_o_timeout_no_streaming():
+    interno = _ProviderQueRegistraTimeout()
+
+    async for _ in DlpEnforcingProvider(interno).stream("modelo", "prompt"):
+        pass
+
+    assert interno.recebido == _ProviderQueRegistraTimeout.TIMEOUT_PROPRIO
+
+
+@pytest.mark.asyncio
+async def test_timeout_explicito_continua_valendo():
+    """A contrapartida: quem PEDE um timeout tem o pedido respeitado."""
+    interno = _ProviderQueRegistraTimeout()
+
+    await DlpEnforcingProvider(interno).complete("modelo", "prompt", timeout=7)
+
+    assert interno.recebido == 7
+
+
+def test_o_timeout_do_maritaca_cabe_no_fluxo_agentico():
+    """O Data Ocean roda várias consultas antes de devolver a primeira palavra.
+
+    Se alguém baixar este valor para perto dos 30s dos outros providers, o modo
+    volta a estourar — e o sintoma é um erro sem mensagem.
+    """
+    from app.services.integracoes.ai_providers import MaritacaProvider
+
+    assert MaritacaProvider.TIMEOUT_FERRAMENTAS >= 90

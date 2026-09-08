@@ -1022,15 +1022,37 @@ class DlpEnforcingProvider(BaseProvider):
             for m in history
         ]
 
-    async def complete(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
+    async def complete(self, model_id: str, prompt: str, timeout: int | None = None, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> ProviderResponse:
         safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
         safe_history = await self._sanitize_history(history)
-        return await self._inner.complete(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history)
+        return await self._inner.complete(model_id, safe_prompt, **self._timeout(timeout), system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history)
 
-    async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
+    @staticmethod
+    def _timeout(timeout: int | None) -> dict:
+        """Repassa `timeout` só quando quem chamou realmente pediu um.
+
+        POR QUE ISTO EXISTE
+        O wrapper declarava `timeout: int = 30` e repassava esse valor SEMPRE.
+        Como todo provider é embrulhado por ele, o default de 30s virava o
+        timeout efetivo de todos — anulando os que cada provider define para
+        si: 120s no Maritaca (o fluxo agêntico do Data Ocean leva mais que
+        isso), 45s no Perplexity (busca na web).
+
+        O sintoma era um `httpx.ReadTimeout` — que tem `str()` VAZIO — logado
+        como "Stream falhou em sabia-4-thinking: ." e seguido de um fallback,
+        sem nenhuma indicação de que a causa era timeout. O Data Ocean nunca
+        completava.
+
+        Omitir a chave faz o Python usar o default declarado no provider, que
+        é onde a decisão pertence: quem sabe quanto uma chamada demora é quem
+        conhece a API.
+        """
+        return {} if timeout is None else {"timeout": timeout}
+
+    async def stream(self, model_id: str, prompt: str, timeout: int | None = None, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         safe_prompt = (await sanitize_prompt_async(prompt)).sanitized_text
         safe_history = await self._sanitize_history(history)
-        async for token in self._inner.stream(model_id, safe_prompt, timeout=timeout, system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history):
+        async for token in self._inner.stream(model_id, safe_prompt, **self._timeout(timeout), system_prompt=system_prompt, temperature=temperature, web_search=web_search, image_content=image_content, max_tokens=max_tokens, history=safe_history):
             yield token
 
 

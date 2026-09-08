@@ -420,7 +420,12 @@ class OrquestradorService:
                 "tool_usage": response.tool_usage,
             }
         except Exception as e:
-            logger.warning(f"Falha no {model_id}: {e}. Tentando fallback...")
+            # Tipo da exceção junto da mensagem: um `httpx.ReadTimeout` tem
+            # `str()` vazio, e o log saía sem dizer que a causa era timeout.
+            logger.warning(
+                "Falha no %s: %s: %s. Tentando fallback...",
+                model_id, type(e).__name__, e or "(sem mensagem)",
+            )
             return await self._try_fallback(
                 mode, prompt, system_prompt, str(e), history=history, image_content=image_content
             )
@@ -470,7 +475,11 @@ class OrquestradorService:
                     "tokens_out": response.tokens_out,
                     "is_fallback": True,
                 }
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Fallback %s também falhou: %s: %s",
+                    fallback_model, type(e).__name__, e or "(sem mensagem)",
+                )
                 continue
 
         return {
