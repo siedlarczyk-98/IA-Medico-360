@@ -13,6 +13,8 @@ interface FolderRowProps {
   onMove: (convId: string, folderId: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  /** Abre o modal da pasta para editar nome e evolução do paciente. */
+  onEdit: (folder: Folder) => void;
   onNewInFolder: (folderId: string, folderName: string) => void;
   selectedConvIds?: Set<string>;
   selectionMode?: boolean;
@@ -21,7 +23,7 @@ interface FolderRowProps {
   onDropConv?: (folderId: string | null) => void;
 }
 
-function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
+function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onEdit, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
@@ -119,6 +121,16 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
                   <path d="M11 2 L14 5 L5 14 H2 V11 L11 2Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                 </svg>
                 Renomear
+              </button>
+              {/* Renomear inline continua existindo e NÃO manda a evolução —
+                  corrigir um typo no nome não deve abrir uma tela de texto
+                  clínico. Editar a evolução é uma ação própria. */}
+              <button onClick={() => { onEdit(folder); setMenuOpen(false); }} style={ctxItemStyle}>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 2h10v12H3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                  <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+                {folder.clinical_context ? 'Editar evolução' : 'Adicionar evolução'}
               </button>
               <div style={{ height: 1, background: 'var(--line2)', margin: '0 8px' }} />
               {!confirmDelete ? (

@@ -3,7 +3,8 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { useUserUsage } from '../lib/useUserUsage';
 import { listConversations, type ConversationSummary } from '../api/conversations';
-import { listFolders, createFolder, renameFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder } from '../api/folders';
+import { listFolders, createFolder, renameFolder, updateFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder } from '../api/folders';
+import { FolderModal } from './FolderModal';
 import { logout } from '../lib/auth';
 import { ProfileModal } from './ProfileModal';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -56,13 +57,15 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: (name: string) => createFolder(name),
-    onMutate: async (name: string) => {
+    mutationFn: ({ name, clinicalContext }: { name: string; clinicalContext: string }) =>
+      createFolder(name, clinicalContext),
+    onMutate: async ({ name, clinicalContext }) => {
       await queryClient.cancelQueries({ queryKey: ['folders'] });
       const previous = queryClient.getQueryData<Folder[]>(['folders']);
       const optimistic: Folder = {
         id: `optimistic-${Date.now()}`,
         name,
+        clinical_context: clinicalContext || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -82,6 +85,26 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       const previous = queryClient.getQueryData<Folder[]>(['folders']);
       queryClient.setQueryData<Folder[]>(['folders'], (old = []) =>
         old.map(f => f.id === id ? { ...f, name } : f)
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['folders'], ctx.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['folders'] }),
+  });
+
+  // Separada de `renameFolderMutation` de propósito: aquela omite
+  // `clinical_context` para não tocar na evolução ao renomear inline. Esta
+  // manda os dois porque veio do modal, onde o médico viu e editou o texto.
+  const updateFolderMutation = useMutation({
+    mutationFn: ({ id, name, clinicalContext }: { id: string; name: string; clinicalContext: string }) =>
+      updateFolder(id, name, clinicalContext),
+    onMutate: async ({ id, name, clinicalContext }) => {
+      await queryClient.cancelQueries({ queryKey: ['folders'] });
+      const previous = queryClient.getQueryData<Folder[]>(['folders']);
+      queryClient.setQueryData<Folder[]>(['folders'], (old = []) =>
+        old.map(f => f.id === id ? { ...f, name, clinical_context: clinicalContext || null } : f)
       );
       return { previous };
     },
@@ -149,12 +172,13 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const [showUsageTip, setShowUsageTip] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
+  // `null` = fechado; `'new'` = criando; um Folder = editando aquele.
+  // Substituiu o input inline de nome: a evolução é texto de várias linhas e
+  // não cabe na sidebar, e criar/editar na mesma tela evita duas UIs.
+  const [folderModal, setFolderModal] = useState<'new' | Folder | null>(null);
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
   const [draggingConvId, setDraggingConvId] = useState<string | null>(null);
   const [showBulkFolderPicker, setShowBulkFolderPicker] = useState(false);
-  const newFolderInputRef = useRef<HTMLInputElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const selectionMode = selectedConvIds.size > 0;
@@ -212,10 +236,6 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     return () => document.removeEventListener('mousedown', handleClick);
   }, [userMenuOpen]);
 
-  useEffect(() => {
-    if (creatingFolder) newFolderInputRef.current?.focus();
-  }, [creatingFolder]);
-
   const closeAfter = useCallback(
     (fn: () => void) => () => { fn(); if (isMobile) onToggle(); },
     [isMobile, onToggle],
@@ -256,11 +276,13 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     return map;
   }, [folders, conversations]);
 
-  function submitNewFolder() {
-    const name = newFolderName.trim();
-    if (name) createFolderMutation.mutate(name);
-    setNewFolderName('');
-    setCreatingFolder(false);
+  function salvarPastaDoModal(name: string, clinicalContext: string) {
+    if (folderModal === 'new') {
+      createFolderMutation.mutate({ name, clinicalContext });
+    } else if (folderModal) {
+      updateFolderMutation.mutate({ id: folderModal.id, name, clinicalContext });
+    }
+    setFolderModal(null);
   }
 
   if (isMobile && !open) return null;
@@ -391,14 +413,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
 
         {/* Seção de pastas */}
-        {(folders.length > 0 || creatingFolder) && (
+        {folders.length > 0 && (
           <div style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px' }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)' }}>
                 Pastas
               </span>
               <button
-                onClick={() => setCreatingFolder(true)}
+                onClick={() => setFolderModal('new')}
                 title="Nova pasta"
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '1px 3px', borderRadius: 4, display: 'flex', alignItems: 'center' }}
               >
@@ -407,29 +429,6 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 </svg>
               </button>
             </div>
-
-            {creatingFolder && (
-              <div style={{ padding: '4px 10px 8px', display: 'flex', gap: 6, alignItems: 'center' }}>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: 'var(--pen3)' }}>
-                  <path d="M2 4h5l1.5 2H14v7H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-                </svg>
-                <input
-                  ref={newFolderInputRef}
-                  value={newFolderName}
-                  onChange={e => setNewFolderName(e.target.value)}
-                  onBlur={submitNewFolder}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') submitNewFolder();
-                    if (e.key === 'Escape') { setNewFolderName(''); setCreatingFolder(false); }
-                  }}
-                  placeholder="Nome da pasta"
-                  style={{
-                    flex: 1, fontSize: 12, border: '1px solid var(--line)', borderRadius: 5,
-                    padding: '3px 7px', outline: 'none', background: '#fff',
-                  }}
-                />
-              </div>
-            )}
 
             {folders.map(folder => (
               <FolderRow
@@ -442,6 +441,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 onMove={handleMoveConv}
                 onRename={handleRenameFolder}
                 onDelete={handleDeleteFolder}
+                onEdit={setFolderModal}
                 onNewInFolder={handleNewInFolder}
                 selectedConvIds={selectedConvIds}
                 selectionMode={selectionMode}
@@ -454,10 +454,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         )}
 
         {/* Botão criar primeira pasta */}
-        {folders.length === 0 && !creatingFolder && (
+        {folders.length === 0 && (
           <div style={{ padding: '0 10px 10px' }}>
             <button
-              onClick={() => setCreatingFolder(true)}
+              onClick={() => setFolderModal('new')}
               style={{
                 width: '100%', background: 'none', border: '1px dashed var(--line2)',
                 borderRadius: 7, padding: '6px 10px', fontSize: 11.5,
@@ -656,6 +656,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         <ProfileModal
           onClose={() => setShowProfile(false)}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: ['currentUser'] })}
+        />
+      )}
+
+      {folderModal && (
+        <FolderModal
+          folder={folderModal === 'new' ? undefined : folderModal}
+          onClose={() => setFolderModal(null)}
+          onSave={salvarPastaDoModal}
         />
       )}
     </aside>

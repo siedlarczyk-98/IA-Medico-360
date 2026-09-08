@@ -35,8 +35,9 @@ vi.mock('../api/conversations', () => ({
 
 vi.mock('../api/folders', () => ({
   listFolders: vi.fn(async () => []),
-  createFolder: vi.fn(), renameFolder: vi.fn(), deleteFolder: vi.fn(),
+  createFolder: vi.fn(), renameFolder: vi.fn(), updateFolder: vi.fn(), deleteFolder: vi.fn(),
   moveConversation: vi.fn(), bulkMoveConversations: vi.fn(),
+  MAX_CHARS_EVOLUCAO: 8000,
 }));
 
 vi.mock('../api/usage', () => ({

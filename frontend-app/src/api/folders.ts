@@ -13,9 +13,14 @@ function authHeaders(): HeadersInit {
 export interface Folder {
   id: string;
   name: string;
+  /** Evolução do paciente escrita pelo médico. Entra em toda mensagem da pasta. */
+  clinical_context: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** Teto do texto de evolução — espelha MAX_CHARS_EVOLUCAO na API, que devolve 422 acima disso. */
+export const MAX_CHARS_EVOLUCAO = 8000;
 
 export async function listFolders(): Promise<Folder[]> {
   const res = await fetch(`${BASE}/api/v1/folders`, { headers: authHeaders() });
@@ -23,16 +28,23 @@ export async function listFolders(): Promise<Folder[]> {
   return res.json();
 }
 
-export async function createFolder(name: string): Promise<Folder> {
+export async function createFolder(name: string, clinicalContext?: string): Promise<Folder> {
   const res = await fetch(`${BASE}/api/v1/folders`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, ...(clinicalContext ? { clinical_context: clinicalContext } : {}) }),
   });
   if (!res.ok) throw new Error('Erro ao criar pasta');
   return res.json();
 }
 
+/**
+ * Renomeia a pasta SEM tocar na evolução.
+ *
+ * O campo é omitido de propósito: a API trata ausente como "não mexa". Mandar
+ * `clinical_context: undefined` daqui seria o mesmo, mas mandar `null` ou `''`
+ * APAGARIA a evolução do paciente — use `updateFolder` para editá-la.
+ */
 export async function renameFolder(id: string, name: string): Promise<Folder> {
   const res = await fetch(`${BASE}/api/v1/folders/${id}`, {
     method: 'PUT',
@@ -40,6 +52,22 @@ export async function renameFolder(id: string, name: string): Promise<Folder> {
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error('Erro ao renomear pasta');
+  return res.json();
+}
+
+/**
+ * Atualiza nome e evolução juntos.
+ *
+ * `clinicalContext` como string vazia LIMPA a evolução — é assim que o médico
+ * apaga o que escreveu. Para não mexer nela, use `renameFolder`.
+ */
+export async function updateFolder(id: string, name: string, clinicalContext: string): Promise<Folder> {
+  const res = await fetch(`${BASE}/api/v1/folders/${id}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({ name, clinical_context: clinicalContext }),
+  });
+  if (!res.ok) throw new Error('Erro ao salvar pasta');
   return res.json();
 }
 
