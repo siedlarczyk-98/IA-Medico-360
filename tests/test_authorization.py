@@ -120,6 +120,19 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/news/keywords/preview"): AUTENTICADA,
     # Dispara coleta, tagging e redação — ou seja, gasta Anthropic e OpenAI.
     ("POST", "/api/v1/news/admin/pipeline"): ADMIN,
+    # Localizador de DEA. É o ÚNICO módulo inteiramente público do produto, e a
+    # decisão é de produto, não descuido: numa parada cardiorrespiratória não há
+    # tempo para autenticar, e quem socorre raramente é quem tem a conta. Não há
+    # dado pessoal envolvido — a localização de um desfibrilador num shopping é
+    # informação pública por natureza, e quanto mais gente enxerga, melhor.
+    #
+    # O que protege esta rota não é login, são os tetos de `raio_km` e `limite`
+    # (contra raspagem da base) mais o rate limit por origem.
+    #
+    # ATENÇÃO ao acrescentar rota administrativa aqui (moderar pin, exportar
+    # base): ela precisa de ADMIN explícito. Neste projeto a auth é rota a rota,
+    # então esquecer a dependency não dá erro — dá vazamento silencioso.
+    ("GET", "/api/v1/dea/locais"): PUBLICA,
     # Uploads e uso
     ("POST", "/api/v1/uploads/extract"): AUTENTICADA,
     ("GET", "/api/v1/users/usage"): AUTENTICADA,

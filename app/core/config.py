@@ -251,6 +251,28 @@ class Settings(BaseSettings):
     # acompanham". Abaixo disso a frase social seria estatistica inventada.
     news_min_amostra_social: int = 20
 
+    # --- Localizador de DEA ---
+    # Frontend do modulo (dea-app). Diferente dos outros apps, este e PUBLICO:
+    # sem login, sem embed, sem identidade.
+    dea_url: str = "http://localhost:5177"
+    dea_enabled: bool = True
+
+    # Sal do hash de IP dos contribuidores anonimos. Obrigatorio em producao (ver
+    # `_validate_production_secrets`): sem sal, `sha256(ip)` e reversivel por
+    # forca bruta trivial — o espaco IPv4 inteiro cabe numa GPU. O hash ainda
+    # rotaciona a cada 24h por um bucket de data, entao o sal sozinho nao permite
+    # rastrear uma origem ao longo do tempo. Ver `app/dea/services/anonimato.py`.
+    dea_ip_hash_salt: str = ""
+
+    # --- Confianca dos registros de DEA ---
+    # Chutes calibraveis, nao constantes fisicas: o numero certo so aparece com
+    # uso real. Ficam aqui, e nao no codigo, para recalibrar sem migration.
+    # Passado este prazo sem verificacao, o registro deixa de valer por si.
+    dea_dias_para_expirar: int = 365
+    dea_dias_para_recente: int = 90
+    # Confirmacoes independentes para o nivel mais alto de confianca.
+    dea_confirmacoes_para_alta: int = 2
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
@@ -273,6 +295,17 @@ class Settings(BaseSettings):
         ]
         if missing:
             raise ValueError(f"Variáveis obrigatórias vazias em produção: {', '.join(missing)}")
+
+        # O sal do hash de IP do DEA só é exigido se o módulo estiver ligado:
+        # sem ele o hash vira `sha256(ip|data)`, reversível por força bruta
+        # (o espaço IPv4 inteiro cabe numa GPU), e o que deveria ser pseudônimo
+        # vira registro de geolocalização por IP. Condicionado a `dea_enabled`
+        # para que desligar o módulo não derrube o backend inteiro no startup.
+        if self.dea_enabled and not self.dea_ip_hash_salt:
+            raise ValueError(
+                "DEA_IP_HASH_SALT é obrigatório em produção com DEA_ENABLED=true: "
+                "sem sal, o hash de IP dos contribuidores anônimos é reversível."
+            )
 
         # O embed SSO só prova identidade via validação server-to-server: sem ela, o
         # endpoint confia apenas no header Origin (forjável) e emite JWT para qualquer
@@ -306,6 +339,13 @@ def origens_confiaveis(settings: "Settings") -> list[str]:
     montadas em lugares diferentes divergiriam, e a divergência apareceria como
     "o upload parou de funcionar" depois de alguém acrescentar um front novo só
     no CORS.
+
+    **Exceção deliberada: `dea_url` NÃO entra aqui.** O `dea-app` é público —
+    não tem cookie de sessão nem header `Authorization`, então não há requisição
+    autenticada dele para proteger contra CSRF. Ele precisa do CORS (em
+    `main.py`) para o browser deixar o JavaScript ler a resposta; incluí-lo
+    nesta lista só ampliaria a superfície de origens confiáveis sem nenhum ganho.
+    Se um dia o módulo ganhar rota autenticada, esta linha é a que muda.
     """
     origens = [settings.frontend_url, settings.calculadoras_url]
     origens += settings.embed_allowed_origins + settings.landing_pages_origins

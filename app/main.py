@@ -100,7 +100,10 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────
-_app_origins = [settings.frontend_url, settings.calculadoras_url]
+# `dea_url` entra no CORS mas NÃO em `origens_confiaveis()`: o dea-app é público,
+# não manda cookie nem Authorization, então não há requisição autenticada dele
+# para o anti-CSRF proteger. Ver o docstring de `origens_confiaveis`.
+_app_origins = [settings.frontend_url, settings.calculadoras_url, settings.dea_url]
 _cors_origins = _app_origins + settings.embed_allowed_origins + settings.landing_pages_origins
 if not settings.is_production:
     # localhost e 127.0.0.1 são tratados como origens distintas pelo browser

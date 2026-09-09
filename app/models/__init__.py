@@ -1,4 +1,5 @@
 from app.models.calculators import *  # noqa: F401, F403
+from app.models.dea import *  # noqa: F401, F403
 from app.models.landing_pages import *  # noqa: F401, F403
 from app.models.models import *  # noqa: F401, F403
 from app.models.news import *  # noqa: F401, F403

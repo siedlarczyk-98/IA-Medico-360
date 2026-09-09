@@ -13,6 +13,7 @@ from app.api.v1.endpoints.uploads import router as uploads_router
 from app.api.v1.endpoints.usage import router as usage_router
 from app.calculators.routers.calculators_router import router as calculators_router
 from app.calculators.routers.prevent_router import router as prevent_router
+from app.dea.routers.dea_router import router as dea_router
 
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(auth_router)
@@ -21,6 +22,7 @@ api_v1_router.include_router(folders_router)
 api_v1_router.include_router(agregador_router)
 api_v1_router.include_router(calculators_router)
 api_v1_router.include_router(prevent_router)
+api_v1_router.include_router(dea_router)
 api_v1_router.include_router(health_router)
 api_v1_router.include_router(landing_pages_router)
 api_v1_router.include_router(meta_router)
