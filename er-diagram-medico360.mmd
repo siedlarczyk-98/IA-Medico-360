@@ -196,3 +196,48 @@ erDiagram
     timestamp revoked_at
     timestamp createdat
   }
+  %% ── schema dea ──────────────────────────────────────────────
+  %% Localizador publico de desfibriladores. NAO ha FK para users:
+  %% o modulo e anonimo, e a autoria e um hash rotativo de IP.
+  dea_locais ||--o{ dea_dispositivos : "local_id (CASCADE)"
+  dea_dispositivos ||--o{ dea_verificacoes : "dispositivo_id (CASCADE)"
+
+  dea_locais {
+    uuid id PK
+    string nome
+    string endereco
+    string cidade
+    string uf
+    float latitude
+    float longitude
+    float lat_arredondada
+    float lon_arredondada
+    string horario_texto
+    boolean acesso_24h
+    timestamp criado_em
+    timestamp atualizado_em
+  }
+
+  dea_dispositivos {
+    uuid id PK
+    uuid local_id FK
+    text descricao_localizacao
+    string acesso
+    string foto_url
+    string status
+    string origem
+    int verificacoes_positivas
+    int verificacoes_negativas
+    timestamp ultima_verificacao_em
+    timestamp criado_em
+    string criado_por_ip_hash
+  }
+
+  dea_verificacoes {
+    uuid id PK
+    uuid dispositivo_id FK
+    string resultado
+    text observacao
+    timestamp verificado_em
+    string ip_hash
+  }

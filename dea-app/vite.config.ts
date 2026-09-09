@@ -18,7 +18,8 @@ export default defineConfig({
     // unica copia do React (duas quebrariam os hooks).
     dedupe: ['react', 'react-dom'],
   },
-  // Porta propria: 5173 e o app principal, 5174 as calculadoras, 5175 as LPs,
-  // 5176 as noticias.
-  server: { port: 5177 },
+  // 5173 app principal, 5174 calculadoras, 5175/5176/5177 as tres LPs, 5176
+  // noticias (que ja colide com lp-contabilidade — divida pre-existente).
+  // 5179 para nao colidir com lp-parceiros, que ocupa a 5177.
+  server: { port: 5179 },
 })

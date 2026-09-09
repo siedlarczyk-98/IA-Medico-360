@@ -252,7 +252,7 @@ class Settings(BaseSettings):
     # --- Localizador de DEA ---
     # Frontend do modulo (dea-app). Diferente dos outros apps, este e PUBLICO:
     # sem login, sem embed, sem identidade.
-    dea_url: str = "http://localhost:5177"
+    dea_url: str = "http://localhost:5179"
     dea_enabled: bool = True
 
     # Sal do hash de IP dos contribuidores anonimos. Obrigatorio em producao (ver

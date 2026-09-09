@@ -1,7 +1,7 @@
 # Arquitetura Técnica — Médico 360
 
-> Levantamento estático do código em **2026-09-08** (commit `4fd6475`). Referências `arquivo:linha` apontam para a raiz do repositório.
-> Substitui a versão de 2026-09-02 — o que mudou desde então está no §1.
+> Levantamento estático do código em **2026-09-09**. Referências `arquivo:linha` apontam para a raiz do repositório.
+> Substitui a versão de 2026-09-08 — o que mudou desde então está no §1.
 
 ## 0. Como ler este documento
 
@@ -29,7 +29,42 @@ Documentos irmãos, que este aqui não duplica:
 
 ---
 
-## 1. O que mudou desde o levantamento anterior (2 → 8 de setembro)
+## 1. O que mudou desde o levantamento anterior (8 → 9 de setembro)
+
+Uma frente só, mas grande: **o localizador de DEA**, um módulo novo do zero — schema,
+API pública, app frontend e deploy. Detalhes no §7-B; aqui fica o que muda para quem
+conhecia o sistema anterior.
+
+### 1.0 Localizador de DEA — o primeiro módulo público do produto
+
+Até aqui, **toda** rota que servia conteúdo exigia usuário autenticado, e todo frontend
+era embedado no LMS. O `dea-app` quebra as duas premissas: é público, anônimo, e não vive
+em iframe. Três consequências práticas para quem for mexer no código:
+
+1. **`origens_confiaveis()` ganhou uma exceção documentada.** `DEA_URL` entra no CORS de
+   `app/main.py` mas **não** na lista anti-CSRF — não há requisição autenticada do
+   `dea-app` para proteger. É a primeira vez que as duas listas divergem de propósito.
+2. **A escrita pública precisou de defesas que não existiam no projeto**: densidade
+   geográfica, honeypot, `status=pendente` como etiqueta de confiança. Ver §7-B.1.
+3. **`DEA_IP_HASH_SALT` é fail-closed no startup** quando `DEA_ENABLED=true`. Sem sal, o
+   hash de IP do contribuidor anônimo é reversível por força bruta.
+
+Também **confirmou uma decisão de longo prazo sobre o banco**: nenhuma extensão nova. A
+busca por raio usa bounding box + Haversine em SQL em vez de PostGIS, e o motivo é
+testabilidade, não performance — `tests/conftest.py` monta o schema por `create_all`, então
+o que só a migration cria não existe em teste. Ver §7-B.3.
+
+### 1.0-A Uma armadilha conhecida cobrou de novo
+
+O primeiro deploy do `dea-app` subiu **verde e quebrado**: sem `ARG VITE_API_URL` no
+Dockerfile, o Vite assou `localhost:8000` no bundle. É exatamente o que o comentário do
+`noticias-app/Dockerfile` avisa desde o caso do `VITE_WAID_ORIGIN`, e ainda assim
+aconteceu — o app nasceu sem nenhuma variável `VITE_`, e o `ARG` não foi acrescentado
+junto com a primeira. Corrigido no código; falta o valor no painel e um rebuild.
+
+### 1.0-B Levantamento anterior (2 → 8 de setembro)
+
+O que segue abaixo descreve o trabalho da semana anterior e continua válido.
 
 Vinte commits em um dia, em cinco frentes. As duas primeiras são produto; as três últimas saíram de revisões que encontraram defeitos **abertos em produção**.
 
@@ -103,13 +138,14 @@ Duas frentes: o módulo de notícias e a identidade profissional do médico.
 Não existem "3 instâncias" no sentido de serviços de backend independentes. A arquitetura é:
 
 - **1 backend único** (`app/`) — FastAPI monolítico que serve todos os domínios (Orquestrador/Agregador, Calculadoras, Notícias, Landing Pages) no mesmo processo, mesmo banco, mesmo router raiz.
-- **6 frontends React**, cada um com deploy próprio no Railway:
+- **7 frontends React**, cada um com deploy próprio no Railway:
 
 | App | Papel | Porta dev | Rotas de backend que consome |
 |---|---|---|---|
 | `frontend-app/` | Chat do Orquestrador, histórico, pastas, anexos | 5173 | `/auth`, `/orquestrador`, `/agregador`, `/conversations`, `/folders`, `/uploads`, `/users/usage` |
 | `calculadoras-app/` | Calculadoras clínicas | 5174 | `/auth`, `/calculators`, `/prevent`, `/landing-pages/calculators` |
 | `noticias-app/` | Feed clínico por tema | 5176 | `/auth`, `/news`, `/meta` |
+| `dea-app/` | Metrônomo de RCP + mapa de desfibriladores. **Público, sem login** | 5179 | `/dea` |
 | `lp-financas/` | LP de captação — finanças | 5175 | `/landing-pages/finance` |
 | `lp-contabilidade/` | LP de captação — contabilidade | 5178 | `/landing-pages/accounting` |
 | `lp-parceiros/` | LP de captação — parceiros | 5177 | `/landing-pages/partners` |
@@ -780,6 +816,167 @@ identidade do §3.4.**
 | `POST /news/feedback/nao-interessa` | Registra desinteresse, com a especialidade do momento |
 | `GET` / `PUT /news/me/preferences` | E-mail do digest |
 | `POST /news/admin/pipeline` | Dispara o pipeline (admin) |
+
+---
+
+## 7-B. Localizador de DEA
+
+Mapa colaborativo de desfibriladores externos automáticos, mais um metrônomo de RCP.
+Entrou em 2026-09-09. É o **único módulo público do produto** — sem login, sem embed,
+sem identidade — e essa decisão explica quase todo o desenho abaixo.
+
+O canal de captação são os participantes dos cursos de ACLS que a empresa ministra: o
+médico instala pelo metrônomo, que é útil sozinho, e descobre o mapa.
+
+### 7-B.1 Por que público, e o que substitui a autenticação
+
+Numa parada cardiorrespiratória não há tempo para autenticar, e quem socorre raramente é
+quem tem a conta. Exigir login para **cadastrar** mataria a base antes de ela existir:
+quem passa por um DEA e quem é usuário do produto quase nunca são a mesma pessoa.
+
+No lugar da autenticação, em ordem de eficácia real:
+
+| Defesa | Onde | O que barra |
+|---|---|---|
+| Densidade geográfica | `antivandalismo.densidade_excedida` | >5 locais novos/hora num raio de ~1 km → 429. Mata o "50 pins numa quadra" |
+| `status='pendente'` | `cadastro_service.criar` | Não bloqueia: tira o incentivo. O pin plantado nasce marcado como não confirmado |
+| Honeypot + tempo mínimo | `antivandalismo.parece_bot` | Campo oculto e <3s de preenchimento. Responde **201 com id falso**, nunca 400 |
+| Limite por origem | `cache_service.rate_limit_exceeded` | 5 cadastros/h, 20 verificações/h por `ip_hash` |
+| Tetos de `raio_km` e `limite` | `dea_schemas.py` | Raspagem da base: sem eles, `raio_km=20000` é um dump |
+
+**A densidade é a única que não depende de identificar a origem, e por isso a mais
+confiável.** O limite por IP é o mais fraco: `Dockerfile:22` roda uvicorn com
+`--forwarded-allow-ips "*"`, então o `X-Forwarded-For` é forjável e quem o troca a cada
+request aparece como origem nova. Está documentado no código — confiar numa defesa mais
+do que ela merece é pior que não tê-la.
+
+**A densidade conta apenas locais novos, nunca verificações.** É a diferença entre barrar
+spam e barrar o caso de uso principal: trinta alunos confirmando o mesmo DEA durante um
+curso é o comportamento desejado. Há teste amarrando isso.
+
+### 7-B.2 A decisão central: confiança que envelhece
+
+O protótipo que originou o projeto tinha um `verified: bool`. O problema não é ser simples
+demais — é **não ter eixo de tempo**. Um DEA marcado como verificado em 2026 continua
+verificado em 2029, mesmo que tenha saído da parede em 2027. Correr 300 m até uma parede
+vazia é tempo fora da janela de sobrevida.
+
+A verificação virou histórico (`dea.verificacoes`), e a confiança é derivada dele em
+`app/dea/services/confianca.py` — função pura, testável sem banco:
+
+- `alta` — 2+ confirmações e verificação recente (≤90 dias)
+- `media` — pelo menos uma confirmação, ou alta que envelheceu
+- `baixa` — nunca confirmado, ou passou do prazo (365 dias)
+- `contestado` — negativas ≥ positivas. **Domina qualquer histórico positivo**: entre "3
+  pessoas confirmaram no ano passado" e "alguém não achou ontem", a segunda é a que muda
+  a decisão de quem está correndo
+
+Os limiares vivem em `Settings`, não em constantes: são chutes calibráveis, e o número
+certo só aparece com uso real.
+
+**A API nunca devolve um score numérico** — só o rótulo e os fatos crus (`confirmacoes`,
+`dias_desde_ultima_verificacao`). Um `0.73` viraria porcentagem em alguma tela, e
+porcentagem parece medida; não é, é heurística sobre quantas pessoas passaram por ali.
+
+A regra de produto que decorre: **o app nunca diz "há um DEA aqui"**. Diz "confirmado por
+3 pessoas · há 12 dias" ou "ainda não confirmado por ninguém". A responsabilidade fica no
+dado, não numa promessa que o app não pode cumprir.
+
+### 7-B.3 Busca por raio sem PostGIS
+
+Bounding box sobre o índice btree `(latitude, longitude)`, depois Haversine em SQL para
+distância exata, ordenação e corte — tudo numa ida ao banco
+(`app/dea/repositories/locais_repository.py`).
+
+**O argumento decisivo não foi performance, foi testabilidade.** `tests/conftest.py` monta
+o schema com `Base.metadata.create_all`, não com Alembic. Um índice GiST sobre
+`earth_box(...)`, ou a extensão em si, seriam criados apenas pela migration — e portanto
+não existiriam no banco de teste. O teste da busca passaria exercitando um caminho
+diferente do de produção, que é pior que não ter teste. Índice declarado no modelo existe
+nos dois lugares, e há teste conferindo que ele existe.
+
+Somam-se: `CREATE EXTENSION` pode ser recusado num Postgres gerenciado (descoberto no
+deploy, no meio da cadeia), e o ganho do índice espacial só aparece com centenas de
+milhares de pontos. A migration `012_dea` **não cria extensão nenhuma** — confirmado em
+produção, onde só `vector` e `plpgsql` existem.
+
+### 7-B.4 Modelo (schema `dea`)
+
+`locais` (o prédio) → `dispositivos` (N por local) → `verificacoes` (histórico).
+
+`locais` separado de `dispositivos` não é YAGNI: o endereço é do prédio, não do aparelho,
+e **duplicata é o problema nº 1 de mapa colaborativo**. Com `Local`, fundir dois cadastros
+do mesmo shopping é repontar `local_id`; sem ele, é impossível sem perder dado. O índice
+`ix_dea_locais_dedupe` (lat/lon arredondados a 4 casas, ~11 m) é o que permite **detectar**
+a duplicata.
+
+Uma tabela de janelas de horário chegou a ser desenhada e **foi cortada**: sete linhas de
+dia/abre/fecha é onde a contribuição morre num formulário de celular, ficaria quase sempre
+vazia, e "vazia" seria indistinguível de "24 h". Pior: horário desatualizado com cara de
+exato é o modo de falha mais perigoso aqui. Virou `horario_texto` (livre, exibido e nunca
+interpretado) + `acesso_24h`.
+
+Contadores (`verificacoes_positivas/negativas`, `ultima_verificacao_em`) são materializados
+em `dispositivos`: `COUNT`+`MAX` correlacionado dentro da busca por raio fica lento cedo.
+`verificacoes` continua a fonte auditável.
+
+**Nada é deletado.** Duas contestações mandam para `nao_encontrado` e o registro
+**continua no mapa**, marcado — "duas pessoas procuraram e não acharam" é informação útil
+para a terceira. Só `removido` e `spam` saem da listagem, e mesmo esses ficam na tabela.
+
+Contribuidor anônimo é identificado por `sha256(sal ‖ ip ‖ dia)`. O bucket diário faz o
+hash rotacionar a cada 24 h: preserva dedupe e rate limit dentro do dia, destrói o
+rastreamento de longo prazo. `DEA_IP_HASH_SALT` é **obrigatório em produção** — sem sal, o
+espaço IPv4 inteiro cabe numa GPU e o pseudônimo vira registro de geolocalização.
+
+### 7-B.5 Rotas (`/api/v1/dea`, todas públicas)
+
+| Rota | O que faz |
+|---|---|
+| `GET /dea/locais` | Busca por raio. `raio_km` ≤ 25, `limite` ≤ 50 |
+| `POST /dea/locais` | Cadastra local + primeiro dispositivo. Nasce `pendente` |
+| `POST /dea/dispositivos/{id}/verificacoes` | "Encontrei / não encontrei". Promove `pendente`→`ativo` quando a confirmação vem de **origem diferente** da que cadastrou |
+
+As três estão declaradas como `PUBLICA` em `tests/test_authorization.py` — a trava do repo
+que exige política explícita por rota. **Rota administrativa futura (moderar, exportar)
+precisa de `ADMIN` ali**: neste projeto a auth é rota a rota, então esquecer a dependency
+não dá erro, dá vazamento silencioso.
+
+### 7-B.6 Frontend
+
+`dea-app/`, CSS puro como os outros apps de produto, sem Tailwind. Duas telas por hash
+(`#/metronomo`, `#/mapa`) — duas telas não justificam uma lib de roteamento.
+
+**Metrônomo** (`src/lib/metronomo.ts`): agenda as batidas no relógio do `AudioContext`
+com lookahead de 100 ms, **não** com `setInterval`. Não é preciosismo — `setInterval` é
+estrangulado a 1 disparo/segundo com a aba em background, e o erro acumula: poucos ms por
+batida viram quase uma batida inteira de defasagem nos 2 minutos de um ciclo. A referência
+é sempre a próxima batida agendada, nunca `currentTime`. Há teste medindo deriva <1 ms em
+2 minutos e compasso intacto após 3 s de aba congelada.
+
+**Mapa**: Leaflet + OpenStreetMap, sem chave e sem billing — num app público, chave no
+bundle é conta que cresce com tráfego de terceiros. A atribuição do OSM é exigida pela
+licença. A coordenada vem do toque no mapa, **não de geocoding**: quem está no local sabe
+melhor que qualquer geocoder, e isso dispensa mais uma chave de API.
+
+A confiança aparece em cor no mapa **e em texto no cartão** — cor sozinha excluiria quem
+não distingue verde de vermelho.
+
+### 7-B.7 Estado do deploy (2026-09-09)
+
+| Item | Estado |
+|---|---|
+| Migration `012_dea` | ✅ aplicada em produção, com dump antes |
+| Backend (rotas `/dea`) | ✅ no ar; `GET` 200, `POST` 201, teto de raio 422 |
+| `dea-app` | ✅ publicado em `dea-m360.up.railway.app` |
+| **Mapa em produção** | ❌ **quebrado**: o bundle tem `localhost:8000` assado |
+
+O `ARG VITE_API_URL` faltava no `dea-app/Dockerfile` — a armadilha que o próprio arquivo
+documenta, e que já custou horas no `VITE_WAID_ORIGIN`. O `ARG` foi adicionado no código;
+falta definir `VITE_API_URL` no painel do serviço e **rebuildar** (redeploy sem rebuild
+não resolve: o valor é assado em tempo de build).
+
+Ver `docs/runbook.md` › "Publicar o `dea-app`" para o checklist completo.
 
 ---
 

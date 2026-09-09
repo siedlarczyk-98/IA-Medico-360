@@ -23,13 +23,18 @@ RUN cd dea-app && npm ci
 COPY shared/ shared/
 COPY dea-app/ dea-app/
 
-# Este app ainda não tem nenhuma variável VITE_ (a Fase 1 é só o metrônomo, que
-# não fala com o backend). Quando o mapa entrar, `VITE_API_URL` vem para cá.
-#
+# Resolvida em tempo de build pelo Vite; sem ela o bundle aponta para localhost.
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+
 # TODA variável `VITE_` nova precisa de UMA LINHA `ARG` AQUI, além de existir no
 # painel do Railway. Sem o ARG, o Docker não recebe o valor e o Vite assa o
 # default do código no bundle — build verde, comportamento errado, e nenhum
 # redeploy conserta.
+#
+# Não é hipotético: no primeiro deploy deste app (2026-09-09) o `ARG` faltava, o
+# serviço subiu verde e o mapa chamava `localhost:8000` do navegador de quem
+# abrisse a página.
 
 RUN cd dea-app && npm run build
 
