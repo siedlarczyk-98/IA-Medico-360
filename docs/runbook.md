@@ -383,6 +383,94 @@ política está sendo cumprida.
 
 ---
 
+## Publicar o `dea-app` (localizador de DEA)
+
+O quinto app do monorepo, e o primeiro **público**: sem login, sem embed, sem
+identidade. Isso muda três coisas em relação ao deploy dos outros fronts, todas
+apontadas abaixo.
+
+### 1. Migration (já aplicada em 2026-09-09)
+
+`012_dea` cria o schema `dea` e nada mais — não toca em `public`. Foi aplicada
+da máquina local contra a URL pública do Railway, porque o plano free não tem
+terminal:
+
+```bash
+DSN=$(grep "^DATABASE_URL=" .env | sed 's/^DATABASE_URL=//')
+DATABASE_URL="$DSN" APP_ENV=development JWT_SECRET_KEY="<qualquer coisa com 32+ bytes>"   python -m alembic upgrade head
+```
+
+Antes de rodar, faça o dump (`python -m scripts.backup_producao --dsn "$DSN"
+--saida backups/`): o backup é manual e o RPO é a idade do último.
+
+### 2. Variáveis no serviço do BACKEND
+
+| Variável | Valor | Obrigatória? |
+|---|---|---|
+| `DEA_ENABLED` | `true` | não (default `true`) |
+| `DEA_IP_HASH_SALT` | 64 hex (`python -c "import secrets; print(secrets.token_hex(32))"`) | **SIM em produção** |
+| `DEA_URL` | a URL pública do `dea-app` | sim, para o CORS |
+
+**`DEA_IP_HASH_SALT` derruba o backend inteiro no startup se faltar** — a
+validação é fail-closed de propósito (`_validate_production_secrets`). Sem sal,
+`sha256(ip)` é reversível por força bruta: o espaço IPv4 cabe numa GPU, e o que
+deveria ser pseudônimo vira registro de geolocalização por IP.
+
+Existe uma saída se algo der errado: `DEA_ENABLED=false` desliga o módulo e a
+validação do sal junto, sem derrubar o resto.
+
+Os limiares de confiança e antivandalismo (`DEA_DIAS_PARA_EXPIRAR`,
+`DEA_DENSIDADE_MAX_POR_HORA`, ...) têm default no código e só precisam ser
+definidos para recalibrar. Ver `.env.example`.
+
+### 3. Serviço novo no Railway
+
+Igual aos outros fronts — **o contexto de build é a raiz do monorepo**:
+
+- Root Directory: `/`
+- Builder: `Dockerfile`
+- Dockerfile Path: `dea-app/Dockerfile`
+
+O `dea-app` ainda **não tem nenhuma variável `VITE_`**: o metrônomo não fala com
+o backend, e o mapa usa o default `http://localhost:8000`. Para o mapa funcionar
+em produção é preciso `VITE_API_URL` — e ela exige **uma linha `ARG` no
+Dockerfile**, além do valor no painel. Sem o `ARG`, o Vite assa o default no
+bundle: build verde, comportamento errado, e nenhum redeploy conserta.
+
+### 4. CORS
+
+`DEA_URL` entra em `_app_origins` (`app/main.py`) e **não** em
+`origens_confiaveis()`. Não é esquecimento: o `dea-app` não manda cookie nem
+`Authorization`, então não há requisição autenticada dele para o anti-CSRF
+proteger. Se um dia o módulo ganhar rota autenticada, é essa linha que muda.
+
+### 5. Verificar depois de subir
+
+```bash
+curl "https://<backend>/api/v1/dea/locais?latitude=-23.5613&longitude=-46.6565&raio_km=5"
+```
+
+- [ ] Responde 200 **sem** nenhum header de autenticação
+- [ ] `raio_km=20000` devolve 422 (trava anti-raspagem)
+- [ ] O front abre e o mapa carrega os tiles do OpenStreetMap
+- [ ] Um cadastro de teste nasce com `status: "pendente"`
+- [ ] `/api/v1/health/ready` continua 200 (o sal não derrubou o startup)
+
+### O que este módulo NÃO tem, e é decisão consciente
+
+- **Sem moderação por fila.** Pin novo aparece no mapa marcado como não
+  confirmado. Segurar até alguém validar mataria a contribuição onde ela é mais
+  valiosa — um bairro sem usuários. Remoção de abuso é reativa (`status='spam'`).
+- **Sem tela de administração.** Moderar hoje é `UPDATE dea.dispositivos SET
+  status='spam' WHERE id=...`. Se o volume justificar, vira trabalho próprio —
+  e aí a rota precisa de `ADMIN` explícito em `tests/test_authorization.py`.
+- **O limite por IP é fraco.** `Dockerfile:22` roda uvicorn com
+  `--forwarded-allow-ips "*"`, então o `X-Forwarded-For` é forjável. A defesa que
+  sustenta o mapa é a densidade geográfica, que não depende de identificar a
+  origem. Corrigir o proxy trust é trabalho à parte, e beneficia login e OTP.
+
+---
+
 ## Verificar antes de considerar resolvido
 
 - [ ] `/api/v1/health/ready` retorna 200

@@ -950,10 +950,10 @@ PostgreSQL com extensão `vector` (pgvector), três schemas no **mesmo** banco f
              → 003_cache_hnsw → 004_news_monorepo → 005_news_taxonomia
              → 006_news_keywords → 007_identidade_profissional → 008_waid_uuid
              → 009_folder_evolucao_clinica → 010_folder_tipo
-             → 011_indices_auditoria   (head)
+             → 011_indices_auditoria → 012_dea   (head)
 ```
 
-Estado em produção (Railway) em 2026-09-08: `011_indices_auditoria`.
+Estado em produção (Railway) em 2026-09-09: `012_dea`.
 
 | Revisão | O que faz |
 |---|---|
@@ -970,6 +970,8 @@ Estado em produção (Railway) em 2026-09-08: `011_indices_auditoria`.
 | `009_folder_evolucao_clinica` | `folders.clinical_context` (TEXT, nullable) — a evolução do paciente escrita pelo médico (§6.3). Nasce nula, sem backfill: é informação que só o médico tem. O teto de tamanho vive na API (`MAX_CHARS_EVOLUCAO`), não na coluna, para que um texto longo receba 422 explicativo em vez de 500 do driver |
 | `010_folder_tipo` | `folders.folder_kind` (`clinical` \| `general`), NOT NULL com default `clinical` e CHECK. Decide a **marcação** com que o contexto é injetado no prompt. O default é deliberado: as pastas da `009` nasceram quando o campo era descrito como evolução de paciente, e assumir o contrário reclassificaria dado clínico existente. `VARCHAR`+CHECK em vez de ENUM porque a lista tende a crescer e ENUM exigiria `ALTER TYPE` a cada valor novo |
 | `011_indices_auditoria` | Três índices que faltavam: `audit_logs (action, created_at)` — a vigilância faz `max(created_at) WHERE action = ...` a cada 6h numa tabela escrita uma vez por interação; `audit_logs (user_id)` — anonimização na exclusão de conta (LGPD); `interactions (conversation_id, status, started_at)` — `load_history` roda em **toda mensagem** e ordenava o histórico inteiro em memória para pegar 40 linhas |
+
+| `012_dea` | Schema `dea` do localizador público de desfibriladores: `locais`, `dispositivos`, `verificacoes`. **Nenhuma extensão nova** — a busca por raio usa bounding box sobre o índice btree `(latitude, longitude)` mais Haversine em SQL. A alternativa (PostGIS ou `cube`+`earthdistance`) foi descartada porque `tests/conftest.py` monta o schema com `Base.metadata.create_all`: índice de expressão ou extensão criados só na migration não existiriam no banco de teste, e o teste da busca deixaria de exercitar o caminho de produção. Sem FK para `users` — é o único módulo público do produto, e a autoria é um hash rotativo de IP |
 
 `alembic/versions_legacy/` é histórico arquivado, **fora da cadeia ativa** — não deve ser alterado nem referenciado por migrations novas.
 
