@@ -1,0 +1,312 @@
+/*
+ * CSS puro, como frontend-app / calculadoras-app / noticias-app. Sem Tailwind:
+ * este app abre no celular, na rua, as vezes em 4G ruim, e o bundle importa.
+ */
+
+:root {
+  --petroleo: #0e7c86;
+  --petroleo-escuro: #0c3b34;
+  --verde: #009b57;
+  --verde-claro: #0bd07c;
+  --vermelho: #c0392b;
+  --ambar: #b26a00;
+  --fundo: #f4f8f6;
+  --superficie: #ffffff;
+  --borda: #d8e3df;
+  --texto: #1c2b28;
+  --texto-suave: #5c6f6a;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--fundo);
+  color: var(--texto);
+  -webkit-text-size-adjust: 100%;
+}
+
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Cabeçalho ─────────────────────────────────────────────── */
+
+.cabecalho {
+  background: var(--petroleo-escuro);
+  color: #fff;
+  padding: 0.75rem 1rem 0;
+}
+
+.cabecalho__marca {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.abas {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.aba {
+  padding: 0.6rem 1rem;
+  border-radius: 8px 8px 0 0;
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.aba--ativa {
+  background: var(--fundo);
+  color: var(--petroleo-escuro);
+}
+
+.conteudo {
+  flex: 1;
+  width: 100%;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+/* ── Avisos ────────────────────────────────────────────────── */
+
+.aviso-emergencia {
+  margin: 0 0 1.25rem;
+  padding: 0.7rem 0.9rem;
+  border-left: 4px solid var(--vermelho);
+  border-radius: 6px;
+  background: #fdf0ee;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #6b2018;
+}
+
+.aviso-troca {
+  margin: 1rem 0 0;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: #fff4e0;
+  border: 1px solid #f0c98a;
+  color: var(--ambar);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+/* ── Pulso ─────────────────────────────────────────────────── */
+
+.pulso {
+  width: 190px;
+  height: 190px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--superficie);
+  border: 5px solid var(--borda);
+  /* Transição curta: a batida precisa parecer instantânea. */
+  transition:
+    transform 60ms ease-out,
+    border-color 60ms ease-out,
+    background-color 60ms ease-out;
+}
+
+.pulso--compressao {
+  transform: scale(1.07);
+  border-color: var(--verde);
+  background: #eafaf2;
+}
+
+.pulso--ventilacao {
+  transform: scale(1.03);
+  border-color: var(--petroleo);
+  background: #e6f4f6;
+}
+
+.pulso__bpm {
+  font-size: 3.4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--petroleo-escuro);
+}
+
+.pulso__unidade {
+  font-size: 0.85rem;
+  color: var(--texto-suave);
+}
+
+.fase {
+  margin: 0.75rem 0 1.25rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--texto-suave);
+  min-height: 1.4em;
+}
+
+/* ── Controles ─────────────────────────────────────────────── */
+
+.controles {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.botao {
+  flex: 1;
+  padding: 0.9rem 1rem;
+  border: 0;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  /* Alvo de toque confortável: a pessoa pode estar com pressa. */
+  min-height: 52px;
+}
+
+.botao--iniciar {
+  background: var(--verde);
+  color: #fff;
+}
+
+.botao--parar {
+  background: var(--vermelho);
+  color: #fff;
+}
+
+.botao--secundario {
+  flex: 0 0 32%;
+  background: var(--superficie);
+  color: var(--texto);
+  border: 1px solid var(--borda);
+}
+
+.campo {
+  margin-bottom: 1.25rem;
+}
+
+.campo label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.campo--linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.campo--linha label {
+  margin: 0;
+}
+
+.campo input[type='range'] {
+  width: 100%;
+  accent-color: var(--petroleo);
+}
+
+.campo input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--petroleo);
+}
+
+.dica {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+}
+
+/* ── Painel de contadores ──────────────────────────────────── */
+
+.painel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.painel__item {
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 0.7rem 0.5rem;
+  text-align: center;
+}
+
+.painel__rotulo {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--texto-suave);
+  margin-bottom: 0.2rem;
+}
+
+.painel__valor {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 700;
+  /* Tabular: o cronômetro não pode "dançar" a cada segundo. */
+  font-variant-numeric: tabular-nums;
+  color: var(--petroleo-escuro);
+}
+
+.progresso {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--borda);
+  overflow: hidden;
+}
+
+.progresso__barra {
+  height: 100%;
+  background: var(--verde-claro);
+  transition: width 120ms linear;
+}
+
+/* ── Rodapé e placeholder ──────────────────────────────────── */
+
+.rodape {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+  border-top: 1px solid var(--borda);
+}
+
+.em-breve {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--texto-suave);
+}
+
+/*
+ * O pulso pisca até 2x por segundo. Movimento nessa frequência é desconfortável
+ * — e potencialmente um gatilho — para parte das pessoas. Quem pediu menos
+ * movimento continua tendo a informação pela cor e pelo texto de fase.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .pulso,
+  .progresso__barra {
+    transition: none;
+  }
+
+  .pulso--compressao,
+  .pulso--ventilacao {
+    transform: none;
+  }
+}

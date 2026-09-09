@@ -136,6 +136,28 @@ jobs:
       - run: npx tsc -b --noEmit
       - run: npm run build
 
+  dea-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dea-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          # Mesma armadilha do noticias-app: o lockfile precisa nascer em Linux,
+          # senao `npm ci` recusa o lock como incompleto.
+          cache-dependency-path: dea-app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b --noEmit
+      # O motor do metrônomo tem consequência clínica (deriva de compasso numa
+      # RCP), então é testado — diferente do noticias-app, que não tem suite.
+      - run: npm test
+      - run: npm run build
+
   # E2E depende de Postgres + backend rodando + usuário/calculadoras seedados
   # (ver calculadoras-app/e2e/helpers/auth.ts). Toda essa infra está automatizada
   # nos steps abaixo, então o job é bloqueante como os outros três.
