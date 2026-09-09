@@ -1,35 +1,43 @@
 /*
- * CSS puro, como frontend-app / calculadoras-app / noticias-app. Sem Tailwind:
- * este app abre no celular, na rua, as vezes em 4G ruim, e o bundle importa.
+ * Identidade visual compartilhada com frontend-app e calculadoras-app: mesmas
+ * variaveis, mesma fonte, mesmo reset. Os tokens sao copia literal de
+ * `calculadoras-app/src/tokens.ts` — se aquele arquivo mudar, este muda junto.
+ *
+ * CSS puro (sem Tailwind), como os outros apps de produto: este abre no celular,
+ * na rua, as vezes em 4G ruim.
  */
 
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
 :root {
-  --petroleo: #0e7c86;
-  --petroleo-escuro: #0c3b34;
-  --verde: #009b57;
-  --verde-claro: #0bd07c;
-  --vermelho: #c0392b;
-  --ambar: #b26a00;
-  --fundo: #f4f8f6;
-  --superficie: #ffffff;
-  --borda: #d8e3df;
-  --texto: #1c2b28;
-  --texto-suave: #5c6f6a;
+  --ink:    #0e252d;
+  --petrol: #014751;
+  --green:  #00d17d;
+  --mint:   #aef6c6;
+  --paper:  #fdfff4;
+  --pen:    #37464d;
+  --pen2:   #6b7a80;
+  --pen3:   #9aa6ab;
+  --line:   #d8ddde;
+  --line2:  #e7ebec;
+  --fill:   #eef2f1;
+  --fill2:  #f5f7f6;
+  --red:    #c8434b;
+  --red-bg: #fdf2f3;
+  --red-fg: #7a2a30;
 
   color-scheme: light;
 }
 
-* {
-  box-sizing: border-box;
+html, body, #root {
+  height: 100%;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: var(--fundo);
-  color: var(--texto);
-  -webkit-text-size-adjust: 100%;
-}
+button { font-family: inherit; cursor: pointer; }
 
 .app {
   min-height: 100dvh;
@@ -40,84 +48,103 @@ body {
 /* ── Cabeçalho ─────────────────────────────────────────────── */
 
 .cabecalho {
-  background: var(--petroleo-escuro);
-  color: #fff;
-  padding: 0.75rem 1rem 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
 }
 
-.cabecalho__marca {
-  margin: 0 0 0.5rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  opacity: 0.8;
+.cabecalho__interno {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 6px 20px 0;
 }
 
 .abas {
   display: flex;
-  gap: 0.25rem;
+  gap: 4px;
 }
 
+/* Aba como no resto do produto: sublinhado petrol, sem "pílula".
+   `min-height` de 44px pelo alvo de toque. */
 .aba {
-  padding: 0.6rem 1rem;
-  border-radius: 8px 8px 0 0;
-  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  color: var(--pen2);
   text-decoration: none;
-  font-size: 0.9rem;
+  font-size: 13.5px;
   font-weight: 600;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.aba:hover {
+  color: var(--pen);
 }
 
 .aba--ativa {
-  background: var(--fundo);
-  color: var(--petroleo-escuro);
+  color: var(--petrol);
+  border-bottom-color: var(--petrol);
 }
 
 .conteudo {
   flex: 1;
   width: 100%;
-  max-width: 34rem;
+  max-width: 640px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 28px 20px;
+}
+
+/* ── Título de página (barrinha petrol, como nas calculadoras) ─ */
+
+.titulo {
+  margin-bottom: 18px;
+}
+
+.titulo h1 {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
 }
 
 /* ── Avisos ────────────────────────────────────────────────── */
 
 .aviso-emergencia {
-  margin: 0 0 1.25rem;
-  padding: 0.7rem 0.9rem;
-  border-left: 4px solid var(--vermelho);
-  border-radius: 6px;
-  background: #fdf0ee;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: #6b2018;
+  margin-bottom: 22px;
+  padding: 11px 14px;
+  border: 1px solid #f1b3b7;
+  border-radius: 10px;
+  background: var(--red-bg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--red-fg);
 }
 
 .aviso-troca {
-  margin: 1rem 0 0;
-  padding: 0.8rem 1rem;
-  border-radius: 10px;
-  background: #fff4e0;
-  border: 1px solid #f0c98a;
-  color: var(--ambar);
-  font-size: 0.95rem;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--mint);
+  border: 1px solid var(--green);
+  color: var(--petrol);
+  font-size: 13.5px;
+  font-weight: 600;
   text-align: center;
 }
 
 /* ── Pulso ─────────────────────────────────────────────────── */
 
 .pulso {
-  width: 190px;
-  height: 190px;
+  width: 186px;
+  height: 186px;
   margin: 0 auto;
   border-radius: 50%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--superficie);
-  border: 5px solid var(--borda);
+  background: #fff;
+  border: 4px solid var(--line);
   /* Transição curta: a batida precisa parecer instantânea. */
   transition:
     transform 60ms ease-out,
@@ -125,35 +152,42 @@ body {
     background-color 60ms ease-out;
 }
 
+/* Compressão usa o verde de acento; ventilação o petrol. Mesma lógica do
+   resto do produto: petrol é a cor "de peso", verde é o sinal ativo. */
 .pulso--compressao {
-  transform: scale(1.07);
-  border-color: var(--verde);
-  background: #eafaf2;
+  transform: scale(1.06);
+  border-color: var(--green);
+  background: #f2fdf7;
 }
 
 .pulso--ventilacao {
   transform: scale(1.03);
-  border-color: var(--petroleo);
-  background: #e6f4f6;
+  border-color: var(--petrol);
+  background: var(--fill);
 }
 
 .pulso__bpm {
-  font-size: 3.4rem;
-  font-weight: 700;
+  font-size: 54px;
+  font-weight: 800;
   line-height: 1;
-  color: var(--petroleo-escuro);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .pulso__unidade {
-  font-size: 0.85rem;
-  color: var(--texto-suave);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pen3);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
 }
 
 .fase {
-  margin: 0.75rem 0 1.25rem;
+  margin: 12px 0 22px;
   text-align: center;
+  font-size: 13.5px;
   font-weight: 600;
-  color: var(--texto-suave);
+  color: var(--pen2);
   min-height: 1.4em;
 }
 
@@ -161,75 +195,115 @@ body {
 
 .controles {
   display: flex;
-  gap: 0.6rem;
-  margin-bottom: 1.5rem;
+  gap: 8px;
+  margin-bottom: 24px;
 }
 
 .botao {
   flex: 1;
-  padding: 0.9rem 1rem;
-  border: 0;
-  border-radius: 10px;
-  font-size: 1rem;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-size: 14.5px;
   font-weight: 700;
-  cursor: pointer;
   /* Alvo de toque confortável: a pessoa pode estar com pressa. */
   min-height: 52px;
+  transition: background 0.15s, box-shadow 0.15s;
 }
 
+/* Primário em petrol, como o resto do produto (o verde é acento, não botão). */
 .botao--iniciar {
-  background: var(--verde);
+  background: var(--petrol);
   color: #fff;
+}
+
+.botao--iniciar:hover {
+  box-shadow: 0 6px 18px rgba(1, 71, 81, 0.18);
 }
 
 .botao--parar {
-  background: var(--vermelho);
+  background: var(--red);
   color: #fff;
+}
+
+.botao--parar:hover {
+  box-shadow: 0 6px 18px rgba(200, 67, 75, 0.2);
 }
 
 .botao--secundario {
   flex: 0 0 32%;
-  background: var(--superficie);
-  color: var(--texto);
-  border: 1px solid var(--borda);
+  background: #fff;
+  color: var(--pen);
+  border-color: var(--line);
 }
 
+.botao--secundario:hover {
+  background: var(--fill2);
+}
+
+/* ── Campos ────────────────────────────────────────────────── */
+
 .campo {
-  margin-bottom: 1.25rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
 }
 
 .campo label {
   display: block;
-  margin-bottom: 0.4rem;
-  font-size: 0.9rem;
+  margin-bottom: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pen);
 }
 
+/* A linha inteira é o alvo de toque, não só o quadradinho de 22px: o `label`
+   ocupa todo o espaço e o clique nele alterna o checkbox pelo `htmlFor`. */
 .campo--linha {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 16px;
+  padding: 0;
 }
 
 .campo--linha label {
   margin: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 0 0 14px;
+  cursor: pointer;
 }
 
+.campo--linha input[type='checkbox'] {
+  margin-right: 14px;
+}
+
+/* Altura de 44px: e o alvo de toque minimo recomendado, e este slider e
+   arrastado com o polegar, com pressa. O `background: transparent` mantem a
+   aparencia nativa da trilha; o que cresce e a area sensivel ao toque. */
 .campo input[type='range'] {
   width: 100%;
-  accent-color: var(--petroleo);
+  height: 44px;
+  background: transparent;
+  accent-color: var(--petrol);
 }
 
 .campo input[type='checkbox'] {
   width: 22px;
   height: 22px;
-  accent-color: var(--petroleo);
+  accent-color: var(--petrol);
+  flex-shrink: 0;
 }
 
 .dica {
-  margin: 0.35rem 0 0;
-  font-size: 0.78rem;
-  color: var(--texto-suave);
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--pen3);
 }
 
 /* ── Painel de contadores ──────────────────────────────────── */
@@ -237,61 +311,187 @@ body {
 .painel {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: 8px;
+  margin: 20px 0 10px;
 }
 
 .painel__item {
-  background: var(--superficie);
-  border: 1px solid var(--borda);
-  border-radius: 10px;
-  padding: 0.7rem 0.5rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 8px;
   text-align: center;
 }
 
 .painel__rotulo {
   display: block;
-  font-size: 0.7rem;
-  color: var(--texto-suave);
-  margin-bottom: 0.2rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pen3);
+  margin-bottom: 4px;
 }
 
 .painel__valor {
   display: block;
-  font-size: 1.35rem;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
   /* Tabular: o cronômetro não pode "dançar" a cada segundo. */
   font-variant-numeric: tabular-nums;
-  color: var(--petroleo-escuro);
+  color: var(--ink);
 }
 
 .progresso {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--borda);
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line2);
   overflow: hidden;
 }
 
 .progresso__barra {
   height: 100%;
-  background: var(--verde-claro);
+  background: var(--green);
   transition: width 120ms linear;
 }
 
 /* ── Rodapé e placeholder ──────────────────────────────────── */
 
 .rodape {
-  padding: 1rem;
+  padding: 16px 20px;
   text-align: center;
-  font-size: 0.78rem;
-  color: var(--texto-suave);
-  border-top: 1px solid var(--borda);
+  font-size: 11.5px;
+  color: var(--pen3);
+  border-top: 1px solid var(--line);
+}
+
+.rodape strong {
+  color: var(--petrol);
+  font-weight: 700;
 }
 
 .em-breve {
   text-align: center;
-  padding: 3rem 1rem;
-  color: var(--texto-suave);
+  padding: 40px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--pen2);
+  font-size: 13.5px;
+}
+
+/*
+ * ── Telas baixas ────────────────────────────────────────────
+ *
+ * Medido: num iPhone SE (667px) e num Galaxy S8 (740px), o painel de
+ * contadores terminava em 818px — ou seja, "Próxima troca" ficava abaixo da
+ * dobra. Numa RCP ninguém rola a tela para ver o cronômetro.
+ *
+ * O corte é por ALTURA, não por largura: o problema é vertical, e um celular
+ * deitado tem a mesma largura de um tablet em pé. Aqui encolhemos o que é
+ * decorativo (o círculo, os espaçamentos) e preservamos o que é funcional
+ * (altura dos botões, tamanho dos números).
+ */
+@media (max-height: 780px) {
+  .conteudo {
+    padding: 16px 20px;
+  }
+
+  .titulo {
+    margin-bottom: 12px;
+  }
+
+  .aviso-emergencia {
+    margin-bottom: 14px;
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+
+  .pulso {
+    width: 132px;
+    height: 132px;
+    border-width: 3px;
+  }
+
+  .pulso__bpm {
+    font-size: 38px;
+  }
+
+  .fase {
+    margin: 8px 0 14px;
+  }
+
+  .controles {
+    margin-bottom: 14px;
+  }
+
+  .campo {
+    padding: 12px 14px;
+    margin-bottom: 8px;
+  }
+
+  .campo label {
+    margin-bottom: 4px;
+  }
+
+  /* O card do 30:2 não precisa dos 52px em tela baixa: a linha inteira
+     continua sendo o alvo, e 46px ainda passa do mínimo de 44px. */
+  .campo--linha label {
+    min-height: 46px;
+  }
+
+  /* A dica do intervalo da AHA é contexto, não instrução de uso: em tela
+     apertada ela dá lugar ao cronômetro. O slider já limita 100–120. */
+  .dica {
+    display: none;
+  }
+
+  .painel {
+    margin: 12px 0 8px;
+  }
+
+  .painel__item {
+    padding: 10px 6px;
+  }
+
+  .rodape {
+    padding: 12px 20px;
+    font-size: 11px;
+  }
+}
+
+/*
+ * Telas muito baixas (iPhone SE e similares, 667px). Aqui os ~25px que faltam
+ * para o cronômetro caber saem do círculo e dos respiros — nunca dos botões
+ * nem do tamanho dos números.
+ */
+@media (max-height: 700px) {
+  .pulso {
+    width: 112px;
+    height: 112px;
+  }
+
+  .pulso__bpm {
+    font-size: 32px;
+  }
+
+  .pulso__unidade {
+    font-size: 11px;
+  }
+
+  .aviso-emergencia {
+    margin-bottom: 12px;
+  }
+
+  .fase {
+    margin: 6px 0 12px;
+  }
+
+  .campo {
+    margin-bottom: 6px;
+  }
+
+  .painel {
+    margin: 10px 0 6px;
+  }
 }
 
 /*

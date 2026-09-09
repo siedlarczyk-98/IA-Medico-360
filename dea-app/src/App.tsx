@@ -28,42 +28,46 @@ export function App() {
   return (
     <div className="app">
       <header className="cabecalho">
-        <p className="cabecalho__marca">Médico 360</p>
-        <nav className="abas">
-          <a
-            href="#/metronomo"
-            className={aba === 'metronomo' ? 'aba aba--ativa' : 'aba'}
-            aria-current={aba === 'metronomo' ? 'page' : undefined}
-          >
-            Metrônomo RCP
-          </a>
-          <a
-            href="#/mapa"
-            className={aba === 'mapa' ? 'aba aba--ativa' : 'aba'}
-            aria-current={aba === 'mapa' ? 'page' : undefined}
-          >
-            Mapa de DEA
-          </a>
-        </nav>
+        <div className="cabecalho__interno">
+          <nav className="abas">
+            <a
+              href="#/metronomo"
+              className={aba === 'metronomo' ? 'aba aba--ativa' : 'aba'}
+              aria-current={aba === 'metronomo' ? 'page' : undefined}
+            >
+              Metrônomo RCP
+            </a>
+            <a
+              href="#/mapa"
+              className={aba === 'mapa' ? 'aba aba--ativa' : 'aba'}
+              aria-current={aba === 'mapa' ? 'page' : undefined}
+            >
+              Mapa de DEA
+            </a>
+          </nav>
+        </div>
       </header>
 
       <main className="conteudo">
         {aba === 'metronomo' ? (
           <MetronomoPage />
         ) : (
-          <div className="em-breve">
-            <h1>Mapa de DEA</h1>
-            <p>
-              Em construção. Aqui vai ficar o mapa colaborativo de desfibriladores
-              externos automáticos.
-            </p>
-          </div>
+          <>
+            <div className="titulo">
+              <h1>Mapa de DEA</h1>
+            </div>
+            <div className="em-breve">
+              <p>
+                Em construção. Aqui vai ficar o mapa colaborativo de
+                desfibriladores externos automáticos.
+              </p>
+            </div>
+          </>
         )}
       </main>
 
       <footer className="rodape">
-        Em caso de parada cardiorrespiratória, ligue <strong>192 (SAMU)</strong> e
-        inicie a reanimação enquanto o DEA é buscado.
+        <strong>Médico 360</strong> · Ferramentas de apoio à prática clínica
       </footer>
     </div>
   )

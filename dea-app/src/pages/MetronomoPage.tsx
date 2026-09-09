@@ -116,6 +116,10 @@ export function MetronomoPage() {
 
   return (
     <div className="metronomo">
+      <div className="titulo">
+        <h1>Metrônomo de RCP</h1>
+      </div>
+
       <p className="aviso-emergencia" role="note">
         Em parada cardiorrespiratória: <strong>ligue 192 (SAMU)</strong> e comece as
         compressões. Este metrônomo é apoio de ritmo, não substitui treinamento.
