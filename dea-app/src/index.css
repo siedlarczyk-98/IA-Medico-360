@@ -379,6 +379,312 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /*
+ * ── Mapa de DEA ─────────────────────────────────────────────
+ */
+
+.mapa-wrapper {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.mapa {
+  height: 300px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  /* O Leaflet desenha tiles fora do contêiner sem isto. */
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Os marcadores são SVG inline; o Leaflet põe um fundo branco por padrão. */
+.marcador-dea,
+.marcador-usuario {
+  background: none;
+  border: none;
+}
+
+.instrucao-mapa {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  background: var(--petrol);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  /* Acima dos tiles do Leaflet, que usam z-index próprio. */
+  z-index: 500;
+  white-space: nowrap;
+}
+
+.aviso-localizacao {
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--fill2);
+  font-size: 12.5px;
+  color: var(--pen2);
+}
+
+.botao--largo {
+  width: 100%;
+  margin-bottom: 12px;
+  /* É um `<a>` no caso da rota: precisa parecer e alinhar como botão. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
+}
+
+.estado {
+  padding: 20px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--pen2);
+}
+
+.erro {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #f1b3b7;
+  border-radius: 10px;
+  background: var(--red-bg);
+  color: var(--red-fg);
+  font-size: 12.5px;
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--petrol);
+  font-weight: 600;
+  font-size: inherit;
+  text-decoration: underline;
+}
+
+/* ── Lista de locais ────────────────────────────────────────── */
+
+.lista {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cartao {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.cartao--ativo {
+  border-color: var(--petrol);
+  box-shadow: 0 4px 16px rgba(1, 71, 81, 0.1);
+}
+
+.cartao__topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cartao__topo h2 {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.cartao__distancia {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--petrol);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cartao__endereco {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--pen2);
+}
+
+.dispositivo {
+  margin-top: 10px;
+}
+
+.dispositivo__local {
+  font-size: 13px;
+  color: var(--pen);
+  margin-bottom: 8px;
+}
+
+.etiquetas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.etiqueta {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--pen);
+  border: 1px solid var(--line2);
+}
+
+/*
+ * A confiança tem cor, mas o TEXTO dentro da etiqueta já diz tudo ("confirmado
+ * por 3 pessoas · há 12 dias"). A cor reforça, nunca é o único sinal — cerca de
+ * 8% dos homens não distinguem verde de vermelho.
+ */
+.etiqueta--alta {
+  background: var(--mint);
+  border-color: var(--green);
+  color: var(--petrol);
+}
+
+.etiqueta--media {
+  background: var(--fill);
+  border-color: var(--line);
+  color: var(--pen);
+}
+
+.etiqueta--baixa {
+  background: var(--fill2);
+  border-color: var(--line2);
+  color: var(--pen2);
+}
+
+.etiqueta--contestado {
+  background: var(--red-bg);
+  border-color: #f1b3b7;
+  color: var(--red-fg);
+}
+
+.verificacao {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
+}
+
+.verificacao__titulo {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pen);
+  margin-bottom: 8px;
+}
+
+/* ── Formulário de cadastro ─────────────────────────────────── */
+
+.formulario {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.formulario .campo {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-bottom: 14px;
+}
+
+.formulario__coordenada {
+  font-size: 12.5px;
+  color: var(--pen2);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line2);
+}
+
+.formulario input[type='text'],
+.formulario textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--fill2);
+  /* 16px seria o ideal para o iOS não dar zoom no foco; 14px + este ajuste no
+     mobile resolve sem inchar o layout no desktop. */
+}
+
+.formulario input[type='text']:focus,
+.formulario textarea:focus {
+  outline: 2px solid var(--petrol);
+  outline-offset: -1px;
+  background: #fff;
+}
+
+.formulario textarea {
+  resize: vertical;
+}
+
+.opcoes {
+  display: flex;
+  gap: 6px;
+}
+
+.opcao {
+  flex: 1;
+  padding: 10px 8px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pen2);
+}
+
+.opcao--ativa {
+  background: var(--petrol);
+  border-color: var(--petrol);
+  color: #fff;
+}
+
+/*
+ * Honeypot: invisível para quem enxerga E para leitor de tela, mas presente no
+ * DOM. `display: none` seria pior — parte dos bots ignora campos escondidos
+ * assim, e alguns navegadores não os enviam.
+ */
+.honeypot {
+  /* `absolute` + `left: -9999px` tira da tela sem tirar do DOM. `display: none`
+     seria pior: parte dos bots ignora campos assim escondidos.
+     O `!important` existe porque `.formulario input[type='text']` define
+     `width: 100%`, e sem ele o campo reaparece dentro do formulário — foi
+     exatamente o que aconteceu na primeira versão. */
+  position: absolute !important;
+  left: -9999px !important;
+  top: auto !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden;
+}
+
+.honeypot input {
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+/*
  * ── Telas baixas ────────────────────────────────────────────
  *
  * Medido: num iPhone SE (667px) e num Galaxy S8 (740px), o painel de

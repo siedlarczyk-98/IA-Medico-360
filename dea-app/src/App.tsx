@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { MapaPage } from './pages/MapaPage'
 import { MetronomoPage } from './pages/MetronomoPage'
 
 type Aba = 'metronomo' | 'mapa'
@@ -49,21 +50,7 @@ export function App() {
       </header>
 
       <main className="conteudo">
-        {aba === 'metronomo' ? (
-          <MetronomoPage />
-        ) : (
-          <>
-            <div className="titulo">
-              <h1>Mapa de DEA</h1>
-            </div>
-            <div className="em-breve">
-              <p>
-                Em construção. Aqui vai ficar o mapa colaborativo de
-                desfibriladores externos automáticos.
-              </p>
-            </div>
-          </>
-        )}
+        {aba === 'metronomo' ? <MetronomoPage /> : <MapaPage />}
       </main>
 
       <footer className="rodape">

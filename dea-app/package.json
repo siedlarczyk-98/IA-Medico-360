@@ -16,11 +16,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "serve": "^14.2.4"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.20",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
