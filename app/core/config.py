@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     maritaca_api_key: str = ""
     pharmadb_api_key: str = ""
     pubmed_api_key: str = ""
-    
+
     # --- SendGrid ---
     sendgrid_api_key: str = ""
     sendgrid_from_email: str = "noreply@medico360.com.br"
@@ -178,9 +178,7 @@ class Settings(BaseSettings):
         pergunta "por que não há dado nenhum".
         """
         if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                f"SENTRY_TRACES_SAMPLE_RATE deve estar entre 0.0 e 1.0 (recebido: {v})"
-            )
+            raise ValueError(f"SENTRY_TRACES_SAMPLE_RATE deve estar entre 0.0 e 1.0 (recebido: {v})")
         return v
 
     # --- Observabilidade (Arize Phoenix) ---
@@ -273,6 +271,17 @@ class Settings(BaseSettings):
     # Confirmacoes independentes para o nivel mais alto de confianca.
     dea_confirmacoes_para_alta: int = 2
 
+    # --- Antivandalismo da escrita publica ---
+    # Cadastros por origem, por hora. Baixo de proposito: cadastrar um DEA e um
+    # ato raro (a pessoa passou por um aparelho), diferente de verificar.
+    dea_max_cadastros_por_hora: int = 5
+    dea_max_verificacoes_por_hora: int = 20
+    # Locais novos por hora num raio de ~1km. Mata o "50 pins numa quadra" sem
+    # punir o caso legitimo: verificacoes NAO contam aqui, entao 30 alunos
+    # confirmando o mesmo DEA num curso de ACLS passam sem barreira.
+    # Numero certamente errado na primeira tentativa — por isso e configuravel.
+    dea_densidade_max_por_hora: int = 5
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
@@ -324,10 +333,7 @@ class Settings(BaseSettings):
             if not value
         ]
         if embed_missing:
-            raise ValueError(
-                "Validação Curseduca habilitada mas sem credenciais: "
-                f"{', '.join(embed_missing)}"
-            )
+            raise ValueError("Validação Curseduca habilitada mas sem credenciais: " f"{', '.join(embed_missing)}")
         return self
 
 
@@ -353,6 +359,7 @@ def origens_confiaveis(settings: "Settings") -> list[str]:
         for o in [settings.frontend_url, settings.calculadoras_url, *settings.landing_pages_origins]:
             origens += [o.replace("localhost", "127.0.0.1"), o.replace("127.0.0.1", "localhost")]
     return list(dict.fromkeys(o for o in origens if o))
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -133,6 +133,13 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # base): ela precisa de ADMIN explícito. Neste projeto a auth é rota a rota,
     # então esquecer a dependency não dá erro — dá vazamento silencioso.
     ("GET", "/api/v1/dea/locais"): PUBLICA,
+    # A ESCRITA também é pública, e é a decisão mais forte do módulo: exigir
+    # login para cadastrar mataria a base antes de ela existir, porque quem
+    # passa por um DEA e quem tem conta no produto raramente são a mesma pessoa.
+    # O que substitui a autenticação: registro nasce `pendente` (não convence
+    # ninguém), limite de densidade geográfica, honeypot, e limite por origem.
+    ("POST", "/api/v1/dea/locais"): PUBLICA,
+    ("POST", "/api/v1/dea/dispositivos/{dispositivo_id}/verificacoes"): PUBLICA,
     # Uploads e uso
     ("POST", "/api/v1/uploads/extract"): AUTENTICADA,
     ("GET", "/api/v1/users/usage"): AUTENTICADA,

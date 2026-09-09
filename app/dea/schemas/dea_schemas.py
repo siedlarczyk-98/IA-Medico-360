@@ -9,6 +9,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from app.models.dea import AcessoEnum, ResultadoVerificacaoEnum
+
 # Teto do raio de busca. Sem ele, `raio_km=20000` devolveria o banco inteiro por
 # uma rota pública — o jeito mais barato de raspar a base que existe.
 RAIO_MAXIMO_KM = 25.0
@@ -78,3 +80,70 @@ class Coordenada(BaseModel):
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+
+
+# ── Escrita ──────────────────────────────────────────────────────────────
+#
+# Todos os campos de texto têm teto de tamanho. Numa rota sem login, um `Text`
+# sem limite é upload de arquivo disfarçado de formulário.
+
+
+class CadastroRequest(BaseModel):
+    """Cadastro de um DEA. Cria local + primeiro dispositivo numa transação.
+
+    A interface não expõe o conceito de "local": quem cadastra descreve um
+    aparelho num lugar. A separação existe no banco para poder fundir duplicatas
+    depois — ver o docstring de `app/models/dea.py`.
+    """
+
+    nome: str = Field(min_length=2, max_length=160)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+    # Texto livre e opcional: a coordenada vem do clique no mapa, não daqui.
+    # Serve para exibição, nunca para localizar.
+    endereco: str | None = Field(default=None, max_length=240)
+    cidade: str | None = Field(default=None, max_length=120)
+    uf: str | None = Field(default=None, max_length=2)
+
+    # O campo que mais economiza segundos de quem já chegou ao prédio.
+    descricao_localizacao: str | None = Field(default=None, max_length=500)
+    acesso: AcessoEnum = AcessoEnum.PUBLICO_LIVRE
+
+    horario_texto: str | None = Field(default=None, max_length=200)
+    acesso_24h: bool = False
+
+    # ── Sinais antivandalismo ──
+    # Campo escondido por CSS: humano não vê, bot genérico preenche. Nomeado
+    # `website` porque é o nome que os bots mais procuram.
+    website: str | None = Field(default=None, max_length=200)
+    # Quanto tempo o formulário ficou aberto. Menos de 3s não é digitação.
+    segundos_de_preenchimento: float | None = Field(default=None, ge=0)
+
+
+class VerificacaoRequest(BaseModel):
+    """ "Estou aqui: encontrei / não encontrei."
+
+    É o motor de manutenção da base. Sem um fluxo barato como este, o mapa vira
+    um cemitério de pins de 2026.
+    """
+
+    resultado: ResultadoVerificacaoEnum
+    observacao: str | None = Field(default=None, max_length=500)
+    website: str | None = Field(default=None, max_length=200)
+
+
+class CadastroResponse(BaseModel):
+    local_id: uuid.UUID
+    dispositivo_id: uuid.UUID
+    status: str
+    mensagem: str
+
+
+class VerificacaoResponse(BaseModel):
+    dispositivo_id: uuid.UUID
+    status: str
+    confianca: str
+    confirmacoes: int
+    contestacoes: int
+    mensagem: str
