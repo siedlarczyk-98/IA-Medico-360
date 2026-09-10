@@ -24,7 +24,7 @@ Documentos irmãos, que este aqui não duplica:
 
 | Arquivo | O que traz |
 |---|---|
-| `docs/regras-de-negocio-v2.2.md` | Regras de negócio numeradas (RN-*) |
+| `docs/regras-de-negocio.md` | Regras de negócio numeradas (RN-*), com o arquivo e a constante de cada número |
 | `docs/Calculadoras_Cientificas_Regras_de_Arquitetura_v1.0.md` | Contrato de arquitetura do módulo de calculadoras |
 | `docs/debitos.md` | 16 débitos técnicos, com status e justificativa de cada um |
 | `docs/runbook.md` | Operação: incidentes, rotação de segredos, backup/restore (com números medidos), retenção |
