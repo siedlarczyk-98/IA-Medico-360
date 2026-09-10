@@ -124,7 +124,6 @@ describe('Sidebar no desktop', () => {
 
   it('o clique em recolher desfixa e volta ao trilho', async () => {
     localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
-    const user = userEvent.setup();
     renderSidebar();
 
     // Fixada não há wrapper de hover, mas o handler é `onMouseDown`.
@@ -192,7 +191,6 @@ describe('Sidebar no desktop', () => {
 
   it('fixada, o mesmo canto oferece o caminho de volta', async () => {
     localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
-    const user = userEvent.setup();
     renderSidebar();
 
     const botao = within(painel()!).getByRole('button', { name: /recolher barra lateral/i });
