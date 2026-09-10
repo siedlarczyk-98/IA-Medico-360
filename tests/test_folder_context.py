@@ -960,7 +960,7 @@ async def test_conversa_longa_nao_ocupa_todos_os_lugares(db, user, folder_factor
     os vetores aqui são idênticos, a ordenação por similaridade não desempata:
     só o particionamento por conversa produz o resultado esperado.
     """
-    from app.models.models import Conversation, MessageEmbedding
+    from app.models.models import MessageEmbedding
 
     pasta = await folder_factory(user, "Pasta")
     atual = await _conversa_indexada(db, user, pasta, "Atual", "atual")
