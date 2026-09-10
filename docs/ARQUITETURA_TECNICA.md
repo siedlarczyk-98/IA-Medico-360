@@ -1,7 +1,7 @@
 # Arquitetura Técnica — Médico 360
 
-> Levantamento estático do código em **2026-09-09**. Referências `arquivo:linha` apontam para a raiz do repositório.
-> Substitui a versão de 2026-09-08 — o que mudou desde então está no §1.
+> Estado do código em **2026-09-09**. Referências `arquivo:linha` apontam para a raiz do repositório.
+> Descreve o sistema como ele é hoje; o histórico de mudanças vive no `git log`.
 
 ## 0. Como ler este documento
 
@@ -9,12 +9,16 @@ Se você tem uma tarde para entender o sistema, leia nesta ordem:
 
 1. **§2 — topologia.** Quantos serviços existem de verdade e quem fala com quem.
 2. **§5 — pipeline do Orquestrador.** É o produto. Todo o resto do backend orbita este fluxo.
-3. **§3.4 — identidade profissional.** Como o médico é reconhecido e de onde vem a especialidade dele. É o trabalho mais recente e o que mais toca os três frontends.
+3. **§3.4 — identidade profissional.** Como o médico é reconhecido e de onde vem a especialidade dele. É o que mais toca os frontends autenticados.
 4. **§6 — contexto e memória.** Histórico, orçamento de tokens e pastas-como-projeto. É fácil de quebrar sem perceber.
-5. **§11 — banco.** O ER completo e as constraints que a aplicação assume.
+5. **§11 — banco.** As relações entre as 49 tabelas e as constraints que a aplicação assume.
 6. **§17 — pontos de atenção.** Onde estão as armadilhas conhecidas, e o mapa de dívidas com tamanho e risco.
 
 O resto é referência: tabelas de rotas, variáveis de ambiente, CI, scripts.
+
+> A numeração começa no §2: a antiga §1 era um changelog de "o que mudou na última
+> semana" e foi removida — esse histórico vive no `git log`. Os demais números foram
+> mantidos para não invalidar as referências cruzadas.
 
 Documentos irmãos, que este aqui não duplica:
 
@@ -26,97 +30,6 @@ Documentos irmãos, que este aqui não duplica:
 | `docs/runbook.md` | Operação: incidentes, rotação de segredos, backup/restore (com números medidos), retenção |
 | `docs/teste-e2e.md` | Roteiro manual de E2E + como rodar o E2E automatizado com chamada real aos provedores |
 | `README.md` | Setup local |
-
----
-
-## 1. O que mudou desde o levantamento anterior (8 → 9 de setembro)
-
-Uma frente: **o localizador de DEA** (§7-B), um módulo novo do zero — schema, API pública,
-app frontend. Em produção desde 09/09.
-
-### 1.0 O primeiro módulo público do produto
-
-Até aqui, toda rota que servia conteúdo exigia usuário autenticado e todo frontend era
-embedado no LMS. O `dea-app` quebra as duas premissas: é público, anônimo e não vive em
-iframe. O que isso muda para quem conhecia o sistema:
-
-- **`origens_confiaveis()` ganhou uma exceção.** `DEA_URL` entra no CORS de `app/main.py`
-  mas não na lista anti-CSRF — não há requisição autenticada do `dea-app` para proteger.
-  É a única divergência intencional entre as duas listas.
-- **A escrita pública trouxe defesas que não existiam no projeto**: densidade geográfica,
-  honeypot, `status=pendente` como etiqueta de confiança (§7-B.2).
-- **`DEA_IP_HASH_SALT` é fail-closed no startup** com `DEA_ENABLED=true`.
-- **Nenhuma extensão nova no banco.** A busca por raio usa bounding box + Haversine em SQL
-  em vez de PostGIS, por testabilidade (§7-B.4).
-
-### 1.0-A Levantamento anterior (2 → 8 de setembro)
-
-O que segue continua válido.
-
-Vinte commits em um dia, em cinco frentes. As duas primeiras são produto; as três últimas saíram de revisões que encontraram defeitos **abertos em produção**.
-
-### 1.1 Contexto de anexos — o exame no meio da conversa
-
-O médico discutia um caso, anexava um exame e escrevia "e esse aqui?" — e recebia uma resposta confiante construída **sem o exame**. Três causas independentes, com o mesmo sintoma:
-
-1. A triagem só vê o TEXTO. Para "e esse aqui?" ela devolvia `QUICK_SEARCH`, que roteia para `sonar-pro` — **um modelo sem visão**. A promoção para `EXAM_REVIEW` existia, mas rodava só *antes* da triagem, então nunca via o modo que ela escolheu.
-2. O gate de confiança baixa pedia reformulação de uma pergunta que estava completa: o texto é curto porque o conteúdo está no arquivo.
-3. As duas cadeias de fallback chamavam `provider.complete` **sem `image_content`** — quando o primário falhava, a imagem ficava para trás. `MODES_REQUIRING_VISION` documentava essa garantia e não era lida por ninguém.
-
-Junto veio o **orçamento separado para anexos** (§6.2): com teto único de 6000 tokens, um laboratorial completo (~4700) ocupava 78% do espaço e expulsava a discussão do caso.
-
-### 1.2 Pastas com evolução do paciente
-
-`folders.clinical_context` — texto que o médico escreve e que entra **na íntegra em toda mensagem daquela pasta**, e `folders.folder_kind` (`clinical` | `general`), que decide a marcação com que esse texto é injetado. Ver §6.3.
-
-A distinção não é cosmética: o contexto por similaridade que já existia chega ao modelo marcado como *"material de APOIO, pode ser de outro paciente"*. A evolução é o oposto — é o caso atual e é autoritativa. Numa pasta de estudos, porém, anunciá-la como "evolução do paciente" faz o modelo inventar um paciente que não existe.
-
-### 1.3 Modo `DATA_OCEAN` (Maritaca)
-
-Bases de dados públicas brasileiras — DATASUS, CNES, ANVISA, InfoDengue, IBGE — consultadas no momento da pergunta, com a fonte junto. Ver §5.3.
-
-É uma ferramenta **agêntica que roda do lado da Maritaca**: o Sabiá decide quais bases consultar, executa, cruza e devolve só a resposta final. Isso impõe restrições que nenhum outro modo tem — sem streaming, sem fallback, sem cache, sem triagem.
-
-### 1.4 Revisão de segurança — quatro achados corrigidos
-
-Varredura do código inteiro (não só do diff), em quatro frentes paralelas. Injeção/upload e config/frontend saíram limpos. Os quatro achados:
-
-| Achado | Gravidade |
-|---|---|
-| `orquestrador_shared` instanciava `OpenAIProvider()` direto — **o único provider fora do registry**, e portanto o único que escapava do `DlpEnforcingProvider`. O verificador de clarificação mandava histórico e evolução da pasta em claro para a OpenAI. `clinical_context` também não passava por DLP em lugar nenhum | HIGH |
-| O cache semântico servia resposta **condicionada a um paciente**: a chave é `(modo, prompt)`, mas a resposta era gerada com a evolução da pasta injetada | HIGH |
-| O `/query` devolvia `conversation_id` de **outro médico** no cache hit. O `/stream` já corrigia isso, com comentário explicando o risco — a correção nunca foi propagada | HIGH |
-| CSRF em `/uploads/extract`, a única rota multipart do projeto e por isso a única sem preflight CORS | MEDIUM |
-
-### 1.5 Revisão de performance e manutenção
-
-Medição contra o banco de produção, não intuição:
-
-- **Latência real por modo** (§5.4). `CLINICAL_REASONING` tem p50 de 32,8s e p95 de 56,7s. O gargalo é LLM, não banco: as tabelas têm centenas de linhas.
-- **O cache semântico nunca acertou** — 0 hits em 240 interações. A causa não é threshold nem índice: *o que se repete não pode ser cacheado, e o que pode não se repete*. Desligado por flag, com a análise registrada (§6.4, débito 16).
-- **`record_cost` não existia no `/query`** — o quarto bug da família de divergência `/query` ↔ `/stream`. `check_limit` lia um contador que só o `/stream` incrementava, e o limite semanal era inaplicável no caminho de todos os modos PharmaDB.
-- **`DlpEnforcingProvider` anulava o timeout de todos os providers** — declarava `timeout: int = 30` e repassava sempre, sobrescrevendo os 120s do Maritaca e os 45s do Perplexity. Foi o que derrubou a primeira consulta real ao Data Ocean.
-- **`PerplexityProvider` não streamava** — chamava `complete()` e fatiava o texto pronto. O médico esperava 3 a 15 segundos em tela parada no modo mais usado.
-- **Extração para o `shared`**: `pos_processar_interacao` e `registrar_hit_de_cache`. As construções de modelo que estavam duplicadas nos dois serviços (`PubmedValidation`, `InteractionMedication`, a `Interaction` do cache hit) agora existem **num lugar só**, com testes que falham se voltarem.
-
-> **A divergência `/query` ↔ `/stream` é o problema estrutural nº 1 deste projeto.** Quatro bugs distintos vieram dela num único dia. `orquestrador_shared` existe para consolidar o que é comum, e os testes em `tests/test_orquestrador_paridade.py` e `tests/test_cache_paridade.py` travam o que já foi consolidado.
-
-### 1.6 Levantamento anterior (28 de agosto → 2 de setembro)
-
-Duas frentes: o módulo de notícias e a identidade profissional do médico.
-
-**Notícias (`noticias-app` + schema `news`)** — feed clínico por tema, alimentado por um pipeline PubMed → tagger → redator. O médico escolhe temas e palavras-chave; o feed casa artigos contra as duas coisas. Ver §7-A.
-
-**Identidade profissional** — reescrita de como o sistema sabe quem é o médico:
-
-- **A especialidade passou a ter dono e proveniência.** `users.specialty` era texto livre sem validação; agora existe um vocabulário canônico (`app/medicina/especialidades.py`, 55 especialidades do CFM) e uma regra de precedência entre as quatro fontes que podem escrevê-la (`app/medicina/identidade.py`).
-- **Ela chega sozinha, dos grupos de acesso da Curseduca.** A página de cadastro (outro sistema, outro time) consulta o CFM e cria um grupo `[CFM] <especialidade>`. O payload do membro já era baixado a cada login de embed e descartado; agora dele saem o nome e a especialidade.
-- **O onboarding virou uma tela só, compartilhada pelos três apps** (`shared/onboarding/`). O servidor calcula o que falta (`onboarding_pendencias`); os apps só renderizam. Antes existia em um app só, e os outros dois nem checavam.
-- **O CRM deixou de ser exigido.** A prova de registro vem do grupo `[CFM]`; um CRM digitado à mão não acrescentava prova. A coluna continua, e continua sendo gravada de fonte confiável.
-- **Os frontends passaram a buildar por Dockerfile**, com contexto na raiz do monorepo — o `shared/` fica fora da pasta de cada app e o Nixpacks não o enxergava. Ver §13.2.
-- **`services/` ganhou um subpacote `integracoes/`** com os seis clientes de sistemas externos, que estavam soltos entre os demais.
-- **Roteamento do Orquestrador unificado.** O bloco que decide qual agente atende era escrito duas vezes e já tinha divergido: na mesma situação de confiança baixa, `/query` e `/stream` diziam textos diferentes ao médico. Agora é `orquestrador_shared.decidir_rota`.
-- **A cascata de exclusão de conta saiu do endpoint** para `auth_repository`, e ganhou os primeiros testes — eram 25 linhas de SQL cru sem cobertura nenhuma, onde a ORDEM das exclusões é o que impede erro de chave estrangeira.
 
 ---
 
@@ -1132,390 +1045,75 @@ Não há `CREATE TYPE` (enums nativos) nem triggers: campos categóricos (`role`
 
 **Todas as migrations da série 009–011 foram validadas contra Postgres real** nos quatro cenários: upgrade, downgrade, reaplicação sobre estrutura já existente (são idempotentes, com `IF NOT EXISTS`) e — no caso da `011` — `EXPLAIN` confirmando que o planner usa o índice criado.
 
-### 11.2 Diagrama ER
+### 11.2 Diagrama ER — relações
+
+As 49 tabelas dos cinco schemas e as 47 chaves estrangeiras entre elas, extraídas do banco
+de produção. O rótulo de cada aresta traz a coluna e a regra de `ON DELETE`, que é o que
+muda comportamento em cascata.
+
+**As colunas de cada tabela não estão aqui de propósito** — elas vivem nos modelos
+(`app/models/*.py`), que são a fonte da verdade e não divergem. Para o dicionário de uma
+tabela específica: o modelo, ou `\d nome_da_tabela` no psql.
 
 ```mermaid
 erDiagram
-    COMPANY ||--o{ USERS : "company_id"
-    USERS ||--o{ CONSENT_LOGS : "user_id"
-    USERS ||--o{ FILE_EXTRACTIONS : "user_id (CASCADE)"
+    %% ---- nucleo (public) ----
+    COMPANY ||--o{ COMPANY_LEGACY_MAPPING : "company_id CASCADE"
+    COMPANY ||--o{ INTERACTIONS : "company_id SET NULL"
+    COMPANY ||--o{ USERS : "company_id SET NULL"
+    CONVERSATIONS ||--o{ INTERACTIONS : "conversation_id CASCADE"
+    CONVERSATIONS ||--o{ MESSAGE_EMBEDDINGS : "conversation_id CASCADE"
+    FOLDERS ||--o{ CONVERSATIONS : "folder_id SET NULL"
+    INTERACTIONS ||--o{ AUDIT_LOGS : "interaction_id SET NULL"
+    INTERACTIONS ||--o{ FILE_EXTRACTIONS : "interaction_id SET NULL"
+    INTERACTIONS ||--o{ INTERACTION_MEDICATIONS : "interaction_id CASCADE"
+    INTERACTIONS ||--o{ INTERACTION_RESPONSES : "interaction_id CASCADE"
+    INTERACTIONS ||--o{ MESSAGE_EMBEDDINGS : "interaction_id CASCADE"
+    INTERACTIONS ||--o{ PHARMA_ALERTS : "interaction_id CASCADE"
+    INTERACTIONS ||--o{ PUBMED_VALIDATIONS : "interaction_id CASCADE"
+    USERS ||--o{ AUDIT_LOGS : "user_id SET NULL"
+    USERS ||--o{ CONSENT_LOGS : "user_id CASCADE"
+    USERS ||--o{ CONVERSATIONS : "user_id CASCADE"
+    USERS ||--o{ FILE_EXTRACTIONS : "user_id CASCADE"
     USERS ||--o{ FOLDERS : "user_id"
-    USERS ||--o| USER_PREFERENCES : "user_id (UNIQUE)"
-    USERS ||--o| USER_WEEKLY_USAGE : "user_id (UNIQUE, CASCADE)"
-    USERS ||--o{ CONVERSATIONS : "user_id"
+    USERS ||--o{ INTERACTIONS : "user_id CASCADE"
     USERS ||--o{ INVITE_TOKENS : "created_by"
-    FOLDERS ||--o{ CONVERSATIONS : "folder_id (SET NULL)"
-    CONVERSATIONS ||--o{ INTERACTIONS : "conversation_id"
-    USERS ||--o{ INTERACTIONS : "user_id"
-    COMPANY ||--o{ INTERACTIONS : "company_id"
-    INTERACTIONS ||--o{ AUDIT_LOGS : "interaction_id"
-    USERS ||--o{ AUDIT_LOGS : "user_id"
-    INTERACTIONS ||--o{ INTERACTION_MEDICATIONS : "interaction_id"
-    INTERACTIONS ||--o{ INTERACTION_RESPONSES : "interaction_id"
-    INTERACTIONS ||--o{ PHARMA_ALERTS : "interaction_id"
-    INTERACTIONS ||--o{ PUBMED_VALIDATIONS : "interaction_id"
+    USERS ||--o{ LEGACY_USER_MAPPING : "user_id CASCADE"
+    USERS ||--o{ MESSAGE_EMBEDDINGS : "user_id CASCADE"
+    USERS ||--o{ USER_PREFERENCES : "user_id CASCADE"
+    USERS ||--o{ USER_WEEKLY_USAGE : "user_id CASCADE"
 
-    SPECIALTIES ||--o{ CALCULATOR_DEFINITIONS : "specialty_id"
-    CALCULATOR_DEFINITIONS ||--o{ CALCULATOR_FIELDS : "calculator_id (CASCADE)"
-    CALCULATOR_DEFINITIONS ||--o{ CALCULATOR_VERSIONS : "calculator_id (CASCADE)"
-    CALCULATOR_DEFINITIONS ||--o{ CALCULATOR_FAVORITES : "calculator_id (CASCADE)"
-    USERS ||--o{ CALCULATOR_FAVORITES : "user_id (CASCADE)"
-    CALCULATOR_DEFINITIONS ||--o{ CALCULATOR_EXECUTIONS : "calculator_id"
-    CALCULATOR_VERSIONS ||--o{ CALCULATOR_EXECUTIONS : "version_id"
-    USERS ||--o{ CALCULATOR_EXECUTIONS : "user_id"
-    COMPANY ||--o{ CALCULATOR_EXECUTIONS : "company_id"
-    INTERACTIONS ||--o{ CALCULATOR_EXECUTIONS : "interaction_id"
+    %% ---- calculadoras ----
+    CALC_CALCULATOR_DEFINITIONS ||--o{ CALC_CALCULATOR_EXECUTIONS : "calculator_id"
+    CALC_CALCULATOR_DEFINITIONS ||--o{ CALC_CALCULATOR_FAVORITES : "calculator_id CASCADE"
+    CALC_CALCULATOR_DEFINITIONS ||--o{ CALC_CALCULATOR_FIELDS : "calculator_id CASCADE"
+    CALC_CALCULATOR_DEFINITIONS ||--o{ CALC_CALCULATOR_VERSIONS : "calculator_id CASCADE"
+    CALC_CALCULATOR_VERSIONS ||--o{ CALC_CALCULATOR_EXECUTIONS : "version_id"
+    CALC_SPECIALTIES ||--o{ CALC_CALCULATOR_DEFINITIONS : "specialty_id"
 
-    COMPANY {
-        uuid id PK
-        varchar name
-        varchar slug UK
-        jsonb settings
-        boolean company_status
-        varchar legacy_company_id
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    USERS {
-        uuid id PK
-        varchar phone_number
-        uuid company_id FK
-        varchar email UK
-        varchar name
-        varchar crm
-        varchar crm_state
-        varchar role
-        varchar med_status
-        varchar specialty "rotulo legado, casa por string com news"
-        varchar specialty_slug "chave canonica (007)"
-        varchar specialty_source "de onde veio: decide precedencia"
-        timestamptz specialty_updated_at
-        varchar specialty_rqe
-        jsonb specialties "todas as especialidades do CFM"
-        varchar profissao
-        varchar crm_status
-        timestamptz crm_verified_at
-        jsonb cfm_payload
-        varchar cadastro_externo_id
-        varchar waid_uuid "identidade estavel na Waid (008)"
-        date enrollment_date
-        boolean onboarding_complete
-        boolean status
-        varchar legacy_user_id
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    CONSENT_LOGS {
-        uuid id PK
-        uuid user_id FK
-        varchar consent_type
-        boolean accepted
-        inet ip_address
-        text user_agent
-        timestamptz accepted_at
-        timestamptz revoked_at
-        timestamptz created_at
-    }
-    FILE_EXTRACTIONS {
-        uuid id PK
-        uuid user_id FK "ON DELETE CASCADE"
-        varchar file_name
-        varchar file_type
-        uuid interaction_id FK "ON DELETE SET NULL"
-        text extracted_text
-        text image_base64
-        varchar image_media_type
-        timestamptz created_at
-    }
-    FOLDERS {
-        uuid id PK
-        uuid user_id FK
-        varchar name
-        varchar folder_kind "clinical ou general (CHECK, default clinical)"
-        text clinical_context "evolucao declarada pelo medico"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    INVITE_TOKENS {
-        uuid id PK
-        uuid token UK
-        varchar email
-        uuid created_by FK
-        timestamptz created_at
-        timestamptz expires_at
-        boolean used
-    }
-    USER_PREFERENCES {
-        uuid id PK
-        uuid user_id FK,UK
-        jsonb selected_models
-        jsonb ui_settings
-        jsonb notification_prefs
-        timestamptz updated_at
-    }
-    USER_WEEKLY_USAGE {
-        uuid id PK
-        uuid user_id FK,UK "ON DELETE CASCADE"
-        timestamptz week_start
-        numeric total_cost_usd
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    CONVERSATIONS {
-        uuid id PK
-        uuid user_id FK
-        uuid folder_id FK "ON DELETE SET NULL"
-        varchar title
-        varchar feature
-        boolean status
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    INTERACTIONS {
-        uuid id PK
-        uuid conversation_id FK
-        uuid user_id FK
-        uuid company_id FK
-        varchar feature
-        varchar mode
-        varchar input_type
-        text prompt_text
-        boolean prompt_sanitized
-        float triage_confidence
-        varchar triage_category
-        integer response_time_ms
-        boolean cache_hit
-        numeric token_cost_usd
-        float confidence_score
-        varchar specialty_detected
-        varchar topic_detected
-        varchar status
-        jsonb clarification_questions
-        timestamptz started_at
-        timestamptz completed_at
-        timestamptz created_at
-    }
-    AUDIT_LOGS {
-        uuid id PK
-        uuid user_id FK
-        uuid interaction_id FK
-        varchar action
-        varchar entity_type
-        uuid entity_id
-        jsonb metadata
-        inet ip_address
-        text user_agent
-        timestamptz created_at
-    }
-    INTERACTION_MEDICATIONS {
-        uuid id PK
-        uuid interaction_id FK
-        varchar medication_raw
-        varchar medication_normalized
-        varchar atc_code
-        varchar source
-        timestamptz created_at
-    }
-    INTERACTION_RESPONSES {
-        uuid id PK
-        uuid interaction_id FK
-        varchar model_used
-        text response_text
-        integer response_time_ms
-        integer tokens_in
-        integer tokens_out
-        numeric cost_usd
-        boolean is_fallback
-        text error_message
-        jsonb extra_metadata
-        timestamptz created_at
-    }
-    PHARMA_ALERTS {
-        uuid id PK
-        uuid interaction_id FK
-        integer alert_level
-        varchar alert_color
-        text description
-        varchar source_api
-        text doctor_justification
-        timestamptz acknowledged_at
-        timestamptz created_at
-    }
-    PUBMED_VALIDATIONS {
-        uuid id PK
-        uuid interaction_id FK
-        varchar pmid
-        text article_title
-        text abstract_snippet
-        float relevance_score
-        timestamptz created_at
-    }
-    MODEL_PRICING {
-        uuid id PK
-        varchar model_id UK
-        varchar provider
-        varchar provider_type
-        varchar display_name
-        numeric input_per_million
-        numeric output_per_million
-        boolean status
-        timestamptz updated_at
-        timestamptz created_at
-    }
-    OTP_CODES {
-        uuid id PK
-        varchar email "idx"
-        varchar code
-        boolean used
-        integer failed_attempts
-        timestamptz created_at
-        timestamptz expires_at
-    }
-    SEMANTIC_CACHE {
-        uuid id PK
-        varchar mode
-        text normalized_prompt
-        vector prompt_embedding "vector(1536), ivfflat idx"
-        jsonb response_json
-        integer hit_count
-        timestamptz created_at
-        timestamptz expires_at "idx"
-    }
-    SPECIALTIES {
-        uuid id PK
-        varchar name
-        varchar slug UK
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    CALCULATOR_DEFINITIONS {
-        uuid id PK
-        uuid specialty_id FK
-        varchar slug UK
-        varchar name
-        text description
-        varchar engine_type
-        varchar status
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    CALCULATOR_FIELDS {
-        uuid id PK
-        uuid calculator_id FK "ON DELETE CASCADE"
-        varchar key
-        varchar label
-        varchar field_type
-        varchar unit
-        boolean required
-        float min_value
-        float max_value
-        integer max_length
-        jsonb options
-        integer display_order
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    CALCULATOR_VERSIONS {
-        uuid id PK
-        uuid calculator_id FK "ON DELETE CASCADE"
-        integer version_number
-        varchar formula_key
-        jsonb interpretation_rules
-        text clinical_reference
-        boolean is_active "unique parcial: 1 ativa por calculadora"
-        timestamptz created_at
-    }
-    CALCULATOR_FAVORITES {
-        uuid id PK
-        uuid user_id FK "ON DELETE CASCADE"
-        uuid calculator_id FK "ON DELETE CASCADE"
-        timestamptz created_at
-    }
-    CALCULATOR_EXECUTIONS {
-        uuid id PK
-        uuid calculator_id FK
-        uuid version_id FK
-        uuid user_id FK
-        uuid company_id FK
-        uuid interaction_id FK
-        jsonb inputs
-        jsonb result
-        text interpretation
-        timestamptz created_at
-    }
-    MESSAGE_EMBEDDINGS {
-        uuid id PK
-        uuid interaction_id FK "ON DELETE CASCADE"
-        uuid conversation_id FK "ON DELETE CASCADE"
-        uuid user_id FK "ON DELETE CASCADE, denormalizado"
-        varchar role "user ou assistant"
-        text content "duplicado de proposito"
-        vector embedding "vector(1536), sem indice ivfflat"
-        timestamptz created_at
-    }
-    LP_LANDING_PAGES {
-        uuid id PK
-        varchar slug UK
-        varchar name
-        timestamptz created_at
-    }
-    LP_SUBMISSIONS {
-        uuid id PK
-        uuid landing_page_id FK "ON DELETE RESTRICT"
-        uuid user_id FK "public.users, ON DELETE SET NULL"
-        varchar name
-        varchar email "idx"
-        boolean email_missing
-        varchar phone
-        timestamptz lgpd_consent_at
-        boolean notify_on_availability
-        timestamptz created_at
-    }
-    LP_FINANCE_ANSWERS {
-        uuid id PK
-        uuid submission_id FK,UK "ON DELETE CASCADE"
-        varchar career_stage
-        varchar main_pain_point
-        timestamptz created_at
-    }
-    LP_ACCOUNTING_ANSWERS {
-        uuid id PK
-        uuid submission_id FK,UK "ON DELETE CASCADE"
-        varchar career_stage
-        varchar income_method
-        varchar accountant_status
-        varchar revenue_range
-        varchar willingness_to_pay
-        timestamptz created_at
-    }
-    LP_PARTNER_ANSWERS {
-        uuid id PK
-        uuid submission_id FK,UK "ON DELETE CASCADE"
-        varchar career_stage
-        varchar desired_brands
-        timestamptz created_at
-    }
-    LP_SELECTIONS {
-        uuid id PK
-        uuid submission_id FK "ON DELETE CASCADE"
-        varchar option
-        timestamptz created_at
-    }
+    %% ---- landing pages ----
+    LP_LANDING_PAGES ||--o{ LP_SUBMISSIONS : "landing_page_id RESTRICT"
+    LP_SUBMISSIONS ||--o{ LP_ACCOUNTING_ANSWERS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_ACCOUNTING_PAIN_SELECTIONS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_BENEFIT_SELECTIONS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_CALCULATOR_SELECTIONS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_FINANCE_ANSWERS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_PARTNER_ANSWERS : "submission_id CASCADE"
+    LP_SUBMISSIONS ||--o{ LP_PARTNER_CATEGORY_SELECTIONS : "submission_id CASCADE"
 
-    INTERACTIONS ||--o{ MESSAGE_EMBEDDINGS : "interaction_id (CASCADE)"
-    CONVERSATIONS ||--o{ MESSAGE_EMBEDDINGS : "conversation_id (CASCADE)"
-    USERS ||--o{ MESSAGE_EMBEDDINGS : "user_id (CASCADE)"
-    INTERACTIONS ||--o{ FILE_EXTRACTIONS : "interaction_id (SET NULL)"
+    %% ---- noticias ----
+    NEWS_ARTICLES ||--o{ NEWS_ARTICLE_TOPICS : "article_id CASCADE"
+    NEWS_ARTICLES ||--o{ NEWS_FAVORITES : "article_id CASCADE"
+    NEWS_ARTICLES ||--o{ NEWS_TOPIC_FEEDBACK : "article_id CASCADE"
+    NEWS_TOPICS ||--o{ NEWS_ARTICLE_TOPICS : "topic_id CASCADE"
+    NEWS_TOPICS ||--o{ NEWS_TOPIC_FEEDBACK : "topic_id SET NULL"
+    NEWS_TOPICS ||--o{ NEWS_TOPIC_SPECIALTIES : "topic_id CASCADE"
+    NEWS_TOPICS ||--o{ NEWS_USER_TOPICS : "topic_id CASCADE"
 
-    LP_LANDING_PAGES ||--o{ LP_SUBMISSIONS : "landing_page_id (RESTRICT)"
-    USERS ||--o{ LP_SUBMISSIONS : "user_id (SET NULL)"
-    LP_SUBMISSIONS ||--o| LP_FINANCE_ANSWERS : "submission_id (CASCADE)"
-    LP_SUBMISSIONS ||--o| LP_ACCOUNTING_ANSWERS : "submission_id (CASCADE)"
-    LP_SUBMISSIONS ||--o| LP_PARTNER_ANSWERS : "submission_id (CASCADE)"
-    LP_SUBMISSIONS ||--o{ LP_SELECTIONS : "accounting_pain / benefit / calculator / partner_category"
+    %% ---- localizador de DEA ----
+    DEA_DISPOSITIVOS ||--o{ DEA_VERIFICACOES : "dispositivo_id CASCADE"
+    DEA_LOCAIS ||--o{ DEA_DISPOSITIVOS : "local_id CASCADE"
 ```
-
-> No diagrama, `LP_*` são as tabelas do schema `landing_pages`; `LP_SELECTIONS` representa as quatro tabelas de seleção 1:N, que têm a mesma forma (`accounting_pain_selections`, `benefit_selections`, `calculator_selections`, `partner_category_selections`). Um `FileExtraction` agora aponta para a `Interaction` em que foi enviado (nullable: extrações anteriores à migration `001`, e o intervalo entre o upload e o envio da mensagem).
 
 ### 11.3 Constraints e regras notáveis
 
