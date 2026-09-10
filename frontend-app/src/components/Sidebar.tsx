@@ -19,6 +19,10 @@ export const SIDEBAR_PINNED_KEY = 'm360_sidebar_pinned';
 /** Largura do trilho colapsado, em px. */
 const RAIL_WIDTH = 56;
 
+/** Largura do painel aberto, em px. O wrapper do hover precisa da MESMA
+ *  medida para não disparar `mouseleave` quando o mouse entra no painel. */
+const PANEL_WIDTH = 260;
+
 interface Props {
   activeId?: string;
   onNew: (folderId?: string, folderName?: string) => void;
@@ -308,7 +312,9 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           "expandir", que é o que o hover já faz de graça.
         */}
         <button
-          onClick={() => setPinned(true)}
+          // `onMouseDown` pelo mesmo motivo do botão gêmeo no painel: o
+          // `mouseleave` do wrapper chega antes do `click` e desmonta o alvo.
+          onMouseDown={e => { e.preventDefault(); setPinned(true); }}
           title="Fixar barra lateral aberta"
           aria-label="Fixar barra lateral aberta"
           style={{
@@ -392,7 +398,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
 
   const aside = (
     <aside data-testid="sidebar-panel" style={{
-      width: 260, flexShrink: 0, height: '100%',
+      width: PANEL_WIDTH, flexShrink: 0, height: '100%',
       borderRight: '1px solid var(--line2)',
       display: 'flex', flexDirection: 'column',
       background: '#fbfdf7',
@@ -405,15 +411,44 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       {!isMobile && (
         <div style={{ padding: '10px 10px 0', display: 'flex', justifyContent: 'flex-end' }}>
           {/*
-            Simétrico ao de fixar: mesmo tamanho e mesma moldura. O par tem de
-            ser reconhecível como o MESMO controle em dois estados — se só um
-            deles parece um botão, a barra vira um lugar onde algo aconteceu
-            sem que a pessoa saiba desfazer.
+            O botão segue o ESTADO, e isso não é detalhe: quando a barra não
+            está fixada, este painel aparece SOBREPOSTO ao trilho (260px de
+            largura, zIndex 150, cobrindo os 56px do trilho inteiro). O botão
+            de fixar que mora no trilho fica embaixo dele e não recebe clique.
+
+            Enquanto este canto mostrava sempre "recolher", quem passava o
+            mouse e clicava aqui — o único botão alcançável — DESFIXAVA. O
+            relato foi "se eu clico nessa merda ele não fixa": estava clicando
+            no botão certo do ponto de vista do layout e no errado do ponto de
+            vista da intenção.
+
+            Fixada, o painel está no fluxo, o trilho não existe, e aí o mesmo
+            canto precisa oferecer o caminho de volta.
           */}
           <button
-            onClick={() => { setPinned(false); setHovering(false); }}
-            title="Recolher barra lateral"
-            aria-label="Recolher barra lateral"
+            // `onMouseDown`, e NÃO `onClick`. Esta é a correção do bug em que
+            // clicar aqui não fixava nada.
+            //
+            // O painel do hover vive dentro do wrapper que tem `onMouseLeave`.
+            // Ao mover o mouse até este botão, o ponteiro passa por regiões que
+            // disparam `mouseleave` no wrapper ANTES do `click` — medido, nesta
+            // ordem exata: ["mouseleave", "click"]. O `mouseleave` faz
+            // `setHovering(false)`, o painel é desmontado, e o clique aterrissa
+            // num botão que já saiu da árvore. Resultado: nada acontecia, ou
+            // pior, o toggle lia o estado do render antigo e DESFIXAVA.
+            //
+            // `mousedown` acontece antes de qualquer movimento subsequente, com
+            // o painel ainda montado, então o estado muda antes de a corrida
+            // existir. `preventDefault` evita que o botão roube o foco, que é
+            // outro caminho para o mesmo `mouseleave`.
+            onMouseDown={e => {
+              e.preventDefault();
+              setPinned(p => !p);
+              setHovering(false);
+            }}
+            title={pinned ? 'Recolher barra lateral' : 'Fixar barra lateral aberta'}
+            aria-label={pinned ? 'Recolher barra lateral' : 'Fixar barra lateral aberta'}
+            aria-pressed={pinned}
             style={{
               width: 28, height: 28, borderRadius: 8,
               background: 'transparent', border: '1px solid transparent',
@@ -434,8 +469,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
               <path d="M9.5 1.5 L14.5 6.5 M11 3 L7.5 6.5 L3.5 8 L8 12.5 L9.5 8.5 L13 5"
                 stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M6 10 L2 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              {/* Barra cortando: o mesmo pin, "desligado". */}
-              <path d="M2 2 L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              {/* Barra cortando só no estado fixado: o mesmo pin, "desligado". */}
+              {pinned && (
+                <path d="M2 2 L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              )}
             </svg>
           </button>
         </div>
@@ -734,9 +771,29 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   // Não fixada: o trilho fica no fluxo e o painel aparece SOBREPOSTO no hover.
   // Sobrepor em vez de empurrar é deliberado — com push, o chat inteiro se
   // desloca toda vez que o mouse encosta na borda esquerda da tela.
+  // O wrapper reserva RAIL_WIDTH no FLUXO (via o trilho, que é filho normal),
+  // mas sua própria caixa precisa cobrir o painel quando ele está aberto —
+  // senão o mouse "sai" do wrapper ao entrar no painel.
+  //
+  // Este era o bug: o wrapper media 56px e o painel sobreposto, 260px. Ao mover
+  // o ponteiro em direção ao botão de fixar, ele cruzava a fronteira dos 56px e
+  // o `mouseleave` disparava ANTES de qualquer evento do botão — ordem medida:
+  // ["mouseleave", "mousedown", "click"]. O painel era desmontado no primeiro,
+  // e o clique aterrissava no vazio. Daí "clico e não fixa".
+  //
+  // `width` fixo em vez de `onMouseLeave` no painel: um segundo handler criaria
+  // duas fontes de verdade para o mesmo estado, e a região entre os dois
+  // elementos continuaria sendo um buraco.
   return (
     <div
-      style={{ position: 'relative', width: RAIL_WIDTH, flexShrink: 0, height: '100%' }}
+      style={{
+        position: 'relative',
+        width: hovering ? PANEL_WIDTH : RAIL_WIDTH,
+        // Sem o `marginRight` negativo, alargar o wrapper empurraria o chat —
+        // exatamente o que a sobreposição existe para evitar.
+        marginRight: hovering ? RAIL_WIDTH - PANEL_WIDTH : 0,
+        flexShrink: 0, height: '100%',
+      }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >

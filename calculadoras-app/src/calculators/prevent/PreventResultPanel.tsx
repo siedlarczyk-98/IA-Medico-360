@@ -49,7 +49,11 @@ const HORIZONTES = [
   },
 ] as const;
 
-export const formataRisco = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
+// Sem `export`: só este arquivo usa. Exportá-la de um arquivo de componente
+// quebra o Fast Refresh (a regra `react-refresh/only-export-components`), e o
+// CI trata isso como erro. Se algum dia outro arquivo precisar dela, o lugar é
+// `preventUnits.ts`, ao lado das outras funções puras do módulo.
+const formataRisco = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
 function BlocoHorizonte({
   dados,
