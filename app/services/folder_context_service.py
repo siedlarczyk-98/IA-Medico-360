@@ -17,6 +17,7 @@ de outro se o filtro estiver frouxo. Todo caminho de leitura filtra por
 
 import asyncio
 import logging
+import re
 from uuid import UUID
 
 import httpx
@@ -70,6 +71,74 @@ MAX_CHARS_POR_TRECHO = 2000
 # Teto de trechos indexados numa passada. Limita o custo da primeira pergunta
 # feita numa pasta que já tinha conversas.
 MAX_INDEXAR_POR_VEZ = 60
+
+# ── Perguntas agregadoras ────────────────────────────────────────────────────
+#
+# "Monte um roteiro de aula com as informações que constam nesta pasta."
+#
+# Esta pergunta pede o CONJUNTO, e a busca por similaridade é a ferramenta
+# errada para ela. O texto não fala de tema nenhum — é uma instrução sobre o
+# que fazer — então o vetor dela não se parece com o de nenhuma conversa da
+# pasta, por mais pertinente que a conversa seja.
+#
+# Medido na pasta "Aulas" do caso que motivou isto, com três conversas dentro:
+#
+#   0.359  resposta sobre complicações cardiovasculares do diabetes
+#   0.240  resposta sobre PCR extra-hospitalar (Data Ocean)
+#   0.216  pergunta sobre PCR extra-hospitalar
+#   0.159  pergunta sobre complicações do diabetes
+#
+# Com o piso em 0.25, entrou UM trecho e a conversa inteira do Data Ocean
+# ficou de fora por um centésimo. O médico pediu para juntar duas conversas e
+# recebeu uma resposta construída sobre metade do material, sem nada na tela
+# que indicasse a falta.
+#
+# Baixar o piso não é a correção: ele existe para as pastas CLÍNICAS, onde
+# trazer o trecho errado significa material de outro paciente na discussão
+# atual. O que muda aqui é o CRITÉRIO — quando a pergunta é agregadora, a
+# relevância é dada pela pasta (o médico já disse "desta pasta"), e o piso sai
+# do caminho. O teto de trechos continua valendo, e o orçamento de contexto
+# em `context_budget` continua sendo o limite real.
+_PADRAO_AGREGADOR = re.compile(
+    r"""
+    (?:
+        # Referência explícita ao continente: "nesta pasta", "deste projeto".
+        \b(?:nesta|nessa|desta|dessa|na|da)\s+pasta\b
+      | \b(?:neste|nesse|deste|desse|no|do)\s+projeto\b
+        # Referência ao trabalho conjunto: "o que discutimos aqui".
+      | \b(?:discutimos|conversamos|falamos|vimos|levantamos)\b
+        # Quantificador sobre as conversas: "todas as conversas", "tudo que".
+      | \btodas?\s+as\s+(?:conversas|discuss(?:ão|ões)|pesquisas)\b
+      | \btudo\s+(?:que|o\s+que)\b
+        # Verbo de consolidação seguido do material: "junte o material".
+      | \b(?:junt(?:e|ar|ando)|consolid(?:e|ar|ando)|compil(?:e|ar|ando)
+           |unifi(?:que|car|cando)|re[uú]n(?:a|ir|indo))\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Teto de trechos numa pergunta agregadora. Mais alto que `MAX_TRECHOS` porque
+# o objetivo aqui é COBRIR a pasta, não escolher o mais parecido — mas ainda um
+# teto: uma pasta com trinta conversas não cabe num prompt, e o corte por
+# orçamento em `fit_turns_with_attachment_budget` é quem dá a palavra final.
+MAX_TRECHOS_AGREGADOR = 12
+
+
+def e_pergunta_agregadora(pergunta: str) -> bool:
+    """
+    Diz se a pergunta pede o CONJUNTO da pasta em vez de um tema dela.
+
+    Serve para escolher o critério de recuperação, e por isso erra para o lado
+    de NÃO agregar: um falso positivo injeta mais contexto do que o necessário
+    (custo e ruído), enquanto um falso negativo devolve ao médico uma resposta
+    que ignora silenciosamente parte do material — que é o defeito original.
+
+    Deliberadamente uma regex, e não uma chamada de modelo: isto roda no
+    caminho da resposta, antes do primeiro token, e um classificador aqui
+    somaria latência a um fluxo que já mede p50 de 33s em raciocínio clínico.
+    """
+    return bool(pergunta and _PADRAO_AGREGADOR.search(pergunta))
 
 
 async def _embed_batch(client: httpx.AsyncClient, textos: list[str]) -> list[list[float]]:
@@ -267,14 +336,34 @@ async def recuperar_trechos(
     folder_id: UUID,
     conversation_id: UUID | None,
     pergunta: str,
-    limite: int = MAX_TRECHOS,
+    limite: int | None = None,
 ) -> list[dict]:
     """
     Trechos relevantes das OUTRAS conversas da pasta.
 
     Exclui a conversa atual: o que foi dito nela já entra pelo histórico
     próprio, e recuperá-lo de novo duplicaria contexto e gastaria orçamento.
+
+    Dois regimes, escolhidos por `e_pergunta_agregadora`:
+
+    - **Tema** (o normal): ranqueia por similaridade e corta no piso. "Qual
+      anti-hipertensivo escolher?" deve trazer o que se parece com isso, e o
+      piso é a proteção contra material de outro paciente entrar de carona.
+    - **Agregador**: "monte um roteiro com o que está nesta pasta". O médico já
+      declarou o escopo; a similaridade não sabe medir isso e cortaria as
+      conversas cuja redação não se parece com a instrução. Aqui o piso sai do
+      caminho e o teto sobe — ver `_PADRAO_AGREGADOR`.
+
+    Em AMBOS os regimes a seleção é distribuída entre as conversas da pasta:
+    um trecho de cada uma antes do segundo trecho de qualquer uma. Sem isso,
+    uma conversa longa ocupava os quatro lugares e as outras sumiam — que é o
+    oposto do que "contexto da pasta" promete.
     """
+    agregador = e_pergunta_agregadora(pergunta)
+    if limite is None:
+        limite = MAX_TRECHOS_AGREGADOR if agregador else MAX_TRECHOS
+    piso = 0.0 if agregador else SIMILARITY_FLOOR
+
     try:
         client = get_client()
         vetores = await _embed_batch(client, [pergunta])
@@ -284,23 +373,40 @@ async def recuperar_trechos(
 
         # SQL cru pelo operador de distância do pgvector. Os filtros de dono e
         # pasta ficam DENTRO da consulta, nunca aplicados depois em Python.
+        #
+        # `rank` numera os trechos DENTRO de cada conversa por similaridade, e
+        # a ordenação externa põe todos os primeiros colocados na frente. O
+        # efeito é rodízio: cada conversa da pasta é representada antes que
+        # qualquer uma repita. O piso continua sendo aplicado antes disso, na
+        # cláusula WHERE — cobrir a pasta não é motivo para injetar lixo.
         resultado = await db.execute(
             text("""
-                SELECT me.content,
-                       me.role,
-                       c.title AS conversa,
-                       1 - (me.embedding <=> CAST(:emb AS vector)) AS sim
-                  FROM message_embeddings me
-                  JOIN conversations c ON c.id = me.conversation_id
-                 WHERE me.user_id = :user_id
-                   AND c.user_id = :user_id
-                   AND c.folder_id = :folder_id
-                   AND c.status IS TRUE
-                   -- CAST(... AS uuid) e não `::uuid`: os dois-pontos duplos
-                   -- colidem com a sintaxe de parâmetro nomeado do SQLAlchemy.
-                   AND (CAST(:conversation_id AS uuid) IS NULL
-                        OR me.conversation_id <> CAST(:conversation_id AS uuid))
-                 ORDER BY me.embedding <=> CAST(:emb AS vector)
+                WITH candidatos AS (
+                    SELECT me.content,
+                           me.role,
+                           me.conversation_id,
+                           c.title AS conversa,
+                           1 - (me.embedding <=> CAST(:emb AS vector)) AS sim,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY me.conversation_id
+                               ORDER BY me.embedding <=> CAST(:emb AS vector)
+                           ) AS rank
+                      FROM message_embeddings me
+                      JOIN conversations c ON c.id = me.conversation_id
+                     WHERE me.user_id = :user_id
+                       AND c.user_id = :user_id
+                       AND c.folder_id = :folder_id
+                       AND c.status IS TRUE
+                       -- CAST(... AS uuid) e não `::uuid`: os dois-pontos
+                       -- duplos colidem com a sintaxe de parâmetro nomeado
+                       -- do SQLAlchemy.
+                       AND (CAST(:conversation_id AS uuid) IS NULL
+                            OR me.conversation_id <> CAST(:conversation_id AS uuid))
+                       AND 1 - (me.embedding <=> CAST(:emb AS vector)) >= :piso
+                )
+                SELECT content, role, conversa, sim
+                  FROM candidatos
+                 ORDER BY rank, sim DESC
                  LIMIT :limite
             """),
             {
@@ -308,24 +414,32 @@ async def recuperar_trechos(
                 "user_id": str(user_id),
                 "folder_id": str(folder_id),
                 "conversation_id": str(conversation_id) if conversation_id else None,
+                "piso": piso,
                 "limite": limite,
             },
         )
         selecionados = [
             {"content": linha.content, "role": linha.role, "conversa": linha.conversa, "sim": linha.sim}
             for linha in resultado.fetchall()
-            if linha.sim >= SIMILARITY_FLOOR
         ]
         # Observabilidade: sem isto, "não veio contexto" e "veio contexto ruim"
         # são indistinguíveis de fora, e foi essa cegueira que fez o limiar
-        # errado passar despercebido até a homologação.
+        # errado passar despercebido até a homologação. O regime entra no log
+        # porque ele muda o piso: sem ele, uma similaridade de 0.16 na linha
+        # pareceria um piso quebrado.
+        regime = "agregador" if agregador else "tema"
         if selecionados:
             logger.info(
-                "[PastaContexto] pasta=%s trechos=%d similaridades=%s",
-                folder_id, len(selecionados), [round(t["sim"], 3) for t in selecionados],
+                "[PastaContexto] pasta=%s regime=%s trechos=%d conversas=%d similaridades=%s",
+                folder_id, regime, len(selecionados),
+                len({t["conversa"] for t in selecionados}),
+                [round(t["sim"], 3) for t in selecionados],
             )
         else:
-            logger.info("[PastaContexto] pasta=%s nenhum trecho acima do piso", folder_id)
+            logger.info(
+                "[PastaContexto] pasta=%s regime=%s nenhum trecho acima do piso",
+                folder_id, regime,
+            )
         return selecionados
 
     except Exception as exc:

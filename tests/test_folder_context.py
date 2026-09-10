@@ -25,6 +25,7 @@ erro de sintaxe e os dezesseis testes de isolamento passaram alegremente.
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from app.models.models import Interaction, InteractionResponse, MessageEmbedding
 from app.services import folder_context_service
@@ -33,6 +34,7 @@ from app.services.folder_context_service import (
     MAX_CHARS_EVOLUCAO_NO_PROMPT,
     SIMILARITY_FLOOR,
     contexto_da_pasta,
+    e_pergunta_agregadora,
     evolucao_da_pasta,
     formatar_bloco,
     formatar_bloco_evolucao,
@@ -835,3 +837,152 @@ async def test_bloco_segue_o_tipo_gravado_na_pasta(db, user, folder_factory):
 
     assert "NÃO é um caso clínico" in bloco
     assert "Evolução do paciente" not in bloco
+
+
+# ── Perguntas agregadoras ────────────────────────────────────────────────────
+#
+# "Monte um roteiro de aula com as informações que constam nesta pasta."
+#
+# Esta pergunta pede o CONJUNTO, e a similaridade é a ferramenta errada para
+# ela: o texto é uma instrução, não um tema, e por isso não se parece com
+# NENHUMA conversa da pasta — inclusive as que o médico quer juntar.
+#
+# O caso real que motivou tudo: pasta "Aulas" com três conversas, o médico
+# pediu o roteiro e recebeu uma resposta construída sobre UMA delas. A conversa
+# do Data Ocean pontuou 0.240 contra um piso de 0.25 e ficou de fora por um
+# centésimo, sem nada na tela indicando a falta.
+
+
+def test_reconhece_pedido_de_juntar_o_material_da_pasta():
+    """As formas que o médico usa na prática para pedir o conjunto."""
+    assert e_pergunta_agregadora(
+        "Monte um roteiro de aula com as informações que constam nesta pasta."
+    )
+    assert e_pergunta_agregadora("Resuma tudo que discutimos aqui")
+    assert e_pergunta_agregadora("Junte as duas conversas num documento só")
+    assert e_pergunta_agregadora("Consolide todas as conversas desta pasta")
+    assert e_pergunta_agregadora("Compile o material deste projeto")
+
+
+def test_pergunta_sobre_um_tema_nao_e_agregadora():
+    """
+    O regime normal precisa continuar sendo o normal.
+
+    Um falso positivo aqui derruba o piso numa pergunta clínica comum — e o
+    piso é o que impede material de OUTRO paciente de entrar na discussão
+    atual, que é a garantia central deste arquivo.
+    """
+    assert not e_pergunta_agregadora("Qual anti-hipertensivo escolher para DRC?")
+    assert not e_pergunta_agregadora("Prevalência de PCR extrahospitalar no Brasil")
+    assert not e_pergunta_agregadora("Principais complicações cardiovasculares do diabetes?")
+    assert not e_pergunta_agregadora("Existe contraindicação para o paciente Jorge?")
+    assert not e_pergunta_agregadora("")
+
+
+def test_pergunta_agregadora_traz_conversa_que_o_piso_cortaria():
+    """
+    O caso do Data Ocean: 0.240 contra um piso de 0.25.
+
+    Trava o comportamento em números REAIS medidos na pasta "Aulas" — sem
+    isto, a correção volta a ser um centésimo de distância do defeito.
+    """
+    sim_data_ocean = 0.240
+    assert sim_data_ocean < SIMILARITY_FLOOR, (
+        "a premissa do teste é que este trecho seria cortado no regime normal"
+    )
+    # No regime agregador o piso não se aplica: quem declarou o escopo foi o
+    # médico, ao dizer "nesta pasta".
+    assert e_pergunta_agregadora(
+        "Monte um roteiro de aula com as informações que constam nesta pasta."
+    )
+
+
+async def test_agregador_recupera_de_todas_as_conversas_da_pasta(db, user, folder_factory):
+    """
+    O teste de ponta a ponta do caso do Ruben.
+
+    Três conversas na pasta, uma delas com similaridade ABAIXO do piso. A
+    pergunta agregadora tem de trazer as três — era exatamente isto que
+    falhava.
+    """
+    pasta = await folder_factory(user, "Aulas")
+    atual = await _conversa_indexada(db, user, pasta, "Roteiro", "roteiro")
+    await _conversa_indexada(db, user, pasta, "Diabetes", "complicações do diabetes")
+    # Ortogonal = similaridade ~0, MUITO abaixo do piso: no regime normal
+    # este trecho não entraria de jeito nenhum.
+    await _conversa_indexada(
+        db, user, pasta, "PCR extrahospitalar", "prevalência de PCR",
+        embedding=vetor_ortogonal(),
+    )
+
+    trechos = await recuperar_trechos(
+        db, user.id, pasta.id, atual.id,
+        "Monte um roteiro de aula com as informações que constam nesta pasta.",
+    )
+
+    conversas = {t["conversa"] for t in trechos}
+    assert conversas == {"Diabetes", "PCR extrahospitalar"}, (
+        "a pergunta agregadora deve cobrir a pasta inteira, inclusive o que "
+        "a similaridade cortaria"
+    )
+
+
+async def test_pergunta_por_tema_continua_respeitando_o_piso(db, user, folder_factory):
+    """
+    A contraprova do teste acima, e o que protege as pastas clínicas.
+
+    Mesma pasta, mesmo material — mas uma pergunta sobre um TEMA. O trecho sem
+    relação tem de continuar fora.
+    """
+    pasta = await folder_factory(user, "Pasta")
+    atual = await _conversa_indexada(db, user, pasta, "Atual", "atual")
+    await _conversa_indexada(db, user, pasta, "Relacionada", "material pertinente")
+    await _conversa_indexada(
+        db, user, pasta, "Sem relação", "outro assunto",
+        embedding=vetor_ortogonal(),
+    )
+
+    trechos = await recuperar_trechos(
+        db, user.id, pasta.id, atual.id, "Qual a conduta para este caso?"
+    )
+
+    conversas = {t["conversa"] for t in trechos}
+    assert "Sem relação" not in conversas
+    assert "Relacionada" in conversas
+
+
+async def test_conversa_longa_nao_ocupa_todos_os_lugares(db, user, folder_factory):
+    """
+    Cobertura por conversa: um trecho de cada antes do segundo de qualquer uma.
+
+    Sem o rodízio, a conversa com mais turnos indexados enchia o teto sozinha e
+    apagava as irmãs — o oposto do que "contexto da pasta" promete. Como todos
+    os vetores aqui são idênticos, a ordenação por similaridade não desempata:
+    só o particionamento por conversa produz o resultado esperado.
+    """
+    from app.models.models import Conversation, MessageEmbedding
+
+    pasta = await folder_factory(user, "Pasta")
+    atual = await _conversa_indexada(db, user, pasta, "Atual", "atual")
+    longa = await _conversa_indexada(db, user, pasta, "Longa", "turno inicial")
+    await _conversa_indexada(db, user, pasta, "Curta", "turno único")
+
+    # Mais oito trechos na conversa longa, todos com o mesmo vetor.
+    interaction_id = (await db.execute(
+        select(Interaction.id).where(Interaction.conversation_id == longa.id)
+    )).scalar_one()
+    for i in range(8):
+        db.add(MessageEmbedding(
+            interaction_id=interaction_id, conversation_id=longa.id,
+            user_id=user.id, role="assistant", content=f"turno extra {i}",
+            embedding=vetor(),
+        ))
+    await db.flush()
+
+    trechos = await recuperar_trechos(
+        db, user.id, pasta.id, atual.id, "pergunta sobre o caso", limite=2
+    )
+
+    assert {t["conversa"] for t in trechos} == {"Longa", "Curta"}, (
+        "a conversa longa não pode consumir o teto sozinha"
+    )
