@@ -295,13 +295,42 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         background: '#fbfdf7', padding: '14px 0',
       }}>
+        {/*
+          Botão de fixar. Era uma seta de 14px sem moldura, e ninguém achava:
+          quem passava o mouse via a barra abrir e não tinha por que supor que
+          aquela setinha significasse "deixar assim". O relato que motivou a
+          mudança foi "não tá ficando aberta, só quando meu mouse tá em cima" —
+          de alguém que conhece o produto. A função existia; a descoberta não.
+
+          O que mudou: alvo de 32×32 (mesmo tamanho do botão de nova consulta,
+          e acima dos 24px mínimos de alvo de toque), moldura visível para
+          parecer clicável, e ícone de PIN em vez de seta — seta sugere
+          "expandir", que é o que o hover já faz de graça.
+        */}
         <button
           onClick={() => setPinned(true)}
           title="Fixar barra lateral aberta"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', marginBottom: 14 }}
+          aria-label="Fixar barra lateral aberta"
+          style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: 'var(--paper)', border: '1px solid var(--line2)',
+            cursor: 'pointer', color: 'var(--pen3)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            marginBottom: 14, transition: 'background 120ms, color 120ms',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--fill)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--paper)';
+            e.currentTarget.style.color = 'var(--pen3)';
+          }}
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M6 3 L11 8 L6 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path d="M9.5 1.5 L14.5 6.5 M11 3 L7.5 6.5 L3.5 8 L8 12.5 L9.5 8.5 L13 5"
+              stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M6 10 L2 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </button>
         <button
@@ -375,13 +404,38 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     }}>
       {!isMobile && (
         <div style={{ padding: '10px 10px 0', display: 'flex', justifyContent: 'flex-end' }}>
+          {/*
+            Simétrico ao de fixar: mesmo tamanho e mesma moldura. O par tem de
+            ser reconhecível como o MESMO controle em dois estados — se só um
+            deles parece um botão, a barra vira um lugar onde algo aconteceu
+            sem que a pessoa saiba desfazer.
+          */}
           <button
             onClick={() => { setPinned(false); setHovering(false); }}
             title="Recolher barra lateral"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}
+            aria-label="Recolher barra lateral"
+            style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: 'transparent', border: '1px solid transparent',
+              cursor: 'pointer', color: 'var(--pen3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 120ms, border-color 120ms',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'var(--fill)';
+              e.currentTarget.style.borderColor = 'var(--line2)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'transparent';
+            }}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3 L5 8 L10 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path d="M9.5 1.5 L14.5 6.5 M11 3 L7.5 6.5 L3.5 8 L8 12.5 L9.5 8.5 L13 5"
+                stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M6 10 L2 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              {/* Barra cortando: o mesmo pin, "desligado". */}
+              <path d="M2 2 L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
           </button>
         </div>
