@@ -10,6 +10,7 @@ https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import wraps
 
 from opentelemetry import trace
 
@@ -74,6 +75,153 @@ def _set_llm_output(
         span.set_attribute("llm.token_count.completion", tokens_out)
     if tokens_in and tokens_out:
         span.set_attribute("llm.token_count.total", tokens_in + tokens_out)
+
+
+def get_current_span() -> trace.Span | None:
+    """
+    O span da interação em curso, ou None se o Phoenix estiver desligado.
+
+    Serve para carimbar atributos LONGE de onde o span foi aberto — o custo é
+    calculado ~150 linhas depois do início do `query`, e passá-lo de mão em mão
+    por toda a função só para chegar lá acrescentaria um parâmetro a cada
+    assinatura no caminho.
+
+    Devolve None quando não há span gravando, e não o span "inválido" que o
+    OTel usa como sentinela: quem chama trata os dois do mesmo jeito, e None é
+    mais honesto sobre o que aconteceu.
+    """
+    if _tracer is None:
+        return None
+    span = trace.get_current_span()
+    return span if span.is_recording() else None
+
+
+@asynccontextmanager
+async def interaction_span(mode: str | None, operation: str = "orquestrador") -> AsyncIterator[trace.Span | None]:
+    """
+    Span que cobre a interação INTEIRA, do roteamento ao custo gravado.
+
+    Existe por uma razão de ordem: o span do provider (`async_llm_span`) fecha
+    quando a chamada HTTP retorna, e o custo só é calculado DEPOIS disso — ele
+    precisa da tabela de preços do banco. Não havia onde carimbar o custo: o
+    único span disponível já estava fechado.
+
+    Este é o pai. Os spans de provider ficam aninhados dentro dele (o OTel usa
+    o contexto atual como pai automaticamente), e ele continua aberto tempo
+    suficiente para receber o total via `set_llm_cost`.
+
+    Devolve None quando o Phoenix está desligado, e quem chama passa esse None
+    adiante sem se importar — `set_llm_cost` aceita.
+    """
+    tracer = get_tracer()
+    if tracer is None:
+        yield None
+        return
+
+    with tracer.start_as_current_span(f"medico360.{operation}") as span:
+        span.set_attribute("openinference.span.kind", "CHAIN")
+        if mode:
+            span.set_attribute("medico360.mode", mode)
+        try:
+            yield span
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(trace.StatusCode.ERROR, str(exc))
+            raise
+
+
+def traced_interaction(operation: str = "orquestrador"):
+    """
+    Decorator que abre o span-pai em volta de um método do orquestrador.
+
+    Decorator, e não um `async with` dentro do método, por um motivo prático: o
+    corpo do `query` tem ~300 linhas e o do `stream` é um gerador. Envolver
+    qualquer um dos dois exigiria reindentar tudo, e o diff resultante — 300
+    linhas de espaço em branco — esconderia a mudança real de quem for revisar.
+
+    O `mode` vem dos kwargs quando o cliente o informou explicitamente. Ele
+    ainda pode MUDAR lá dentro (a triagem decide, ou o anexo promove), e por
+    isso `set_llm_cost` o carimba de novo com o valor final — o daqui é só o
+    que se sabia no começo.
+    """
+    def decorador(fn):
+        @wraps(fn)
+        async def wrapper(self, *args, **kwargs):
+            async with interaction_span(kwargs.get("mode"), operation):
+                return await fn(self, *args, **kwargs)
+        return wrapper
+    return decorador
+
+
+def traced_interaction_stream(operation: str = "orquestrador.stream"):
+    """
+    Versão do `traced_interaction` para geradores assíncronos.
+
+    Um `async def` que dá `yield` não pode ser envolvido pelo decorator acima:
+    chamá-lo devolve o gerador na hora, sem executar nada, e o span fecharia
+    antes do primeiro token. Aqui o `async for` mantém o span aberto pelo tempo
+    de vida do stream inteiro — que é justamente o que o `/stream` precisa,
+    porque lá o custo só é calculado quando a geração termina.
+    """
+    def decorador(fn):
+        @wraps(fn)
+        async def wrapper(self, *args, **kwargs):
+            async with interaction_span(kwargs.get("mode"), operation):
+                async for item in fn(self, *args, **kwargs):
+                    yield item
+        return wrapper
+    return decorador
+
+
+def set_llm_cost(
+    span: trace.Span | None,
+    *,
+    cost_usd: object,
+    tool_usage: dict | None = None,
+    mode: str | None = None,
+) -> None:
+    """
+    Carimba no span o custo REAL da interação, já calculado pelo orquestrador.
+
+    Por que isto não sai de `_set_llm_output`: quando o provider retorna, o
+    custo ainda não existe. Ele depende da tabela de preços (`model_pricing`,
+    no banco) e, no caso das ferramentas integradas, de uma conversão de reais
+    para dólar — nada disso é assunto do provider, que só sabe falar HTTP com a
+    API. Quem tem os dois números é o orquestrador, depois do `calculate_cost`.
+
+    Por que importa: sem este atributo o Phoenix ESTIMA o custo a partir do
+    modelo e da contagem de tokens. Para a maioria dos modos a estimativa é
+    aproximada e serve. Para o DATA_OCEAN ela é simplesmente errada — o custo
+    dele está em GB processados, páginas lidas e minutos de execução, não em
+    tokens. Uma consulta agêntica de dezenas de segundos ao DATASUS aparecia no
+    Phoenix custando o mesmo que uma pergunta comum ao mesmo modelo.
+
+    `tool_usage` vai junto, cru, pelo mesmo motivo que ele é gravado cru em
+    `extra_metadata`: os preços da Maritaca mudam, e o consumo permite refazer
+    a conta depois. Sem ele, o span registraria um total sem nada que explique
+    de onde veio.
+
+    Silencioso quando o span é None ou não está gravando — Phoenix desligado é
+    o caminho normal em teste e em desenvolvimento.
+    """
+    if span is None or not span.is_recording():
+        return
+
+    # `float` porque o custo circula como `Decimal` (dinheiro), e o OTel só
+    # aceita tipos primitivos como valor de atributo. A precisão perdida aqui
+    # não tem consequência: o valor autoritativo é o do banco, e este é para
+    # leitura humana num gráfico.
+    span.set_attribute("llm.cost.total", float(cost_usd))
+
+    if mode:
+        span.set_attribute("medico360.mode", mode)
+
+    # Consumo bruto por unidade, do jeito que a Maritaca reporta. Prefixo
+    # próprio: não é convenção OpenInference, e inventar um nome parecido com
+    # os dela confundiria quem lê o trace.
+    for unidade, consumo in (tool_usage or {}).items():
+        if consumo:
+            span.set_attribute(f"medico360.tool_usage.{unidade}", consumo)
 
 
 def start_llm_span(provider: str, model_id: str, prompt: str, operation: str = "stream") -> trace.Span | None:

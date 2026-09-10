@@ -23,6 +23,11 @@ from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     build_orquestrador_prompt,
 )
+from app.core.telemetry import (
+    get_current_span,
+    set_llm_cost,
+    traced_interaction_stream,
+)
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Interaction,
@@ -72,6 +77,7 @@ class OrquestradorStreamService:
         self.user_specialty = user_specialty
         self.user_med_status = user_med_status
 
+    @traced_interaction_stream()
     async def stream(
         self,
         prompt: str,
@@ -366,6 +372,18 @@ class OrquestradorStreamService:
                     # Ferramentas integradas (Data Ocean) cobram por GB, busca
                     # e minuto — grandezas que `calculate_cost` não vê.
                     cost += calcular_custo_ferramentas(tool_usage)
+
+                # O custo REAL vai para o trace aqui, e nao no provider: quando
+                # ele retorna, este numero ainda nao existe. Sem isto o Phoenix
+                # estimava o custo por tokens — o que para o DATA_OCEAN e
+                # simplesmente errado, ja que o custo dele esta em GB e minutos.
+                # Ver `set_llm_cost`.
+                set_llm_cost(
+                    get_current_span(),
+                    cost_usd=cost,
+                    tool_usage=tool_usage,
+                    mode=mode,
+                )
 
                 ir = InteractionResponse(
                     interaction_id=interaction.id,

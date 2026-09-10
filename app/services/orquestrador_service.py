@@ -18,6 +18,7 @@ from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     build_orquestrador_prompt,
 )
+from app.core.telemetry import get_current_span, set_llm_cost, traced_interaction
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Interaction,
@@ -74,6 +75,7 @@ class OrquestradorService:
         self.user_specialty = user_specialty
         self.user_med_status = user_med_status
 
+    @traced_interaction()
     async def query(
         self,
         prompt: str,
@@ -242,9 +244,20 @@ class OrquestradorService:
                 )
                 # Ferramentas integradas (Data Ocean) cobram por GB, busca e
                 # minuto de execução — grandezas que `calculate_cost` não vê.
-                # Enquanto os preços não estiverem preenchidos isto soma zero,
-                # e o custo do modo fica subestimado: ver `PRECOS_FERRAMENTAS_USD`.
+                # Os preços estão em `PRECOS_FERRAMENTAS_BRL` e a conversão usa
+                # um câmbio FIXO, que é um gap conhecido: ver `BRL_POR_USD`.
                 cost += calcular_custo_ferramentas(agent_response.get("tool_usage"))
+
+            # O custo REAL vai para o trace aqui, e não no provider: quando ele
+            # retorna, este número ainda não existe. Sem isto o Phoenix estimava
+            # o custo por tokens — o que para o DATA_OCEAN é simplesmente errado,
+            # já que o custo dele está em GB e minutos. Ver `set_llm_cost`.
+            set_llm_cost(
+                get_current_span(),
+                cost_usd=cost,
+                tool_usage=agent_response.get("tool_usage"),
+                mode=mode,
+            )
 
             ir = InteractionResponse(
                 interaction_id=interaction.id,
