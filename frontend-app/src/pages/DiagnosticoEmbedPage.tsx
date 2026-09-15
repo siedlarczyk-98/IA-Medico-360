@@ -18,7 +18,7 @@
  * minutos, e vê-lo chegar é justamente o que se quer provar.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const WAID_ORIGIN =
   import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
@@ -30,42 +30,41 @@ interface MensagemVista {
   temToken: boolean;
 }
 
-export function DiagnosticoEmbedPage() {
-  const [mensagens, setMensagens] = useState<MensagemVista[]>([]);
-  const [pedidos, setPedidos] = useState(0);
-  const [copiado, setCopiado] = useState(false);
-  const inicio = useRef(Date.now());
-
-  /**
-   * `localStorage` funciona AQUI, neste contexto?
-   *
-   * Somos um iframe cross-origin. Navegadores e webviews bloqueiam ou
-   * particionam armazenamento de terceiros nessa situação — e o modo de falha é
-   * traiçoeiro: em alguns, escrever lança; em outros, escreve e some depois;
-   * em outros ainda, o valor fica isolado por sessão. Por isso o teste é de
-   * ida e volta (escreve, lê, compara), não só um `try` em volta do `setItem`.
-   *
-   * Se isto falhar, TUDO se explica: o handshake funciona, a troca funciona, o
-   * token é guardado, o `RequireAuth` não o encontra no próximo render e manda
-   * para o login. Vale para o token novo e valia para o fluxo por e-mail — que
-   * é justamente o que nunca funcionou nos apps.
-   */
-  function testarArmazenamento(): string {
-    const chave = '__m360_teste_armazenamento';
-    try {
-      const valor = String(Date.now());
-      localStorage.setItem(chave, valor);
-      const lido = localStorage.getItem(chave);
-      localStorage.removeItem(chave);
-      if (lido !== valor) return 'FALHA — escreveu mas leu diferente';
-      return 'OK';
-    } catch (e) {
-      return `BLOQUEADO — ${e instanceof Error ? e.name : 'erro'}`;
-    }
+/**
+ * `localStorage` funciona AQUI, neste contexto?
+ *
+ * Somos um iframe cross-origin. Navegadores e webviews bloqueiam ou
+ * particionam armazenamento de terceiros nessa situação — e o modo de falha é
+ * traiçoeiro: em alguns, escrever lança; em outros, escreve e some depois;
+ * em outros ainda, o valor fica isolado por sessão. Por isso o teste é de
+ * ida e volta (escreve, lê, compara), não só um `try` em volta do `setItem`.
+ *
+ * Se isto falhar, TUDO se explica: o handshake funciona, a troca funciona, o
+ * token é guardado, o `RequireAuth` não o encontra no próximo render e manda
+ * para o login. Vale para o token novo e valia para o fluxo por e-mail — que
+ * é justamente o que nunca funcionou nos apps.
+ *
+ * Vive FORA do componente: escreve no `localStorage`, e uma função com efeito
+ * colateral declarada dentro dele seria chamada a cada render, além de tornar o
+ * corpo do componente impuro.
+ */
+function testarArmazenamento(): string {
+  const chave = '__m360_teste_armazenamento';
+  try {
+    const valor = String(Date.now());
+    localStorage.setItem(chave, valor);
+    const lido = localStorage.getItem(chave);
+    localStorage.removeItem(chave);
+    if (lido !== valor) return 'FALHA — escreveu mas leu diferente';
+    return 'OK';
+  } catch (e) {
+    return `BLOQUEADO — ${e instanceof Error ? e.name : 'erro'}`;
   }
+}
 
-  // Colhido uma vez: o que descreve o CONTEXTO em que a página abriu.
-  const contexto = useRef({
+/** Colhe o que descreve o CONTEXTO em que a página abriu. Roda uma vez. */
+function colherContexto() {
+  return {
     url: window.location.href,
     dentroDeIframe: window.parent !== window,
     referrer: document.referrer || '(vazio)',
@@ -73,7 +72,32 @@ export function DiagnosticoEmbedPage() {
     armazenamento: testarArmazenamento(),
     cookiesHabilitados: navigator.cookieEnabled ? 'SIM' : 'NAO',
     userAgent: navigator.userAgent,
-  });
+  };
+}
+
+export function DiagnosticoEmbedPage() {
+  const [mensagens, setMensagens] = useState<MensagemVista[]>([]);
+  const [pedidos, setPedidos] = useState(0);
+  const [copiado, setCopiado] = useState(false);
+
+  // `useState` com inicializador preguiçoso, e não `useRef(...)`: o argumento
+  // de `useRef` é avaliado a TODO render (só o primeiro valor é guardado), o
+  // que aqui significava reler `window`/`navigator` e reescrever no
+  // `localStorage` a cada vez. O inicializador de `useState` roda uma vez só.
+  //
+  // E o valor é lido no corpo do componente para montar o relatório — ler
+  // `ref.current` durante o render é justamente o que `react-hooks/refs`
+  // proíbe, porque o React não garante consistência nesse caso.
+  const [contexto] = useState(colherContexto);
+
+  // Marco zero para o carimbo de tempo das mensagens. `useState` com
+  // inicializador, e não `useRef(Date.now())`: o argumento de `useRef` é
+  // avaliado a cada render (só o primeiro valor é guardado), e `Date.now()` ali
+  // é chamada impura no corpo do componente.
+  //
+  // Não precisa de ref: o valor nunca muda, então a closure do `useEffect` —
+  // que roda uma vez — enxerga o valor certo.
+  const [inicio] = useState(() => Date.now());
 
   useEffect(() => {
     function aoReceber(event: MessageEvent) {
@@ -83,7 +107,7 @@ export function DiagnosticoEmbedPage() {
       setMensagens(atual => [
         ...atual.slice(-9),
         {
-          em: `${((Date.now() - inicio.current) / 1000).toFixed(1)}s`,
+          em: `${((Date.now() - inicio) / 1000).toFixed(1)}s`,
           origin: event.origin || '(vazia)',
           tipo: typeof dados?.type === 'string' ? dados.type : typeof event.data,
           temToken: Boolean(dados?.token),
@@ -111,22 +135,25 @@ export function DiagnosticoEmbedPage() {
       clearInterval(t);
       window.removeEventListener('message', aoReceber);
     };
-  }, []);
+    // `inicio` vem de `useState` sem setter: nunca muda, então declará-lo não
+    // faz o efeito re-executar. Está aqui só para a regra de dependências
+    // continuar verificável — omitir obrigaria a confiar num comentário.
+  }, [inicio]);
 
   const relatorio = [
-    `URL              : ${contexto.current.url}`,
-    `Dentro de iframe : ${contexto.current.dentroDeIframe ? 'SIM' : 'NAO'}`,
-    `document.referrer: ${contexto.current.referrer}`,
-    `Origem esperada  : ${contexto.current.origemEsperada}`,
-    `localStorage     : ${contexto.current.armazenamento}`,
-    `Cookies          : ${contexto.current.cookiesHabilitados}`,
+    `URL              : ${contexto.url}`,
+    `Dentro de iframe : ${contexto.dentroDeIframe ? 'SIM' : 'NAO'}`,
+    `document.referrer: ${contexto.referrer}`,
+    `Origem esperada  : ${contexto.origemEsperada}`,
+    `localStorage     : ${contexto.armazenamento}`,
+    `Cookies          : ${contexto.cookiesHabilitados}`,
     `Pedidos enviados : ${pedidos}`,
     `Mensagens vistas : ${mensagens.length}`,
     ...mensagens.map(m => `  [${m.em}] origem=${m.origin} tipo=${m.tipo} token=${m.temToken ? 'sim' : 'nao'}`),
-    `UserAgent        : ${contexto.current.userAgent}`,
+    `UserAgent        : ${contexto.userAgent}`,
   ].join('\n');
 
-  const veredito = !contexto.current.dentroDeIframe
+  const veredito = !contexto.dentroDeIframe
     ? 'A página NÃO está dentro de um iframe. Sem iframe, a plataforma não tem como entregar a identidade — nem por evento, nem por parâmetro na URL.'
     : mensagens.length === 0
       ? 'Está dentro de um iframe, mas nenhuma mensagem chegou. O envio de identidade por token pode não estar ligado nesta seção.'
