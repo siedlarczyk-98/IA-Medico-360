@@ -100,8 +100,92 @@ class BaseProvider(ABC):
 
 class AnthropicProvider(BaseProvider):
 
+    # Versão da ferramenta de busca. A `_20260209` traz filtragem dinâmica e é
+    # suportada pelo Sonnet 4.6 (e pela geração seguinte).
+    #
+    # NÃO declare `code_execution` junto: a filtragem dinâmica já roda execução
+    # de código por baixo, e um segundo ambiente declarado confunde o modelo.
+    FERRAMENTA_BUSCA = "web_search_20260209"
+
+    # Modelos que REJEITAM `temperature` — a partir do Sonnet 5 e do Opus 5, os
+    # parâmetros de sampling (`temperature`, `top_p`, `top_k`) foram removidos da
+    # API e um payload que os inclua volta 400.
+    #
+    # Mandar o parâmetro "por garantia" não é neutro aqui: é a diferença entre o
+    # modo clínico funcionar e quebrar em TODA requisição. Mesmo motivo (e mesmo
+    # formato) de `OpenAIProvider._NO_TEMPERATURE_PREFIXES`, que existe porque a
+    # o-series e o gpt-5 fizeram a mesma remoção antes.
+    _NO_TEMPERATURE_PREFIXES = (
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-fable-5",
+        "claude-mythos-5",
+    )
+
+    @classmethod
+    def _supports_temperature(cls, model_id: str) -> bool:
+        return not model_id.startswith(cls._NO_TEMPERATURE_PREFIXES)
+
     def _web_search_tool(self) -> list:
-        return [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+        return [{"type": self.FERRAMENTA_BUSCA, "name": "web_search", "max_uses": 5}]
+
+    @staticmethod
+    def _com_breakpoint_de_cache(history: list[dict] | None) -> list[dict]:
+        """Marca o fim do histórico como ponto de leitura do prompt caching.
+
+        POR QUE NO FIM DO HISTÓRICO, E NÃO NO SYSTEM
+        Caching é prefix match, e o mínimo cacheável no Sonnet é 1024 tokens. O
+        system prompt clínico tem ~460 (com o sufixo do médico), então um
+        breakpoint ali NUNCA criaria entrada — a API não erra, apenas devolve
+        `cache_creation_input_tokens: 0`. O que atinge o mínimo é system +
+        histórico, e o prefixo cresce a cada turno.
+
+        POR QUE EXPLÍCITO, E NÃO O AUTOMÁTICO
+        O breakpoint automático se coloca no último bloco cacheável — que aqui é
+        a PERGUNTA ATUAL, única por requisição. Pagaria o prêmio de escrita
+        (1,25x) em bytes que ninguém relê, toda vez. Marcar o fim do histórico
+        deixa a pergunta depois do corte, que é onde ela deve estar.
+
+        O QUE NÃO É CACHEADO, DE PROPÓSITO
+        Em conversa dentro de pasta, `load_context_messages` injeta o bloco de
+        trechos ANTES do histórico, e ele é recuperado por similaridade contra a
+        pergunta — muda a cada turno e invalida tudo depois dele. Reordenar
+        resolveria o cache, mas contraria a decisão de qualidade registrada em
+        `orquestrador_shared.load_context_messages` ("é pano de fundo, não a
+        última coisa dita"). A escolha foi preservar a qualidade: fora de pasta
+        o cache funciona pleno; dentro de pasta, não cacheia. Ver T12 em
+        `docs/plano-correcoes.md`.
+
+        NOTA SOBRE ESCOPO: o system prompt carrega especialidade e status do
+        médico (`_user_context_suffix`), então o prefixo é por-usuário. O cache
+        serve o mesmo médico entre turnos, nunca entre médicos.
+        """
+        if not history:
+            return []
+
+        mensagens = [dict(m) for m in history]
+        ultima = mensagens[-1]
+        conteudo = ultima.get("content", "")
+
+        # `cache_control` vai num bloco de conteúdo, não na mensagem: uma string
+        # solta não tem onde carregá-lo.
+        if isinstance(conteudo, str):
+            ultima["content"] = [{
+                "type": "text",
+                "text": conteudo,
+                "cache_control": {"type": "ephemeral"},
+            }]
+        elif isinstance(conteudo, list) and conteudo:
+            blocos = [dict(b) if isinstance(b, dict) else b for b in conteudo]
+            if isinstance(blocos[-1], dict):
+                blocos[-1]["cache_control"] = {"type": "ephemeral"}
+            ultima["content"] = blocos
+        else:
+            return mensagens  # conteúdo em formato inesperado: não marca nada
+
+        return mensagens
 
     @staticmethod
     def _build_user_content(prompt: str, image_content: dict | list | None) -> list | str:
@@ -124,9 +208,12 @@ class AnthropicProvider(BaseProvider):
         payload: dict = {
             "model": model_id,
             "max_tokens": max_tokens,
-            "temperature": temperature,
+            **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
             "system": sys_prompt,
-            "messages": [*(history or []), {"role": "user", "content": self._build_user_content(prompt, image_content)}],
+            "messages": [
+                *self._com_breakpoint_de_cache(history),
+                {"role": "user", "content": self._build_user_content(prompt, image_content)},
+            ],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()
@@ -177,9 +264,12 @@ class AnthropicProvider(BaseProvider):
             "model": model_id,
             "max_tokens": max_tokens,
             "stream": True,
-            "temperature": temperature,
+            **({"temperature": temperature} if self._supports_temperature(model_id) else {}),
             "system": sys_prompt,
-            "messages": [*(history or []), {"role": "user", "content": self._build_user_content(prompt, image_content)}],
+            "messages": [
+                *self._com_breakpoint_de_cache(history),
+                {"role": "user", "content": self._build_user_content(prompt, image_content)},
+            ],
         }
         if web_search:
             payload["tools"] = self._web_search_tool()

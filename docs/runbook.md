@@ -372,7 +372,7 @@ python -m scripts.expurgar_dados_vencidos # limpa agora
 | Dado | Prazo | Por quê |
 |---|---|---|
 | Imagem crua de arquivo (`image_base64`) | 30 dias | Mais sensível da base: foto de exame ou receita, fora do alcance do DLP |
-| Extração de arquivo | 180 dias | Texto extraído, já sanitizado |
+| Extração de arquivo | 180 dias | Texto extraído e nome do arquivo, sanitizados na escrita |
 | Cache semântico | 30 dias | Guarda prompt e não tem dono |
 
 Se o cron falhar por dias, nada quebra — o expurgo é idempotente e recupera o

@@ -126,9 +126,15 @@ def test_contexto_com_trechos_da_pasta_desliga_o_cache():
     assert contexto_tem_dado_de_paciente(com_pasta) is True
 
 
-def test_conversa_comum_continua_cacheavel():
-    """A correção não pode matar o cache: pergunta genérica, sem pasta, segue
-    valendo — que é justamente o caso em que o cache é seguro e útil."""
+def test_historico_comum_nao_e_detectado_como_bloco_de_paciente():
+    """
+    O detector enxerga BLOCO SINTÉTICO, não turno comum — e é exatamente por
+    isso que ele não serve como gate sozinho.
+
+    Este teste documenta o limite da função. A decisão de cachear mudou para
+    allowlist (`pode_usar_cache`): histórico presente, cache desligado, seja ele
+    prefixado ou não. Ver `test_gate_do_cache_e_allowlist`.
+    """
     from app.services.orquestrador_shared import contexto_tem_dado_de_paciente
 
     comum = [
@@ -138,6 +144,68 @@ def test_conversa_comum_continua_cacheavel():
 
     assert contexto_tem_dado_de_paciente(comum) is False
     assert contexto_tem_dado_de_paciente([]) is False
+
+
+def test_gate_do_cache_e_allowlist(monkeypatch):
+    """
+    A correção do débito 16: cacheável APENAS sem contexto montado.
+
+    A versão anterior era denylist — cacheava quando o detector não reconhecia
+    bloco de paciente. Mas um follow-up curto ("e qual a dose?") sobre o caso do
+    Dr. A tem histórico sem prefixo nenhum, passava no detector, e podia ser
+    servido ao Dr. B a partir de uma chave que não guarda usuário nem conversa.
+    """
+    from app.core import config
+    from app.services import orquestrador_shared
+
+    # A flag está desligada em produção; aqui o alvo é a condição 3.
+    monkeypatch.setattr(
+        orquestrador_shared, "get_settings",
+        lambda: type("S", (), {"semantic_cache_enabled": True})(),
+    )
+    assert config  # mantém o import explícito sobre de onde vem a flag real
+
+    modo = next(iter(orquestrador_shared.MODOS_CACHEAVEIS))
+
+    # Sem contexto: o único caso seguro por construção.
+    assert orquestrador_shared.pode_usar_cache(modo, []) is True
+
+    # Com histórico comum — o furo que a denylist deixava passar.
+    follow_up = [
+        {"role": "user", "content": "paciente de 62 anos com FA e DRC"},
+        {"role": "assistant", "content": "Considerar anticoagulação."},
+        {"role": "user", "content": "e qual a dose?"},
+    ]
+    assert orquestrador_shared.pode_usar_cache(modo, follow_up) is False
+
+    # Com bloco sintético: seguia barrado antes, segue agora.
+    com_bloco = [{"role": "user", "content": "[Evolução do paciente...] Jorge, DRC"}]
+    assert orquestrador_shared.pode_usar_cache(modo, com_bloco) is False
+
+
+def test_modo_nao_cacheavel_continua_barrado(monkeypatch):
+    """A condição 2 não pode ter sido perdida na troca para allowlist."""
+    from app.services import orquestrador_shared
+
+    monkeypatch.setattr(
+        orquestrador_shared, "get_settings",
+        lambda: type("S", (), {"semantic_cache_enabled": True})(),
+    )
+
+    assert orquestrador_shared.pode_usar_cache("PHARMA_CHECK", []) is False
+
+
+def test_flag_desligada_vence_tudo(monkeypatch):
+    """A condição 1 idem — é o estado de produção hoje."""
+    from app.services import orquestrador_shared
+
+    monkeypatch.setattr(
+        orquestrador_shared, "get_settings",
+        lambda: type("S", (), {"semantic_cache_enabled": False})(),
+    )
+
+    modo = next(iter(orquestrador_shared.MODOS_CACHEAVEIS))
+    assert orquestrador_shared.pode_usar_cache(modo, []) is False
 
 
 def test_os_dois_caminhos_aplicam_o_gate_na_leitura_e_na_gravacao():

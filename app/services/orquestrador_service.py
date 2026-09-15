@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_factory
 from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     build_orquestrador_prompt,
@@ -52,6 +53,117 @@ from app.services.triage_service import is_off_topic_greeting
 from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
+
+
+# Referência forte às tarefas de pós-processamento em voo. `asyncio` só guarda
+# referência fraca, então sem este conjunto o coletor de lixo pode recolher a
+# tarefa no meio — e a falha seria silenciosa. Mesmo motivo de
+# `folder_context_service._indexacoes_em_voo`.
+_pos_em_voo: set[asyncio.Task] = set()
+
+
+async def _pos_processar_em_background(
+    *,
+    user_id: UUID,
+    interaction_id: UUID,
+    response_id: UUID,
+    audit_id: UUID,
+    audit_base: dict,
+    sanitized_prompt: str,
+    texto_resposta: str,
+    mode: str,
+    citations,
+    tool_usage,
+    cachear: bool,
+    cache_normalized,
+    cache_embedding,
+    payload_base: dict,
+) -> None:
+    """
+    Roda o pós-processamento fora da requisição, com sessão própria.
+
+    A sessão da requisição NÃO pode ser reaproveitada: `AsyncSession` não é
+    segura para uso concorrente e a requisição já terá dado commit e retornado.
+    Por isso os objetos ORM são recarregados por id aqui dentro — passar as
+    instâncias da outra sessão daria `DetachedInstanceError` ou, pior, escrita
+    numa transação que esta função não controla.
+    """
+    from app.models.models import AuditLog
+
+    async with async_session_factory() as db:
+        try:
+            interaction = await db.get(Interaction, interaction_id)
+            ir = await db.get(InteractionResponse, response_id)
+            if interaction is None or ir is None:  # pragma: no cover
+                logger.warning(
+                    "[PosProcessamento] Interação %s sumiu antes do pós-processamento",
+                    interaction_id,
+                )
+                return
+
+            pos = await pos_processar_interacao(
+                db, interaction, sanitized_prompt, texto_resposta, mode,
+            )
+            classification, medications, pubmed = (
+                pos.classification, pos.medications, pos.pubmed,
+            )
+
+            # Referências junto da resposta, para sobreviverem ao reload.
+            ir.extra_metadata = build_response_metadata(
+                pubmed=pubmed,
+                citations=citations,
+                tool_usage=tool_usage,
+            )
+
+            # Reatribuição, e não mutação in-place: a coluna é JSON comum, sem
+            # MutableDict, e um `audit.metadata_[...] = x` não marcaria o objeto
+            # como sujo — o enriquecimento sumiria no commit.
+            audit = await db.get(AuditLog, audit_id)
+            if audit is not None:
+                audit.metadata_ = {
+                    **audit_base,
+                    "specialty_detected": classification["specialty"],
+                    "topic_detected": classification["topic"],
+                    "medications": [m["medication_normalized"] for m in medications],
+                    "pubmed_confidence_score": pubmed.confidence_score,
+                    "pubmed_low_evidence_alert": pubmed.low_evidence_alert,
+                    "pubmed_outdated_alert": pubmed.outdated_alert,
+                    "pubmed_fallback": pubmed.fallback,
+                    "pubmed_cited_verified": sum(
+                        1 for c in pubmed.cited_guidelines_verified if c.verified
+                    ),
+                    "pubmed_newer_found": len(pubmed.newer_guidelines_found),
+                }
+
+            # O cache só é gravado AGORA, com o payload completo. Cachear antes
+            # serviria a outro médico uma resposta sem validação PubMed — e é do
+            # cache que o `cache_hit` do front tira o bloco de referências.
+            if cachear:
+                payload = {
+                    **payload_base,
+                    "specialty_detected": classification["specialty"],
+                    "topic_detected": classification["topic"],
+                    "confidence_score": pubmed.confidence_score,
+                    "low_evidence_alert": pubmed.low_evidence_alert,
+                    "outdated_alert": pubmed.outdated_alert,
+                    "cited_guidelines_verified": [
+                        {"title": c.title, "pmid": c.pmid, "verified": c.verified}
+                        for c in pubmed.cited_guidelines_verified
+                    ],
+                    "newer_guidelines_found": [
+                        {"pmid": a.pmid, "title": a.article_title}
+                        for a in pubmed.newer_guidelines_found
+                    ],
+                }
+                await store_response(
+                    db, mode, cache_normalized, cache_embedding, payload,
+                    raw_prompt=sanitized_prompt,
+                )
+
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
 
 # Configuração por modo PharmaDB: (método de busca, método de formatação, rótulo).
@@ -259,6 +371,21 @@ class OrquestradorService:
                 mode=mode,
             )
 
+            # DLP na resposta do modelo, NA ORIGEM — antes de gravar e antes de
+            # devolver. O texto gravado e o texto devolvido saem de duas leituras
+            # separadas deste mesmo dict (aqui e no `return_dict` abaixo):
+            # sanitizar só num dos dois faria o médico ver um texto e encontrar
+            # outro ao reabrir a conversa. Reescrevendo a chave, os dois usos leem
+            # o valor já limpo.
+            #
+            # `use_ner=False`: ver `sanitize_prompt_async`. Na saída clínica o NER
+            # comeria nome de fármaco e de escore, quebrando a retomada da conversa
+            # e a extração de medicamentos logo abaixo.
+            if agent_response.get("text"):
+                agent_response["text"] = (
+                    await sanitize_prompt_async(agent_response["text"], use_ner=False)
+                ).sanitized_text
+
             ir = InteractionResponse(
                 interaction_id=interaction.id,
                 model_used=agent_response.get("model_id", "pharmadb"),
@@ -291,51 +418,27 @@ class OrquestradorService:
             # do medidor, e a divergência só apareceria na fatura.
             await record_cost(self.db, self.user_id, cost)
 
-            # 8-10. Pós-processamento: especialidade, medicamentos e PubMed em
-            # paralelo, e a persistência do que eles apuram. Vive no shared
-            # porque o `/stream` faz exatamente o mesmo — ver
-            # `pos_processar_interacao`.
-            pos = await pos_processar_interacao(
-                self.db, interaction, sanitized_prompt,
-                agent_response.get("text", ""), mode,
-            )
-            classification, medications, pubmed = pos.classification, pos.medications, pos.pubmed
-
-            # Referências junto da resposta, para sobreviverem ao reload.
-            # `citations` vem só do caminho de streaming (Perplexity); aqui
-            # normalmente é None e o helper simplesmente as omite.
-            ir.extra_metadata = build_response_metadata(
-                pubmed=pubmed,
-                citations=agent_response.get("citations"),
-                tool_usage=agent_response.get("tool_usage"),
-            )
-
-            # 11. Audit log
-            add_interaction_audit(
+            # 8. Auditoria nasce AQUI, com o que já se sabe — mesmo motivo do
+            # `/stream`: um erro no pós-processamento não pode apagar o registro
+            # de que a interação existiu. O enriquecimento vem depois, em
+            # background.
+            audit_base = {
+                "mode": mode,
+                "triage_confidence": confidence,
+                "model_used": agent_response.get("model_id", "pharmadb"),
+                "is_fallback": agent_response.get("is_fallback", False),
+                "prompt_length": len(prompt),
+                "total_cost_usd": str(cost),
+                "dlp_sanitized": dlp_result.was_sanitized,
+                "dlp_replacements": dlp_result.replacement_count,
+                "dlp_by_type": dlp_result.counts_by_type,
+            }
+            audit = add_interaction_audit(
                 self.db,
                 user_id=self.user_id,
                 interaction_id=interaction.id,
                 action="orquestrador_query",
-                metadata={
-                    "mode": mode,
-                    "triage_confidence": confidence,
-                    "model_used": agent_response.get("model_id", "pharmadb"),
-                    "is_fallback": agent_response.get("is_fallback", False),
-                    "prompt_length": len(prompt),
-                    "total_cost_usd": str(cost),
-                    "dlp_sanitized": dlp_result.was_sanitized,
-                    "dlp_replacements": dlp_result.replacement_count,
-                    "dlp_by_type": dlp_result.counts_by_type,
-                    "specialty_detected": classification["specialty"],
-                    "topic_detected": classification["topic"],
-                    "medications": [m["medication_normalized"] for m in medications],
-                    "pubmed_confidence_score": pubmed.confidence_score,
-                    "pubmed_low_evidence_alert": pubmed.low_evidence_alert,
-                    "pubmed_outdated_alert": pubmed.outdated_alert,
-                    "pubmed_fallback": pubmed.fallback,
-                    "pubmed_cited_verified": sum(1 for c in pubmed.cited_guidelines_verified if c.verified),
-                    "pubmed_newer_found": len(pubmed.newer_guidelines_found),
-                },
+                metadata=audit_base,
             )
             await self.db.flush()
 
@@ -352,45 +455,72 @@ class OrquestradorService:
                 "tokens_in": agent_response.get("tokens_in"),
                 "tokens_out": agent_response.get("tokens_out"),
                 "cost_usd": float(cost),
-                "specialty_detected": classification["specialty"],
-                "topic_detected": classification["topic"],
-                "confidence_score": pubmed.confidence_score,
-                "low_evidence_alert": pubmed.low_evidence_alert,
-                "outdated_alert": pubmed.outdated_alert,
-                "cited_guidelines_verified": [
-                    {
-                        "title": c.title,
-                        "pmid": c.pmid,
-                        "verified": c.verified,
-                    }
-                    for c in pubmed.cited_guidelines_verified
-                ],
-                "newer_guidelines_found": [
-                    {
-                        "pmid": a.pmid,
-                        "title": a.article_title,
-                    }
-                    for a in pubmed.newer_guidelines_found
-                ],
+                # Os sete campos abaixo são apurados pelo pós-processamento, que
+                # agora roda em BACKGROUND (ver `_pos_processar_em_background`).
+                # Eles saem vazios nesta resposta e são gravados segundos depois.
+                #
+                # Mantidos no contrato de propósito: o front não os consome aqui
+                # (`queryOrquestrador` lê `response_text`, `mode` e
+                # `conversation_id`), mas removê-los seria quebra explícita de
+                # API — e no `cache_hit` eles voltam preenchidos, que é onde a UI
+                # de fato monta o bloco de referências.
+                "specialty_detected": None,
+                "topic_detected": None,
+                "confidence_score": None,
+                "low_evidence_alert": False,
+                "outdated_alert": False,
+                "cited_guidelines_verified": [],
+                "newer_guidelines_found": [],
                 "total_response_time_ms": elapsed_ms,
                 "disclaimer": DISCLAIMER_RESPOSTA,
             }
 
-            # 12. Armazenar no cache semântico (apenas se não fallback e temos embedding)
-            # `pode_cachear` no lugar do literal que estava aqui: a lista de
-            # modos duplicada divergiria de `MODOS_CACHEAVEIS`, e o gate de
-            # contexto de paciente precisa valer na GRAVAÇÃO também — senão a
-            # resposta condicionada entra no cache e vaza na próxima leitura.
-            if (
-                pode_cachear
-                and not agent_response.get("is_fallback")
-                and _cache_embedding
-                and _cache_normalized
-            ):
-                await store_response(
-                    self.db, mode, _cache_normalized, _cache_embedding, return_dict,
-                    raw_prompt=sanitized_prompt,
-                )
+            # Commit de durabilidade, e ele precisa vir ANTES de agendar a
+            # tarefa abaixo — mesmo motivo do `/stream` (ver o commit anterior
+            # ao `text_done` lá).
+            #
+            # A sessão da requisição só seria commitada por `get_db` DEPOIS que
+            # este handler retorna. Como `create_task` agenda a corrotina para o
+            # próximo ciclo do loop, ela podia começar antes disso e procurar por
+            # id, numa sessão nova, registros de uma transação ainda não
+            # confirmada — não encontraria nada e sairia em silêncio, deixando a
+            # interação para sempre sem especialidade, sem PubMed e fora do
+            # cache. Sem erro e sem alerta.
+            #
+            # O commit de `get_db` continua acontecendo no fim; sem alterações
+            # pendentes ele é no-op.
+            await self.db.commit()
+
+            # 9. Pós-processamento + gravação no cache, fora do caminho da
+            # resposta. Validação PubMed, detecção de especialidade e extração de
+            # medicamentos custavam segundos que o médico esperava olhando a
+            # tela — o `/stream` já entregava antes disso (`text_done`), e o
+            # `/query` é o caminho de TODOS os modos PharmaDB.
+            #
+            # A gravação no cache vai JUNTO, e não aqui: o `return_dict` ainda
+            # não tem as referências do PubMed, e cachear agora serviria resposta
+            # sem validação a outro médico — que é justamente o que o `cache_hit`
+            # do front lê para montar o bloco "Referências verificadas".
+            self._agendar_pos_processamento(
+                interaction_id=interaction.id,
+                response_id=ir.id,
+                audit_id=audit.id,
+                audit_base=audit_base,
+                sanitized_prompt=sanitized_prompt,
+                texto_resposta=agent_response.get("text", ""),
+                mode=mode,
+                citations=agent_response.get("citations"),
+                tool_usage=agent_response.get("tool_usage"),
+                cachear=bool(
+                    pode_cachear
+                    and not agent_response.get("is_fallback")
+                    and _cache_embedding
+                    and _cache_normalized
+                ),
+                cache_normalized=_cache_normalized,
+                cache_embedding=_cache_embedding,
+                payload_base=return_dict,
+            )
 
             return return_dict
 
@@ -617,6 +747,42 @@ class OrquestradorService:
     # Clarificação e resolução de conversa vivem em `orquestrador_shared`:
     # eram idênticas às do serviço de streaming, com `self.db` como única
     # diferença.
+
+    def _agendar_pos_processamento(self, **kwargs) -> asyncio.Task | None:
+        """
+        Dispara o pós-processamento em background e devolve na hora.
+
+        Molde de `folder_context_service.agendar_indexacao`: referência forte
+        para o GC não recolher a tarefa no meio, e `done_callback` que drena a
+        exceção — sem ele uma falha vira "Task exception was never retrieved"
+        solto no log, sem dono.
+
+        Devolve None quando não há event loop (chamada fora de contexto async,
+        como em teste síncrono).
+        """
+        try:
+            tarefa = asyncio.create_task(
+                _pos_processar_em_background(user_id=self.user_id, **kwargs),
+                name=f"pos-processar-{kwargs['interaction_id']}",
+            )
+        except RuntimeError:  # pragma: no cover — sem loop rodando
+            return None
+
+        _pos_em_voo.add(tarefa)
+
+        def _encerrar(t: asyncio.Task) -> None:
+            _pos_em_voo.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                # A resposta já foi entregue ao médico e a interação já está
+                # gravada: o que se perde aqui é metadado (especialidade,
+                # PubMed, entrada no cache), não a consulta.
+                logger.warning(
+                    "[PosProcessamento] Falhou para a interação %s: %s",
+                    kwargs["interaction_id"], t.exception(),
+                )
+
+        tarefa.add_done_callback(_encerrar)
+        return tarefa
 
     async def _responder_saudacao(
         self, conversation_id, sanitized_prompt: str, dlp_result, folder_id, start_time: float

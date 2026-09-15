@@ -309,6 +309,13 @@ def extract_excel(content: bytes) -> str:
     return _truncate(joined)
 
 
+# ID canônico, sem sufixo de data. O par payload/`calculate_cost` precisa
+# concordar — `uploads.py` importa esta constante em vez de repetir o literal,
+# porque um dos dois divergindo faz o custo virar zero sem erro nenhum
+# (ver `pricing.get_model_pricing`).
+MODELO_DESCRICAO_IMAGEM = "claude-haiku-4-5"
+
+
 async def extract_image(content: bytes, media_type: str) -> dict:
     """
     Retorna dict com:
@@ -320,7 +327,7 @@ async def extract_image(content: bytes, media_type: str) -> dict:
     """
     b64 = base64.standard_b64encode(content).decode()
     payload = {
-        "model": "claude-haiku-4-5-20251001",
+        "model": MODELO_DESCRICAO_IMAGEM,
         "max_tokens": 1024,
         "messages": [
             {

@@ -55,6 +55,16 @@ Seções:
 Retorne APENAS o markdown formatado, sem comentários."""
 
 
+# ID canônico, sem sufixo de data. O sufixo `-20251001` existia aqui e em mais
+# dois lugares; divergir um deles fazia `calculate_cost` devolver zero em
+# silêncio (ver `pricing.get_model_pricing`).
+#
+# Esta chamada roda por dentro do PharmaDB, sem `db` nem usuário no escopo, então
+# não há a quem descontar: o custo dela não entra no medidor semanal. Ver
+# `docs/plano-correcoes.md`, T3.
+MODELO_LIMPEZA_BULA = "claude-haiku-4-5"
+
+
 async def _limpar_secoes_bula(nome: str, secoes: dict[str, str]) -> str:
     secoes_texto = "\n\n".join(f"### {titulo}\n{texto}" for titulo, texto in secoes.items())
     try:
@@ -67,7 +77,7 @@ async def _limpar_secoes_bula(nome: str, secoes: dict[str, str]) -> str:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": MODELO_LIMPEZA_BULA,
                 "max_tokens": 1500,
                 "messages": [{
                     "role": "user",

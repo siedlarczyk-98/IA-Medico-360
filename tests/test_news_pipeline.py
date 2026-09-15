@@ -195,7 +195,8 @@ async def test_pulado_nao_e_falha(db, monkeypatch):
 @asyncio
 async def test_artigo_com_abstract_e_publicado(db, monkeypatch):
     async def redige(article, journal, **kw):
-        return "Título reescrito", "<p>Corpo</p>"
+        # O terceiro valor é o `usage` da resposta, de onde sai o custo do lote.
+        return "Título reescrito", "<p>Corpo</p>", {"input_tokens": 900, "output_tokens": 400}
 
     monkeypatch.setattr(news_writer_service, "redigir", redige)
 
@@ -244,7 +245,7 @@ async def test_artigo_que_falhou_volta_no_lote_seguinte(db, monkeypatch):
     # Segunda rodada, agora com o modelo respondendo: o artigo tem de ser
     # recolhido pela query — é isto que `retry_count` passou a significar.
     async def redige(article, journal, **kw):
-        return "Recuperado", "<p>Corpo</p>"
+        return "Recuperado", "<p>Corpo</p>", {"input_tokens": 900, "output_tokens": 400}
 
     monkeypatch.setattr(news_writer_service, "redigir", redige)
     resultado = await news_writer_service.redigir_lote(db)

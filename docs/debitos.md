@@ -373,5 +373,58 @@ coincidência muda de patamar. `scripts/medir_cache_semantico.py` responde se j�
 vale: ele mede taxa de acerto real e a distribuição das entradas.
 
 **Cuidado ao religar.** A decisão de cacheabilidade vive em
-`orquestrador_shared.pode_usar_cache`, que junta as três condições (flag, modo,
-contexto sem paciente). Religar é mudar a flag — não mexer nas outras duas.
+`orquestrador_shared.pode_usar_cache`, que junta três condições (flag, modo
+cacheável, **nenhum contexto montado**).
+
+O gate foi corrigido em 2026-09-15 (T9 de `docs/plano-correcoes.md`) e hoje é
+**allowlist**: cacheável apenas quando `not mensagens`. Antes era denylist —
+cacheava quando `contexto_tem_dado_de_paciente` não reconhecia bloco de
+paciente. O furo: aquele detector enxerga os dois blocos sintéticos (evolução
+da pasta, similaridade entre conversas), que começam com `[`, e **não enxerga
+os turnos comuns do histórico**, que são texto sem prefixo e rotineiramente
+carregam o quadro do paciente. Como a chave é `(modo, embedding do prompt
+normalizado)` — sem usuário e sem conversa — um follow-up curto ("e qual a
+dose?") respondido a partir do caso do Dr. A podia ser servido ao Dr. B.
+
+Travado por `tests/test_cache_paridade.py::test_gate_do_cache_e_allowlist`.
+
+O custo da allowlist é menor do que parece: pela medição desta mesma seção,
+todas as entradas que o cache chegou a gravar eram pergunta genérica isolada —
+exatamente o caso que continua cacheável.
+
+> Versões anteriores deste parágrafo diziam "Religar é mudar a flag — não mexer
+> nas outras duas". Isso estava errado: a terceira condição precisava mudar
+> primeiro, e mudou.
+
+---
+
+## 17. Imagem crua do exame vai íntegra para o provider
+
+**O que é.** No modo `EXAM_REVIEW`, a imagem enviada pelo médico é repassada ao
+provider **sem nenhuma transformação**. O wrapper de DLP
+(`DlpEnforcingProvider`, `app/services/integracoes/ai_providers.py`) sanitiza
+`prompt` e `history`, mas passa `image_content` adiante intacto — por desenho,
+não por esquecimento.
+
+**Por quê.** Mascarar dado identificável dentro de uma imagem exige OCR, decisão
+sobre o que fazer com a região detectada, e um caminho de falha novo (OCR que
+erra apaga achado clínico, ou deixa passar o nome). É outro projeto, não um
+parâmetro.
+
+**A exposição concreta.** A foto de um laudo ou exame costuma trazer nome do
+paciente, e às vezes CPF e data de nascimento, impressos no cabeçalho. Essa
+imagem sai do país: Anthropic, OpenAI ou Google, conforme o provider do modo.
+O texto que a acompanha vai mascarado; a imagem, não.
+
+**O que resolve.** Nada de engenharia, isoladamente. É decisão de **base legal**:
+ou a transferência internacional dessa imagem está coberta no que se declara ao
+titular e no registro de operações de tratamento, ou o modo precisa de outro
+desenho (OCR + máscara, ou processamento local).
+
+**Quando revisar.** Na próxima revisão de base legal / registro de transferência
+internacional, e antes de qualquer expansão do `EXAM_REVIEW` para volume maior.
+
+**Registro.** Levantado na análise externa de 2026-09-11 e mantido fora do escopo
+de correção técnica por decisão explícita (D2 de `docs/plano-correcoes.md`).
+Está documentado aqui para que a resposta a uma auditoria seja "sabemos e
+decidimos", não "não sabíamos".

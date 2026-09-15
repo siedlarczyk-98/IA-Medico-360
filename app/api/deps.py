@@ -80,8 +80,13 @@ async def get_current_user(
         
     return user
 
+# Métodos que não mudam estado. `Origin` hostil neles não é CSRF: o atacante
+# dispara a leitura mas não lê a resposta (o CORS bloqueia), e nada é gravado.
+METODOS_IDEMPOTENTES = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+
 async def exigir_origem_confiavel(request: Request) -> None:
-    """Barra requisição de escrita vinda de origem que não é nossa.
+    """Barra requisição de ESCRITA vinda de origem que não é nossa.
 
     POR QUE ISTO EXISTE
     `get_current_user` aceita o JWT no cookie `medico360_session`, emitido com
@@ -89,18 +94,34 @@ async def exigir_origem_confiavel(request: Request) -> None:
     Waid). Um cookie assim viaja em requisição cross-site — é a definição de
     CSRF.
 
-    A maioria dos endpoints está ACIDENTALMENTE protegida: eles exigem
-    `Content-Type: application/json`, que não é um content-type "simples" de
-    CORS, então o browser dispara um preflight `OPTIONS` que a allowlist do
-    `CORSMiddleware` rejeita para origens estranhas.
+    POR QUE ELA VALE PARA TODAS AS ROTAS, E NÃO SÓ PARA O UPLOAD
+    A premissa antiga era: "a maioria dos endpoints está acidentalmente
+    protegida, porque exige `Content-Type: application/json`, que não é um
+    content-type simples de CORS, logo o browser dispara preflight". Isso É
+    verdade para handler que declara parâmetro de corpo — e SÓ para ele.
 
-    `/uploads/extract` era a exceção: ele recebe `multipart/form-data`, um dos
-    três content-types simples. Um `<form>` cross-site não gera preflight, e o
-    browser mandava o cookie junto. Um médico logado que abrisse uma página
-    hostil teria a quota consumida, custo de API cobrado da conta dele (o
-    caminho de imagem chama o Haiku e faz `record_cost`) e `FileExtraction` de
-    conteúdo alheio gravado sob o `user_id` dele — material que depois aparece
-    no export LGPD como se fosse dado do titular.
+    Um handler SEM body param não impõe content-type nenhum: o FastAPI não tem
+    o que validar, o browser não faz preflight, e um `<form>` cross-site chega
+    com o cookie anexado. Havia seis rotas nessa situação (as duas emissíveis
+    por `<form>` — que só sabe GET e POST — sendo
+    `POST /auth/me/consentimentos/{tipo}/revogar` e
+    `POST /news/admin/pipeline`; as outras quatro são PUT/DELETE, alcançáveis
+    apenas por `fetch`, que preflighta).
+
+    A da revogação de consentimento é a grave: grava manifestação de vontade
+    NEGATIVA, permanente e falsamente atribuída, no registro que o próprio
+    docstring da rota chama de prova (LGPD Art. 8º §5º).
+
+    Por isso a guarda é aplicada como dependency do router inteiro
+    (`app/api/v1/router.py`) e filtra por método aqui dentro — em vez de ser
+    declarada rota a rota. Rota de escrita nova nasce protegida; a alternativa
+    depende de alguém lembrar, e foi exatamente o que falhou antes.
+
+    O caso original (`/uploads/extract`, `multipart/form-data`) continua
+    coberto: um médico logado que abrisse página hostil teria quota consumida,
+    custo de API cobrado da conta dele e `FileExtraction` de conteúdo alheio
+    gravado sob o `user_id` dele — material que depois aparece no export LGPD
+    como se fosse dado do titular.
 
     O atacante não conseguia LER a resposta (o CORS bloqueia), então não era
     vazamento; era escrita e custo dirigidos por terceiro.
@@ -116,6 +137,9 @@ async def exigir_origem_confiavel(request: Request) -> None:
     alguns browsers, e chamadas server-to-server (scripts, testes, integrações)
     não têm origem — e também não carregam cookie de sessão de ninguém.
     """
+    if request.method.upper() in METODOS_IDEMPOTENTES:
+        return
+
     origem = request.headers.get("origin")
     if origem is None:
         return

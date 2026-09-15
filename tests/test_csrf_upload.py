@@ -6,9 +6,14 @@ O PROBLEMA
 `SameSite=None` porque os apps rodam dentro do iframe da Waid. Cookie assim
 viaja em requisição cross-site.
 
-Quase todos os endpoints estão acidentalmente protegidos: exigem
-`Content-Type: application/json`, que não é "simples" para o CORS, então o
+Os endpoints que declaram parâmetro de corpo estão acidentalmente protegidos:
+exigem `Content-Type: application/json`, que não é "simples" para o CORS, então o
 browser dispara preflight e o `CORSMiddleware` recusa origens estranhas.
+
+ATENÇÃO — essa premissa NÃO vale para todo mundo, e a versão anterior deste
+arquivo afirmava que sim. Handler SEM body param não impõe content-type algum
+(não há o que o FastAPI valide), logo não há preflight. Eram seis rotas assim;
+ver `tests/test_csrf_rotas_de_escrita.py`, que cobre todas.
 
 `/uploads/extract` é a única rota multipart do projeto — e `multipart/form-data`
 É um content-type simples. Um `<form>` em página hostil chegava aqui sem
@@ -18,6 +23,9 @@ cobrado da conta dele (o caminho de imagem chama o Haiku e faz `record_cost`) e
 
 Ler a resposta o atacante não conseguia — o CORS bloqueia. Era escrita e custo
 dirigidos por terceiro, não vazamento.
+
+A guarda hoje é dependency do router inteiro (`app/api/v1/router.py`), não desta
+rota — mas os testes abaixo continuam válidos e são o caso original.
 """
 
 import io

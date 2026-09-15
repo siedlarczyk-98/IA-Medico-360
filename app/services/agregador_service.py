@@ -120,10 +120,20 @@ class AgregadorService:
             if isinstance(result, ProviderResponse):
                 citations = result.citations or []
                 cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
+
+                # DLP na resposta do modelo, NA ORIGEM — pelo mesmo motivo do
+                # `/query`: `result.text` é lido duas vezes abaixo (no
+                # `InteractionResponse` e no `ModelResponse` devolvido ao médico).
+                # Sanitizar num só faria as duas visões divergirem para sempre.
+                # `use_ner=False`: ver `sanitize_prompt_async`.
+                texto_limpo = (
+                    await sanitize_prompt_async(result.text, use_ner=False)
+                ).sanitized_text if result.text else result.text
+
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
                     model_used=model_id,
-                    response_text=result.text,
+                    response_text=texto_limpo,
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
                     cost_usd=cost,

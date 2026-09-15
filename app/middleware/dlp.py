@@ -14,6 +14,7 @@ placeholder. Um falso positivo, portanto, apaga o termo em definitivo — por is
 o passo de NER é conservador (ver os filtros em `ner._is_person`).
 """
 
+import functools
 import re
 from dataclasses import dataclass, field
 
@@ -24,8 +25,17 @@ from app.middleware import ner
 
 @dataclass
 class SanitizationResult:
-    """Resultado da sanitização de um texto."""
-    original_text: str
+    """Resultado da sanitização de um texto.
+
+    NÃO acrescente aqui um campo com o texto BRUTO. Existiu um `original_text`,
+    escrito em toda sanitização e lido em lugar nenhum — e, como esta dataclass
+    vive como variável local nos frames do orquestrador, qualquer exceção depois
+    do DLP mandava o prompt clínico identificado para o Sentry. Ver
+    `app/core/error_tracking.py`.
+
+    O que se quer saber do texto original está em `replacements` e nos contadores
+    derivados, que são metadados e não conteúdo.
+    """
     sanitized_text: str
     was_sanitized: bool
     replacements: list[dict] = field(default_factory=list)
@@ -102,7 +112,6 @@ class DLPMiddleware:
                 sanitized = sanitized[:start] + "[NOME]" + sanitized[end:]
 
         return SanitizationResult(
-            original_text=text,
             sanitized_text=sanitized,
             was_sanitized=len(replacements) > 0,
             replacements=replacements,
@@ -232,6 +241,16 @@ def sanitize_prompt(text: str) -> SanitizationResult:
     return _dlp.sanitize(text)
 
 
-async def sanitize_prompt_async(text: str) -> SanitizationResult:
-    """Versão async: o NER é CPU-bound e rodaria bloqueando o event loop."""
-    return await anyio.to_thread.run_sync(_dlp.sanitize, text)
+async def sanitize_prompt_async(text: str, use_ner: bool = True) -> SanitizationResult:
+    """Versão async: o NER é CPU-bound e rodaria bloqueando o event loop.
+
+    `use_ner=False` roda só as regex (CPU, telefone, e-mail, data). Use nas
+    RESPOSTAS DO MODELO: o NER mascara nome próprio, e na saída clínica isso
+    come nome comercial de fármaco, de escore e epônimo de patologia — o que
+    quebra a retomada da conversa (o histórico realimenta o modelo) e a extração
+    de medicamentos, sem ganho real de privacidade. Na ENTRADA, onde o médico
+    digita o nome do paciente, o NER continua valendo.
+    """
+    return await anyio.to_thread.run_sync(
+        functools.partial(_dlp.sanitize, use_ner=use_ner), text
+    )

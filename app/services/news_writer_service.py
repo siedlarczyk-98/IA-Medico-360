@@ -26,6 +26,7 @@ contabilizado e rastreamento sem tocar no contrato da chamada.
 """
 
 import logging
+from decimal import Decimal
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,7 @@ from app.core.telemetry import async_llm_span
 from app.models.models import utcnow
 from app.models.news import Article, ArticleStatus
 from app.news.journals import JOURNALS_BY_SLUG
+from app.services.pricing import calculate_cost
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +109,16 @@ def _citacao_html(article: Article, journal: str) -> str:
     return f"<p><em>Fonte: {autores}{article.original_title or ''} — {journal}.</em></p>"
 
 
-async def redigir(article: Article, journal: str, timeout: int = 120) -> tuple[str, str]:
+async def redigir(
+    article: Article, journal: str, timeout: int = 120
+) -> tuple[str, str, dict]:
     """
-    Chama o Claude para reescrever um artigo. Retorna (título, corpo_html).
+    Chama o Claude para reescrever um artigo. Retorna (título, corpo_html, uso).
+
+    `uso` é o bloco `usage` da resposta (tokens de entrada e saída), para que o
+    chamador consiga apurar o custo. Ele era descartado aqui, e como este módulo
+    também não chamava `calculate_cost`, o gasto do redator não aparecia em
+    contabilidade nenhuma — nem no medidor semanal, nem no alarme de custo.
 
     Levanta ValueError se o modelo não chamar a ferramenta ou devolver campo vazio.
     """
@@ -147,7 +156,7 @@ async def redigir(article: Article, journal: str, timeout: int = 120) -> tuple[s
     if not titulo or not corpo:
         raise ValueError("Resposta do modelo veio com título ou corpo vazio")
 
-    return titulo, f"{corpo}\n{_citacao_html(article, journal)}"
+    return titulo, f"{corpo}\n{_citacao_html(article, journal)}", (data.get("usage") or {})
 
 
 async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
@@ -190,6 +199,7 @@ async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
     artigos = list(resultado.scalars())
 
     publicados, falhas, pulados = 0, 0, 0
+    custo_do_lote = Decimal("0")
 
     for article in artigos:
         if not article.original_abstract or not article.original_abstract.strip():
@@ -209,7 +219,21 @@ async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
         journal = config.display_name if config else article.journal_slug
 
         try:
-            titulo, corpo = await redigir(article, journal)
+            titulo, corpo, uso = await redigir(article, journal)
+
+            # Custo do redator. Este pipeline roda pelo agendador noturno, sem
+            # usuário no escopo — não há titular a quem descontar, então NÃO há
+            # `record_cost` aqui. O que se pode (e se deve) fazer é apurar e
+            # registrar, para o gasto deixar de ser invisível. Ver
+            # `docs/plano-correcoes.md`, T3.
+            custo = await calculate_cost(
+                db,
+                get_settings().news_writer_model,
+                uso.get("input_tokens"),
+                uso.get("output_tokens"),
+            )
+            custo_do_lote += custo
+
             article.rewritten_title = titulo
             article.rewritten_body = corpo
             # Publicar é marcar visibilidade. Não há mais chamada externa a um
@@ -244,4 +268,12 @@ async def redigir_lote(db: AsyncSession, tamanho_lote: int = 10) -> dict:
         "Redator: %d publicado(s), %d falha(s), %d sem abstract",
         publicados, falhas, pulados,
     )
-    return {"publicados": publicados, "falhas": falhas, "sem_abstract": pulados}
+    return {
+        "publicados": publicados,
+        "falhas": falhas,
+        "sem_abstract": pulados,
+        # Sai no retorno do pipeline (e portanto no log do agendador e na
+        # resposta de `POST /news/admin/pipeline`). Não passa pelo medidor
+        # semanal: este lote roda sem usuário no escopo. Ver T3 do plano.
+        "custo_usd": str(custo_do_lote),
+    }

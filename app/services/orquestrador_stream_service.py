@@ -385,6 +385,25 @@ class OrquestradorStreamService:
                     mode=mode,
                 )
 
+                # DLP na resposta do modelo. Aqui os tokens JÁ foram entregues ao
+                # médico por SSE, então o que ele leu na tela é o texto original e
+                # o que fica registrado é esta versão mascarada.
+                #
+                # Isso é decisão tomada (D1 em `docs/plano-correcoes.md`): o
+                # histórico é registro e tem de ser gravado; exige-se que seja
+                # CONSISTENTE ao reabrir, não idêntico ao que passou na tela.
+                # Sanitizar por token é inviável — a PII atravessa a fronteira
+                # entre dois deltas e o custo cairia dentro do laço de streaming.
+                #
+                # Sanitiza UMA vez, aqui, porque `full_text` alimenta três
+                # destinos: esta gravação, o `done_payload` do cache (que é
+                # servido a OUTROS médicos) e o pós-processamento.
+                # `use_ner=False`: ver `sanitize_prompt_async`.
+                if full_text:
+                    full_text = (
+                        await sanitize_prompt_async(full_text, use_ner=False)
+                    ).sanitized_text
+
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
                     model_used=model_id,

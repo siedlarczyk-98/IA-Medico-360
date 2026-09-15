@@ -184,7 +184,12 @@ async def test_a_triagem_real_classifica_a_pergunta(client, user, db, model_pric
     """
     from app.services.orquestrador_modes import VALID_MODES
 
-    for mid, ptype in (("sonar-pro", "perplexity"), ("claude-sonnet-4-6", "anthropic")):
+    # Os dois modelos que a triagem pode escolher para esta pergunta. O
+    # `claude-sonnet-5` precisa estar aqui desde a migração de 2026-09-15: se a
+    # triagem classificar como clínica e o pricing não existir, `calculate_cost`
+    # devolve zero em silêncio — o teste passaria (não assere custo) escondendo
+    # exatamente a falha que este arquivo existe para pegar.
+    for mid, ptype in (("sonar-pro", "perplexity"), ("claude-sonnet-5", "anthropic")):
         await model_pricing_factory(
             model_id=mid, provider_type=ptype,
             input_per_million="1.00", output_per_million="1.00",
@@ -203,3 +208,132 @@ async def test_a_triagem_real_classifica_a_pergunta(client, user, db, model_pric
     )).scalar_one()
     assert interacao.mode in VALID_MODES
     assert interacao.triage_confidence is not None
+
+
+# ── Migração para o Sonnet 5 ─────────────────────────────────────────────
+# Os testes acima exercitam sobretudo `QUICK_SEARCH`, que roda Perplexity. Nada
+# neles passa pelo modelo clínico — e a migração de 2026-09-15 mexeu justamente
+# nele: `CLINICAL_REASONING` e `EXAM_REVIEW` saíram do `claude-sonnet-4-6` para
+# o `claude-sonnet-5`.
+#
+# A troca não foi só o `model_id`. O Sonnet 5 REMOVEU os parâmetros de sampling:
+# um payload com `temperature` volta 400, e `MODE_TEMPERATURE_MAP` manda 0.0 nos
+# modos clínicos. O filtro que impede isso vive em
+# `AnthropicProvider._supports_temperature` e é coberto por
+# `tests/test_provider_temperature.py` — mas só contra um payload montado à mão.
+#
+# Este teste é o único lugar onde a API de verdade diz se está certo.
+
+PERGUNTA_CLINICA = (
+    "Em fibrilação atrial não valvar com CHA2DS2-VASc 4 e clearance de "
+    "creatinina reduzido, quais fatores orientam a escolha do anticoagulante?"
+)
+
+
+async def test_modo_clinico_responde_no_sonnet_5(client, user, db, model_pricing_factory):
+    """
+    O caminho clínico contra a API real, com o modelo novo.
+
+    Se o filtro de `temperature` falhar, a Anthropic devolve 400 e o serviço cai
+    no fallback (`gpt-4o`) — silenciosamente, porque o fallback existe para isso.
+    Por isso a asserção sobre `is_fallback`: sem ela, o teste passaria verde com
+    o modo clínico inteiro rodando no modelo errado.
+    """
+    for mid, ptype in (
+        ("claude-sonnet-5", "anthropic"),
+        ("gpt-4o", "openai"),
+        ("gemini-2.5-flash", "google"),
+    ):
+        await model_pricing_factory(
+            model_id=mid, provider_type=ptype,
+            input_per_million="1.00", output_per_million="1.00",
+        )
+
+    resp = await client.post(
+        "/api/v1/orquestrador/query",
+        json={"prompt": PERGUNTA_CLINICA, "mode": "CLINICAL_REASONING"},
+        headers=auth_headers(user),
+        timeout=120,
+    )
+
+    assert resp.status_code == 200, resp.text
+    corpo = resp.json()
+
+    assert corpo.get("response_text"), "o médico receberia uma resposta vazia"
+    assert corpo["mode"] == "CLINICAL_REASONING"
+
+    # O ponto do teste: respondeu o modelo que se pretendia, e não o fallback.
+    assert corpo["is_fallback"] is False, (
+        "caiu no fallback — provavelmente a Anthropic recusou o payload. "
+        "Suspeite do filtro de `temperature` em `AnthropicProvider`."
+    )
+    assert corpo["model_used"] == "claude-sonnet-5", (
+        f"respondeu {corpo['model_used']}, não o modelo clínico configurado"
+    )
+
+    # E o efeito no banco, que é o que sobrevive ao reload da conversa.
+    respostas = (await db.execute(select(InteractionResponse))).scalars().all()
+    assert len(respostas) == 1
+    assert respostas[0].response_text
+    assert respostas[0].model_used == "claude-sonnet-5"
+    assert respostas[0].cost_usd > 0, (
+        "custo zero com pricing cadastrado indica que o `model_id` gravado "
+        "diverge do usado em `calculate_cost`"
+    )
+
+
+async def test_modo_clinico_streama_no_sonnet_5(
+    client, db, db_conn, user, model_pricing_factory, monkeypatch
+):
+    """
+    O mesmo, pelo `/stream` — os dois caminhos montam o payload por funções
+    diferentes do provider (`complete` e `stream`), e o filtro de `temperature`
+    precisou ser aplicado nos dois. Um só corrigido é a divergência
+    `/query`↔`/stream` que este projeto já teve quatro vezes.
+
+    O `monkeypatch` da factory é necessário, não decorativo: o serviço de
+    streaming abre a PRÓPRIA sessão via `async_session_factory`, fora do
+    `get_db`. Sem prendê-la à conexão do teste, ela não enxerga o `user` criado
+    pela fixture (a transação do harness nunca é commitada) e a requisição morre
+    em `ForeignKeyViolationError` antes de chegar à Anthropic. Mesmo padrão de
+    `tests/test_orquestrador_stream.py::servico`.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    # Mira no MÓDULO DO ENDPOINT, não no do serviço: quem resolve o nome
+    # `async_session_factory` é `app/api/v1/endpoints/orquestrador.py`, que o
+    # importou direto de `app.core.database` e o passa como argumento ao
+    # construir `OrquestradorStreamService`. Patchar o módulo do serviço não
+    # surte efeito — a referência já está ligada do outro lado.
+    #
+    # (Mesma armadilha que `test_contexto_cache.py` documenta para
+    # `get_provider_by_type`.)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.orquestrador.async_session_factory",
+        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+    )
+
+    await model_pricing_factory(
+        model_id="claude-sonnet-5", provider_type="anthropic",
+        input_per_million="1.00", output_per_million="1.00",
+    )
+
+    eventos: list[str] = []
+    erros: list[str] = []
+    async with client.stream(
+        "POST",
+        "/api/v1/orquestrador/stream",
+        json={"prompt": PERGUNTA_CLINICA, "mode": "CLINICAL_REASONING"},
+        headers=auth_headers(user),
+        timeout=120,
+    ) as resp:
+        assert resp.status_code == 200
+        async for linha in resp.aiter_lines():
+            if linha.startswith("event: "):
+                eventos.append(linha[7:].strip())
+            elif linha.startswith("data: ") and '"error"' in linha:
+                erros.append(linha)
+
+    assert not erros, f"o stream emitiu erro: {erros}"
+    assert "token" in eventos, "nenhum token — o modo clínico não streamou"
+    assert "done" in eventos

@@ -20,6 +20,7 @@ import sys
 
 from app.core.config import get_settings
 from app.core.error_tracking import setup_sentry
+from app.middleware.dlp import sanitize_prompt
 
 TITULO = "VERIFICACAO DE SCRUBBING — pode ignorar este erro"
 
@@ -53,14 +54,22 @@ def main() -> int:
 
     sentry_sdk.set_tag("verificacao", "manual")
 
-    def simula_chamada_ao_provider(prompt: str, model_id: str):
-        """O prompt fica vivo como variavel local — e o caso que mais importa."""
+    def simula_chamada_ao_provider(prompt: str, model_id: str, dlp_result):
+        """O prompt fica vivo como variavel local — e o caso que mais importa.
+
+        Os tres formatos que aparecem juntos no frame real do orquestrador:
+        a `str`, a lista de dicts do historico, e o OBJETO devolvido pelo DLP.
+        Este ultimo era o ponto cego — tanto aqui quanto no teste automatizado:
+        ambos so punham `str` e `list[dict]`, que `_limpa` ja sabia percorrer.
+        """
         sanitized_prompt = prompt  # noqa: F841 — precisa existir no frame
         historico = [{"role": "user", "content": prompt}]  # noqa: F841
         raise RuntimeError(TITULO)
 
     try:
-        simula_chamada_ao_provider(PROMPT_DE_TESTE, "claude-sonnet-4-6")
+        simula_chamada_ao_provider(
+            PROMPT_DE_TESTE, "claude-sonnet-4-6", sanitize_prompt(PROMPT_DE_TESTE)
+        )
     except RuntimeError:
         sentry_sdk.capture_exception()
 

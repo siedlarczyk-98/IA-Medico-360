@@ -7,6 +7,7 @@ antes de calcular. Não substitui a fórmula determinística (engine_type contin
 import asyncio
 import json
 import logging
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,9 +18,16 @@ from app.core.http_client import get_client
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.calculators import CalculatorField
 from app.models.models import AuditLog
+from app.services.pricing import calculate_cost
+from app.services.usage_service import record_cost
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+# Uma constante, não o literal repetido: o ID aparecia no payload e precisaria
+# aparecer de novo no `calculate_cost`. Dois literais que precisam concordar é
+# como `calculate_cost` passa a devolver zero em silêncio quando um muda.
+MODELO_EXTRACAO = "gpt-5.4-mini"
 
 # P3: limita chamadas simultaneas ao LLM por processo. Sem isso, `/extract` a 30
 # req/min por usuario podia prender dezenas de conexoes por ate 15s cada e
@@ -109,6 +117,7 @@ async def extract_calculator_inputs(
     fields_by_key = {f.key: f for f in fields}
     suggested_inputs: dict = {}
     sanitized_text = (await sanitize_prompt_async(text)).sanitized_text
+    custo = Decimal("0")
 
     try:
         client = get_client()
@@ -120,7 +129,7 @@ async def extract_calculator_inputs(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "gpt-5.4-mini",
+                    "model": MODELO_EXTRACAO,
                     "messages": [
                         {"role": "system", "content": _SYSTEM_PROMPT},
                         {"role": "user", "content": _build_user_prompt(fields, sanitized_text)},
@@ -133,6 +142,17 @@ async def extract_calculator_inputs(
             )
         resp.raise_for_status()
         data = resp.json()
+
+        # O `usage` vinha na resposta e era descartado — era por isso que este
+        # caminho não aparecia em contabilidade nenhuma.
+        uso = data.get("usage") or {}
+        custo = await calculate_cost(
+            db,
+            MODELO_EXTRACAO,
+            uso.get("prompt_tokens"),
+            uso.get("completion_tokens"),
+        )
+
         content = data["choices"][0]["message"]["content"].strip()
         content = content.replace("```json", "").replace("```", "").strip()
 
@@ -148,12 +168,21 @@ async def extract_calculator_inputs(
     except Exception as e:
         logger.warning("Falha ao extrair inputs de calculadora via IA: %s", e)
 
+    # Desconta do medidor semanal. Fora do `try`: se a chamada falhou, `custo`
+    # segue zero e `record_cost` é no-op — mas um erro DEPOIS da resposta do
+    # modelo não pode fazer o gasto já incorrido sumir da conta.
+    await record_cost(db, user_id, custo)
+
     db.add(
         AuditLog(
             user_id=user_id,
             action="calculator.extract",
             entity_type="calculator_field_extraction",
-            metadata_={"fields_extracted": list(suggested_inputs.keys())},
+            metadata_={
+                "fields_extracted": list(suggested_inputs.keys()),
+                "model_used": MODELO_EXTRACAO,
+                "cost_usd": str(custo),
+            },
         )
     )
     await db.commit()

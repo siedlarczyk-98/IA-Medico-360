@@ -15,6 +15,7 @@ No-op quando `sentry_dsn` está vazio — igual ao Phoenix.
 """
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -62,10 +63,83 @@ def _e_par_bloqueado(valor) -> bool:
     )
 
 
+# NÃO ancore no fecha-parênteses. O `safe_repr` do SDK TRUNCA valores longos,
+# e um prompt clínico é longo: o repr chega cortado no meio, sem o `)` final.
+# Com `...\)$` o padrão não casava exatamente no caso que mais importa — o
+# objeto com muito texto dentro — e passava intacto.
+# O nome aceita qualificador: uma classe declarada DENTRO de uma função (closure,
+# factory, fixture de teste) tem repr `modulo.funcao.<locals>.Classe(...)`, com os
+# sinais `<` e `>` no meio. Sem aceitá-los, justamente esses objetos passavam.
+_REPR_DE_OBJETO = re.compile(r"^[A-Za-z_][A-Za-z0-9_.<>]*\((?P<campos>.+)", re.DOTALL)
+_CAMPO_NO_REPR = re.compile(r"(?:^|[,(\s])(?P<nome>[A-Za-z_][A-Za-z0-9_]*)=")
+
+
+def _repr_de_objeto_bloqueado(valor: Any) -> bool:
+    """Reconhece o repr de um objeto JÁ serializado em string pelo Sentry.
+
+    Este é o furo que `_limpa` sozinho não fecha, e o motivo é de ORDEM: o SDK
+    chama `safe_repr()` nas variáveis locais ANTES de entregar o evento ao
+    `before_send`. Quando o scrubbing roda, o que está em `frame["vars"]` não é
+    mais o objeto — é uma `str` como:
+
+        "SanitizationResult(sanitized_text='Paciente [PACIENTE]...', was_sanitized=True)"
+
+    A comparação por nome de variável não alcança isso: a chave é `dlp_result`,
+    que não bate na blocklist, e o conteúdo clínico está DENTRO do valor. Foi
+    assim que o prompt saiu num teste ponta a ponta com todos os testes de
+    unidade verdes — o mesmo formato de ponto cego dos headers do ASGI
+    (ver `_e_par_bloqueado`).
+
+    Detecta por FORMATO, não por nome de classe: qualquer repr cujo conjunto de
+    campos toque a blocklist é mascarado inteiro. Uma lista de nomes de classe
+    envelheceria a cada objeto novo que passasse pelos frames.
+    """
+    if not isinstance(valor, str) or "=" not in valor:
+        return False
+    casado = _REPR_DE_OBJETO.match(valor.strip())
+    if casado is None:
+        return False
+    return any(
+        _bloqueado(m.group("nome"))
+        for m in _CAMPO_NO_REPR.finditer(casado.group("campos"))
+    )
+
+
+def _campos_de_objeto(valor: Any) -> dict | None:
+    """Devolve os atributos de um objeto comum, ou None se não for um.
+
+    Exclui tipos que já têm tratamento próprio e os primitivos, cujo `__dict__`
+    não interessa (ou nem existe).
+    """
+    if isinstance(valor, type):  # a classe em si, não uma instância
+        return None
+    if isinstance(valor, str | bytes | int | float | bool | type(None)):
+        return None
+    atributos = getattr(valor, "__dict__", None)
+    if isinstance(atributos, dict) and atributos:
+        return atributos
+    # Pydantic v2 e afins: sem `__dict__` útil, mas com `__slots__`.
+    slots = getattr(type(valor), "__slots__", None)
+    if slots:
+        return {
+            nome: getattr(valor, nome)
+            for nome in slots
+            if isinstance(nome, str) and hasattr(valor, nome)
+        }
+    return None
+
+
 def _limpa(valor: Any, profundidade: int = 0) -> Any:
     """Percorre a estrutura e mascara todo valor sob chave bloqueada."""
     if profundidade > _MAX_PROFUNDIDADE:
         return MASCARA
+
+    # Antes de qualquer coisa: repr de objeto já virado string pelo `safe_repr`
+    # do SDK. Vem como `str` comum, sob um nome de variável que não diz nada
+    # (`dlp_result`, `request`, `resultado`), com o conteúdo clínico dentro.
+    if _repr_de_objeto_bloqueado(valor):
+        return MASCARA
+
     if isinstance(valor, dict):
         return {
             chave: MASCARA if _bloqueado(chave) else _limpa(v, profundidade + 1)
@@ -75,6 +149,26 @@ def _limpa(valor: Any, profundidade: int = 0) -> Any:
         if _e_par_bloqueado(valor):
             return [valor[0], MASCARA]
         return [_limpa(v, profundidade + 1) for v in valor]
+
+    # OBJETOS. Sem isto, `_limpa` devolvia intacta qualquer dataclass, modelo
+    # Pydantic ou instância comum que aparecesse nos frames — e a blocklist por
+    # nome nunca era consultada para os campos DENTRO dela. O `safe_repr` do
+    # Sentry então serializava o objeto inteiro, com o conteúdo junto.
+    #
+    # Foi assim que `SanitizationResult.original_text` (já removido) levava o
+    # prompt clínico bruto para fora. A correção não depende daquele campo: vale
+    # para qualquer objeto que carregue texto sob um nome bloqueado.
+    #
+    # Devolve dict porque o destino é serialização, não reconstrução do objeto —
+    # e o nome da classe fica registrado para o alerta continuar diagnosticável.
+    campos = _campos_de_objeto(valor)
+    if campos is not None:
+        limpos = {
+            chave: MASCARA if _bloqueado(chave) else _limpa(v, profundidade + 1)
+            for chave, v in campos.items()
+        }
+        return {"__class__": type(valor).__name__, **limpos}
+
     return valor
 
 

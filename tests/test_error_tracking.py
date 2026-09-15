@@ -262,6 +262,96 @@ def test_excecao_real_nao_leva_o_prompt(sentry_espiao):
     assert "chamada_ao_provider" in texto
 
 
+# ── Regressao: OBJETOS nos frames, nao so str e dict ─────────────────────
+# Os testes acima punham no frame apenas `str` e `list[dict]` — tipos que
+# `_limpa` ja sabia percorrer. Em producao o frame do orquestrador carrega
+# OBJETOS: dataclasses, modelos Pydantic, entidades ORM. `_limpa` devolvia cada
+# um deles intacto, e o `safe_repr` do Sentry serializava o conteudo junto.
+#
+# Era o mesmo formato de ponto cego dos headers do ASGI logo abaixo: teste
+# verde, vazamento real.
+
+
+def test_objeto_com_texto_clinico_no_frame_e_limpo(sentry_espiao):
+    """
+    O caso que de fato existe: um objeto vivo no frame carregando texto clínico
+    num atributo. Antes da correção o objeto passava inteiro.
+    """
+    from dataclasses import dataclass
+
+    import sentry_sdk
+
+    @dataclass
+    class ResultadoDeProcessamento:
+        prompt_text: str
+        model_id: str
+
+    def chamada_ao_provider(dados: ResultadoDeProcessamento):
+        raise RuntimeError("provider timeout")
+
+    try:
+        chamada_ao_provider(
+            ResultadoDeProcessamento(prompt_text=PROMPT_CLINICO, model_id="claude-sonnet-4-6")
+        )
+    except RuntimeError:
+        sentry_sdk.capture_exception()
+
+    sentry_sdk.flush(timeout=2)
+
+    assert sentry_espiao.eventos, "Nenhum evento chegou ao transporte"
+    _sem_vazamento(sentry_espiao.eventos[0])
+
+
+def test_sanitization_result_real_no_frame_e_limpo(sentry_espiao):
+    """
+    O objeto concreto que vivia nos frames do orquestrador
+    (`orquestrador_service`, `orquestrador_stream_service`, `agregador_service`)
+    logo depois do DLP — e que é o alvo original desta correção.
+
+    O campo `original_text`, que guardava o texto BRUTO pré-DLP, foi removido da
+    dataclass. Este teste trava as duas metades da correção: o campo não volta, e
+    se voltar, `_limpa` agora o alcança.
+    """
+    import sentry_sdk
+
+    from app.middleware.dlp import sanitize_prompt
+
+    def chamada_ao_provider(dlp_result, model_id: str):
+        # Exatamente o nome usado em producao — e que NAO bate na blocklist.
+        raise RuntimeError("provider timeout")
+
+    try:
+        chamada_ao_provider(sanitize_prompt(PROMPT_CLINICO), "claude-sonnet-4-6")
+    except RuntimeError:
+        sentry_sdk.capture_exception()
+
+    sentry_sdk.flush(timeout=2)
+
+    assert sentry_espiao.eventos, "Nenhum evento chegou ao transporte"
+    _sem_vazamento(sentry_espiao.eventos[0])
+
+
+def test_dataclass_do_dlp_nao_guarda_o_texto_bruto():
+    """
+    Trava direta, sem Sentry: o resultado do DLP não pode carregar o texto
+    original. É a causa raiz — sem o campo, não há o que vazar.
+    """
+    from dataclasses import fields
+
+    from app.middleware.dlp import SanitizationResult, sanitize_prompt
+
+    nomes = {f.name for f in fields(SanitizationResult)}
+    assert "original_text" not in nomes, (
+        "O texto bruto pré-DLP voltou para a dataclass — ver "
+        "`test_sanitization_result_real_no_frame_e_limpo`"
+    )
+
+    resultado = sanitize_prompt(PROMPT_CLINICO)
+    import json
+
+    assert "João da Silva" not in json.dumps(resultado.__dict__, default=str, ensure_ascii=False)
+
+
 # ── Regressao: headers do ASGI sao LISTA DE PARES, nao dicionario ────────
 # Todos os testes acima usavam dados em formato de dicionario, e passavam. Uma
 # simulacao de requisicao real (scripts/simular_erro_de_usuario.py) mostrou o

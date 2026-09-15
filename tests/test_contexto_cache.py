@@ -79,9 +79,22 @@ async def _gravar_troca(db, conv, dono, pergunta, resposta):
 async def test_lookup_do_cache_usa_a_pergunta_atual_sem_historico(
     db, db_conn, user, conversation_factory, model_pricing_factory, monkeypatch
 ):
+    """
+    A chave de lookup é a pergunta atual, e só ela.
+
+    NOTA SOBRE O CENÁRIO (mudou em 2026-09-15, T9): este teste usava uma
+    conversa COM histórico gravado. Desde que o gate virou allowlist
+    (`pode_usar_cache`: cacheável só quando não há contexto montado), histórico
+    presente desliga o cache antes do lookup — o espião nunca seria chamado e o
+    teste passaria a falhar por um motivo que nada tem a ver com a invariante
+    que ele protege.
+
+    A invariante continua valendo e continua aqui: o que vai para a chave é a
+    pergunta, não o contexto. Ver `test_modelo_recebe_o_historico_mesmo_com_a_
+    chave_de_cache_limpa`, que cobre o outro lado (o modelo recebe o histórico).
+    """
     await model_pricing_factory("sonar-pro", provider_type="perplexity")
     conv = await conversation_factory(user)
-    await _gravar_troca(db, conv, user, "PERGUNTA ANTIGA sobre cefaleia", "RESPOSTA ANTIGA")
 
     capturado = {}
 
@@ -106,8 +119,6 @@ async def test_lookup_do_cache_usa_a_pergunta_atual_sem_historico(
 
     chave = capturado["prompt"]
     assert chave == "qual a dose?"
-    assert "PERGUNTA ANTIGA" not in chave, "histórico contaminou a chave do cache"
-    assert "RESPOSTA ANTIGA" not in chave
 
 
 async def test_mesma_pergunta_em_conversas_diferentes_gera_a_mesma_chave(
@@ -115,13 +126,17 @@ async def test_mesma_pergunta_em_conversas_diferentes_gera_a_mesma_chave(
 ):
     """
     É o ponto do cache: duas conversas distintas perguntando a mesma coisa
-    precisam casar. Com histórico embutido na chave, nunca casariam.
+    precisam casar. Com a conversa embutida na chave, nunca casariam.
+
+    NOTA SOBRE O CENÁRIO (mudou em 2026-09-15, T9): as duas conversas tinham
+    histórico gravado. Com o gate em allowlist, histórico desliga o cache antes
+    do lookup — o que este teste mede passa a ser inalcançável por aquele
+    caminho. Duas conversas vazias preservam exatamente a invariante: mesma
+    pergunta, mesma chave, apesar de `conversation_id` diferente.
     """
     await model_pricing_factory("sonar-pro", provider_type="perplexity")
     conv_a = await conversation_factory(user, title="A")
     conv_b = await conversation_factory(user, title="B")
-    await _gravar_troca(db, conv_a, user, "contexto totalmente diferente A", "resposta A")
-    await _gravar_troca(db, conv_b, user, "outro contexto completamente diverso B", "resposta B")
 
     chaves = []
 

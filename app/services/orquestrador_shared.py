@@ -165,8 +165,26 @@ def pode_usar_cache(mode: str, mensagens: list[dict]) -> bool:
        comentário da flag em `core/config`: medição mostrou 0 acertos em 240
        interações, e o custo é ~1s por pergunta antes do primeiro token.
     2. O modo é cacheável (`MODOS_CACHEAVEIS`).
-    3. O contexto não carrega dado de paciente — ver
-       `contexto_tem_dado_de_paciente`.
+    3. **Não há contexto nenhum montado.** Allowlist, não denylist.
+
+    SOBRE A CONDIÇÃO 3 — por que `not mensagens`, e não "não detectei paciente"
+    A versão anterior perguntava a `contexto_tem_dado_de_paciente` se o contexto
+    parecia carregar dado de paciente, e cacheava quando a resposta era não.
+    Isso é denylist: seguro apenas na medida em que o detector é completo.
+
+    E ele não é. O detector reconhece os dois blocos SINTÉTICOS (evolução da
+    pasta, trechos de outras conversas), que começam com "[". Os turnos comuns
+    do histórico são texto sem prefixo — e carregam o quadro do paciente
+    rotineiramente, porque é o médico descrevendo o caso. Como a chave do cache
+    é `(modo, embedding do prompt normalizado)`, sem usuário e sem conversa, um
+    follow-up curto ("e qual a dose?") respondido a partir do caso do Dr. A
+    podia ser servido ao Dr. B — com a conduta calibrada para um paciente que
+    não é o dele.
+
+    `not mensagens` é seguro POR CONSTRUÇÃO: sem contexto montado, a resposta
+    depende só do texto da pergunta, que é exatamente o que a chave representa.
+    E não custa o que parece — pela medição de 2026-09-08, as seis entradas que
+    o cache chegou a gravar eram todas pergunta genérica isolada.
 
     Existe como função única porque a decisão precisa ser a MESMA na leitura e
     na gravação, nos dois caminhos do orquestrador. Quatro pontos que poderiam
@@ -174,14 +192,20 @@ def pode_usar_cache(mode: str, mensagens: list[dict]) -> bool:
     """
     if not get_settings().semantic_cache_enabled:
         return False
-    return mode in MODOS_CACHEAVEIS and not contexto_tem_dado_de_paciente(mensagens)
+    return mode in MODOS_CACHEAVEIS and not mensagens
 
 
 def contexto_tem_dado_de_paciente(mensagens: list[dict]) -> bool:
-    """Diz se o contexto montado carrega material específico de um paciente.
+    """Diz se o contexto montado carrega um BLOCO SINTÉTICO de paciente.
 
-    Serve para decidir CACHEABILIDADE, e é por isso que erra para o lado
-    seguro: qualquer bloco injetado conta.
+    ATENÇÃO — esta função NÃO é mais o gate de cacheabilidade, e sozinha não
+    basta para essa decisão. Ela detecta os blocos injetados (que começam com
+    "[") e não detecta os turnos comuns do histórico, que são texto sem prefixo
+    e também carregam o quadro do paciente. Quem decide cache é
+    `pode_usar_cache`, por allowlist — ver o docstring de lá.
+
+    Continua existindo porque o sinal é útil e está travado por teste: é o que
+    diz se um contexto carrega material explicitamente marcado como de paciente.
 
     O problema que isto resolve: a chave do cache semântico é
     `(modo, prompt_sanitizado)` — sem usuário, sem pasta, sem histórico. Mas a

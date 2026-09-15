@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import exigir_origem_confiavel, get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
+from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import FileExtraction, User
 from app.services.file_extractor_service import (
     ALLOWED_CONTENT_TYPES,
     MAX_EXTRACTED_CHARS,
     MAX_FILE_BYTES,
     MAX_IMAGE_BYTES,
+    MODELO_DESCRICAO_IMAGEM,
     FileValidationError,
     aviso_de_extracao,
     extract_docx,
@@ -113,8 +115,11 @@ async def extract_file(
             image_b64 = img["base64"]
             image_mime = img["media_type"]
 
+            # Importado do serviço, e não repetido como literal: o par
+            # payload/`calculate_cost` precisa concordar, e um literal divergente
+            # faz o custo virar zero sem erro nenhum (`pricing.py`).
             haiku_cost = await calculate_cost(
-                db, "claude-haiku-4-5-20251001", img["tokens_in"], img["tokens_out"]
+                db, MODELO_DESCRICAO_IMAGEM, img["tokens_in"], img["tokens_out"]
             )
             await record_cost(db, user.id, haiku_cost)
     except FileValidationError as e:
@@ -144,9 +149,23 @@ async def extract_file(
     if len(text) > MAX_EXTRACTED_CHARS:
         text = text[:MAX_EXTRACTED_CHARS] + "\n\n[... conteúdo truncado — arquivo muito extenso]"
 
+    # DLP na ESCRITA — era a única porta por onde dado de paciente entrava no
+    # banco sem passar pelo DLP. Um laudo laboratorial traz nome, CPF e data de
+    # nascimento no cabeçalho, e o nome do arquivo costuma trazer o nome do
+    # paciente ("laudo_maria_silva.pdf"). Ficava 180 dias gravado em claro.
+    #
+    # Mesmo padrão de `folders.py::_limpar_evolucao`: sanitizar na escrita faz o
+    # dado identificável deixar de existir, em vez de depender de mascarar em
+    # toda leitura futura.
+    #
+    # Com NER: aqui o texto é do DOCUMENTO do paciente, não resposta de modelo —
+    # é exatamente onde nome sem palavra-gatilho aparece.
+    text = (await sanitize_prompt_async(text)).sanitized_text
+    file_name = (await sanitize_prompt_async(file.filename or "arquivo")).sanitized_text
+
     extraction = FileExtraction(
         user_id=user.id,
-        file_name=file.filename or "arquivo",
+        file_name=file_name,
         file_type=file_kind,
         extracted_text=text,
         image_base64=image_b64,

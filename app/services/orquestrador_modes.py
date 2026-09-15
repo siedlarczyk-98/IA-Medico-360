@@ -87,9 +87,9 @@ PHARMA_CHECK_MIN_CONFIDENCE = 0.90
 # modelo não se aplica a eles.
 MODE_MODEL_MAP: dict[str, str | None] = {
     OrquestradorMode.QUICK_SEARCH: "sonar-pro",
-    OrquestradorMode.CLINICAL_REASONING: "claude-sonnet-4-6",
+    OrquestradorMode.CLINICAL_REASONING: "claude-sonnet-5",
     OrquestradorMode.PRODUCTIVITY: "gpt-5.4-nano",
-    OrquestradorMode.EXAM_REVIEW: "claude-sonnet-4-6",
+    OrquestradorMode.EXAM_REVIEW: "claude-sonnet-5",
     # `sabia-4-thinking`: a ferramenta Data Ocean só existe nos modelos
     # `sabia-4*` (a API devolve 400 nos demais), e a variante `thinking` é a
     # que raciocina sobre quais bases cruzar.
@@ -101,7 +101,13 @@ MODE_MODEL_MAP: dict[str, str | None] = {
     OrquestradorMode.OFF_TOPIC: None,
 }
 
-# temperature=0 para modos clínicos garante respostas consistentes e reproduzíveis
+# temperature=0 para modos clínicos garante respostas consistentes e reproduzíveis.
+#
+# ATENÇÃO: a partir do Sonnet 5 a API removeu `temperature` e um payload que o
+# inclua volta 400. Este mapa continua sendo a intenção declarada por modo, mas
+# quem decide se o parâmetro CHEGA ao provider é
+# `AnthropicProvider._supports_temperature`. Não remova o filtro de lá achando
+# que o valor daqui é inofensivo — ele quebra o modo clínico inteiro.
 MODE_TEMPERATURE_MAP: dict[str, float] = {
     OrquestradorMode.QUICK_SEARCH: 0.0,
     OrquestradorMode.CLINICAL_REASONING: 0.0,

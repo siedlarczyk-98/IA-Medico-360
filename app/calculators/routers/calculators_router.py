@@ -16,6 +16,7 @@ from app.calculators.services import calculators_service, extraction_service
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.models import User
+from app.services.usage_service import check_limit
 
 router = APIRouter(prefix="/calculators", tags=["calculators"])
 
@@ -71,6 +72,12 @@ async def extract_calculator_fields(
     db: AsyncSession = Depends(get_db),
 ):
     definition = await calculators_repository.get_definition_or_404(db, slug)
+
+    # Esta rota gasta LLM (`gpt-5.4-mini`) e era a única que o fazia sem passar
+    # pelo medidor: um `beta_user` que já tinha estourado o teto semanal seguia
+    # gastando por aqui, e o gasto ficava invisível para `vigilancia_service`.
+    # O `record_cost` correspondente vive no service, onde os tokens existem.
+    await check_limit(db, current_user)
 
     suggested_inputs, fields_extracted = await extraction_service.extract_calculator_inputs(
         db,

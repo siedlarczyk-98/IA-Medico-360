@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.deps import exigir_origem_confiavel
 from app.api.v1.endpoints.agregador import router as agregador_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.conversations import router as conversations_router
@@ -15,7 +16,23 @@ from app.calculators.routers.calculators_router import router as calculators_rou
 from app.calculators.routers.prevent_router import router as prevent_router
 from app.dea.routers.dea_router import router as dea_router
 
-api_v1_router = APIRouter(prefix="/api/v1")
+# Anti-CSRF por CLASSE, não rota a rota.
+#
+# O cookie de sessão é `SameSite=None` (iframe da Waid), então viaja cross-site.
+# A defesa que existia dependia de o handler declarar parâmetro de corpo — o que
+# força `application/json` e, por tabela, preflight. Handler SEM body param não
+# impõe content-type nenhum e era alcançável por `<form>` cross-site: eram seis
+# rotas assim, entre elas a revogação de consentimento, que grava recusa
+# permanente no registro que serve de prova (LGPD Art. 8º §5º).
+#
+# Declarada aqui, no router que agrega TODOS os endpoints, porque o furo não era
+# uma rota esquecida e sim a ausência de regra: rota de escrita nova precisa
+# nascer protegida sem ninguém lembrar de nada. `exigir_origem_confiavel` ignora
+# métodos idempotentes, então GET/HEAD cross-origin seguem funcionando.
+api_v1_router = APIRouter(
+    prefix="/api/v1",
+    dependencies=[Depends(exigir_origem_confiavel)],
+)
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(conversations_router)
 api_v1_router.include_router(folders_router)

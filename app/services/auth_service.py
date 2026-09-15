@@ -178,9 +178,29 @@ async def get_or_create_por_identidade_waid(
 
     user = await repo.get_user_by_email(db, identidade.email, active_only=True)
     if user is not None:
-        user.waid_uuid = identidade.uuid
-        await db.commit()
-        logger.info("waid_uuid preenchido para user=%s no primeiro login por token", user.id)
+        # A guarda é o que faz este backfill ser ÚNICO, como o docstring acima, o
+        # log abaixo e a migration 008 já afirmavam. Sem ela a vinculação era
+        # sobrescrita toda vez que a busca por uuid falhava e a por e-mail
+        # acertava — e o log seguia dizendo "primeiro login".
+        #
+        # O caminho não precisa de atacante: basta o LMS re-provisionar a conta
+        # com uuid novo para o mesmo e-mail, e o vínculo passa a alternar a cada
+        # login. A premissa de estabilidade do uuid é do provedor de identidade;
+        # aqui ela é reforçada.
+        #
+        # Assimetria que confirmava o furo: `sincronizar_email_da_waid` (abaixo)
+        # já recusa o caso espelhado, quando o e-mail novo pertence a outra conta.
+        if user.waid_uuid is None:
+            user.waid_uuid = identidade.uuid
+            await db.commit()
+            logger.info("waid_uuid preenchido para user=%s no primeiro login por token", user.id)
+        elif user.waid_uuid != identidade.uuid:
+            logger.warning(
+                "Conta de e-mail %s já vinculada a outro waid_uuid; vinculação MANTIDA "
+                "(user=%s). Identidade nova recusada — ver migration 008_waid_uuid.",
+                identidade.email,
+                user.id,
+            )
         return user, False
 
     user = User(

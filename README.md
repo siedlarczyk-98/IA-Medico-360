@@ -129,7 +129,7 @@ Pipeline principal. Orquestra todos os módulos em sequência:
 | Modo | Trigger | Modelo | Temperature |
 |------|---------|--------|-------------|
 | `QUICK_SEARCH` | Dúvidas diretas, posologia, doses | sonar-pro (Perplexity) | 0.0 |
-| `CLINICAL_REASONING` | Casos clínicos, raciocínio diagnóstico | claude-sonnet-4-20250514 | 0.0 |
+| `CLINICAL_REASONING` | Casos clínicos, raciocínio diagnóstico | claude-sonnet-5 | — (removida na API) |
 | `PHARMA_CHECK` | Interações medicamentosas | PharmaDB (local) | — |
 | `PRODUCTIVITY` | Laudos, emails, tarefas não clínicas | GPT nano | 0.7 |
 
@@ -296,7 +296,7 @@ Checagem local de interações medicamentosas. Ativado quando o triage classific
 | Modo | Modelo Principal | Fallbacks |
 |------|-----------------|-----------|
 | QUICK_SEARCH | sonar-pro (Perplexity) | gemini-2.5-flash |
-| CLINICAL_REASONING | claude-sonnet-4-20250514 | gpt-4o → gemini-2.5-flash |
+| CLINICAL_REASONING | claude-sonnet-5 | gpt-4o → gemini-2.5-flash |
 | PRODUCTIVITY | gpt-5.4-nano | gemini-2.5-flash |
 
 Todos os modelos são configurados via tabela `model_pricing` no banco — sem hardcode de preços no código.
