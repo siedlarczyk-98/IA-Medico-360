@@ -383,3 +383,26 @@ async def test_falha_interna_da_base_chega_ao_medico_como_fallback(
     assert "Nenhuma interação conhecida" not in resposta["text"]
     # E nenhum alerta falso foi gravado no banco.
     assert servico.db.adicionados == []
+
+
+async def test_nome_de_metodo_errado_estoura_em_vez_de_virar_indisponibilidade(
+    servico, monkeypatch
+):
+    """
+    Erro de programação não pode se disfarçar de falha de infraestrutura.
+
+    `PHARMA_MODE_CONFIG` resolve o método por NOME. Com o `getattr` dentro do
+    `try`, um nome trocado ali levantava `AttributeError`, caía no `except` e
+    virava "PharmaDB temporariamente indisponível": a base no ar, o médico
+    recebendo o aviso de degradação, e o log apontando para o lugar errado.
+
+    Descoberto ao testar por mutação o `test_cada_modo_chama_o_metodo_correspondente`
+    — o teste falhava, mas pelo motivo errado.
+    """
+    instalar_extrator(monkeypatch, [{"raw": "Losartana", "normalized": "losartana"}])
+    # Dublê sem o método que o modo pede.
+    instalar_pharmadb(monkeypatch, buscar_bula=None)
+    capturar_fallback(monkeypatch, servico)
+
+    with pytest.raises(AttributeError):
+        await servico._handle_pharma("losartana", "PHARMA_RECEITA")

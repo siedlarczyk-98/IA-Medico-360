@@ -214,15 +214,22 @@ async def test_specialty_manda_o_parametro_certo(monkeypatch):
     assert capturado["corpo"]["temperature"] == 0
 
 
-async def test_specialty_com_falha_nao_derruba_a_interacao(monkeypatch):
-    """A especialidade é metadado: falhar nela não pode custar a resposta."""
+async def test_specialty_com_falha_devolve_as_chaves_vazias(monkeypatch):
+    """
+    A especialidade é metadado: falhar nela não pode custar a resposta.
+
+    Mas "não derrubar" não basta — o chamador faz `classification["specialty"]`
+    direto (`orquestrador_service.py`), então um `{}` no lugar do dicionário
+    completo trocaria a falha de rede por um `KeyError` no meio da interação. O
+    contrato é: as duas chaves existem, com valor `None`.
+    """
     capturado: dict = {}
     cliente = cliente_que_captura(capturado, "{}", status=500)
     instalar(monkeypatch, "app.services.specialty_detector", cliente)
 
     resultado = await specialty_detector.detect_specialty_and_topic("pergunta")
 
-    assert resultado is not None
+    assert resultado == {"specialty": None, "topic": None}
 
 
 # ── Extração de medicamentos ─────────────────────────────────────────────────

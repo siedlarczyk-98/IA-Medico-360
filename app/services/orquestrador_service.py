@@ -715,10 +715,14 @@ class OrquestradorService:
                 "is_fallback": False,
             }
 
+        # O `getattr` fica FORA do `try`: resolver o nome do método é erro de
+        # programação (um nome trocado em `PHARMA_MODE_CONFIG`), não falha de
+        # infraestrutura. Dentro do `try`, o `AttributeError` caía no `except` e
+        # virava "PharmaDB indisponível" — a base no ar, o médico recebendo o
+        # aviso de indisponibilidade, e nada no log apontando para a causa real.
+        buscar = getattr(pharmadb, buscar_attr)
         try:
-            resultado = await self._buscar_com_fallback(
-                getattr(pharmadb, buscar_attr), raw, normalized
-            )
+            resultado = await self._buscar_com_fallback(buscar, raw, normalized)
         except Exception as e:
             logger.warning("PharmaDB %s indisponível: %s", label, e)
             return await self._pharma_fallback(prompt)

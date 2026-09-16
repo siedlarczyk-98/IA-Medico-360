@@ -156,18 +156,50 @@ async def test_o_sse_anuncia_o_fallback(
     assert done["is_fallback"] is True
 
 
-async def test_nao_cai_para_outro_modelo(
+def test_nao_ha_fallback_declarado_para_o_data_ocean():
+    """
+    A invariante do modo, afirmada sobre a CONFIGURAÇÃO.
+
+    Cair para outro modelo devolveria uma resposta fluente construída da memória
+    de treino, com números possivelmente inventados, no lugar de uma consulta ao
+    DATASUS — e com a mesma aparência da verdadeira. Falhar visivelmente é melhor.
+
+    ESTE TESTE JÁ FOI INÚTIL: afirmava `resposta.model_used == "sabia-4-thinking"`,
+    o que parecia provar "não caiu para outro modelo". Não provava nada — esse é
+    o valor devolvido TAMBÉM quando a cadeia de fallback se esgota
+    (`orquestrador_stream_service`: `model_id = MODE_MODEL_MAP.get(mode)`).
+    Adicionar o DATA_OCEAN a `FALLBACK_MODELS` deixava os 5 testes do arquivo
+    passando. Descoberto por teste de mutação, não por leitura.
+
+    A lição: afirmar sobre o efeito observável só serve quando o efeito
+    DISTINGUE os dois casos. Aqui não distinguia, então a asserção é sobre a
+    configuração.
+    """
+    from app.services.orquestrador_modes import FALLBACK_MODELS, OrquestradorMode
+
+    assert OrquestradorMode.DATA_OCEAN not in FALLBACK_MODELS, (
+        "DATA_OCEAN ganhou fallback — nenhum outro modelo consulta as bases "
+        "brasileiras, então a resposta viria da memória do modelo com cara de "
+        "consulta oficial. Se a decisão mudou, mude também "
+        "`orquestrador_modes.py` e o comentário que explica o porquê."
+    )
+
+
+async def test_falha_grava_a_mensagem_generica_e_nao_uma_resposta_inventada(
     servico, db, user, monkeypatch, model_pricing_factory
 ):
     """
-    A invariante do modo: falhar visivelmente é melhor que responder de memória.
+    O outro lado da mesma invariante, agora sobre o que é PERSISTIDO.
 
-    Se um dia alguém adicionar o DATA_OCEAN a `FALLBACK_MODELS`, a resposta
-    passaria a vir de um modelo que NÃO consulta as bases brasileiras — fluente,
-    plausível e possivelmente com números inventados. Este teste quebra antes.
+    Com a base fora, o que se grava tem que ser a mensagem genérica de erro —
+    nunca um texto plausível produzido por outro modelo. É o que distingue
+    "falhou" de "respondeu", e é verificável no conteúdo, não no `model_used`.
     """
     await _rodar(servico, MaritacaQueFalha(), monkeypatch, model_pricing_factory)
 
     _, resposta = await _resposta_gravada(db, user)
 
-    assert resposta.model_used == "sabia-4-thinking"
+    assert resposta.is_fallback is True
+    assert "não foi possível processar" in resposta.response_text
+    # Nenhum conteúdo sobre dados públicos: o modo falhou, não respondeu.
+    assert "DATASUS" not in resposta.response_text
