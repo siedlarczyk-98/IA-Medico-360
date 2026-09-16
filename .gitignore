@@ -19,6 +19,7 @@ scripts/generate_dev_token.py
 # Frontend — agregador
 frontend-app/.env
 frontend-app/.env.production
+frontend-app/coverage/
 
 # Frontend — calculadoras
 calculadoras-app/.env

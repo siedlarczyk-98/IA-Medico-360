@@ -15,7 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.citacoes_fonte import normalizar as normalizar_citacoes, para_json
+from app.core.citacoes_fonte import normalizar as normalizar_citacoes
+from app.core.citacoes_fonte import para_json
 from app.core.prompts import DISCLAIMER_RESPOSTA
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (

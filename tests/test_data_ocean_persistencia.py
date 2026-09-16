@@ -32,7 +32,6 @@ from app.models.models import Interaction, InteractionResponse
 from app.services.integracoes import ai_providers
 from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
-
 from tests.test_orquestrador_stream import (  # noqa: F401 — fixtures reusadas
     parse_sse,
     sem_dependencias_externas,

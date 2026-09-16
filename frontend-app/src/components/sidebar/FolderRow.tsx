@@ -69,6 +69,11 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
       >
         <button
           onClick={() => setOpen(o => !o)}
+          // Sem nome acessível, o leitor de tela anuncia só "botão" — e são
+          // três botões visualmente idênticos na mesma linha. O `aria-expanded`
+          // é o que diz se a pasta está aberta sem depender da seta girada.
+          aria-label={`Pasta ${folder.name}`}
+          aria-expanded={open}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
@@ -108,6 +113,9 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
         <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
           <button
             onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
+            aria-label={`Opções da pasta ${folder.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center' }}
           >
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">

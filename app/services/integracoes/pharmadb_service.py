@@ -31,6 +31,20 @@ TTL_GENERICOS = timedelta(days=7)
 
 TOKEN_LIFETIME_S = 3300  # renova 5min antes de expirar (60min = 3600s)
 
+class InteracoesIndisponiveisError(RuntimeError):
+    """
+    A checagem de interações não pôde ser concluída.
+
+    Existe para separar "consultei e não há interação" de "não consegui
+    consultar". Sem essa distinção a segunda virava a primeira, e o médico
+    recebia um 🟢 "nenhuma interação conhecida" com a base fora do ar — uma
+    afirmação falsa sobre risco de prescrição.
+
+    Quem trata é `OrquestradorService._handle_pharma_check`, que avisa o médico e
+    cai para CLINICAL_REASONING marcado como `is_fallback`.
+    """
+
+
 SEMAFORO = {
     "grave":    {"level": 4, "color": "RED",    "emoji": "🔴"},
     "moderada": {"level": 3, "color": "YELLOW", "emoji": "🟡"},
@@ -318,10 +332,32 @@ class PharmaDBService:
             return_exceptions=True,
         )
 
+        # Uma consulta que FALHOU não é uma consulta sem resultado.
+        #
+        # Antes, a exceção era logada e o laço seguia com `continue`: o PA ficava
+        # como se não tivesse interação nenhuma. Com todas as consultas falhando,
+        # `alertas` saía vazio e a função devolvia `status="sem_interacao"` — que
+        # o formatador renderiza como "🟢 Nenhuma interação conhecida encontrada".
+        # Ou seja: o PharmaDB caía e o médico lia uma luz verde, que é uma
+        # afirmação clínica FALSA sobre risco de prescrição.
+        #
+        # Propagar é o certo: `_handle_pharma_check` já sabe tratar isso — avisa
+        # que a checagem automática está indisponível e cai para
+        # CLINICAL_REASONING marcado como `is_fallback`. Aquele caminho existia e
+        # só não era alcançado, porque a falha morria aqui dentro.
+        #
+        # Qualquer falha invalida a checagem, não só a falha total: se a consulta
+        # da varfarina falhou e a do AAS não, não há como afirmar que os dois não
+        # interagem. "Verifiquei metade" não é uma resposta que sirva.
         for pa, interacoes_pa in zip(pas, interacoes_por_pa):
             if isinstance(interacoes_pa, BaseException):
-                logger.error(f"Erro ao buscar interações do PA {pa['pa_id']}: {interacoes_pa}")
-                continue
+                logger.error(
+                    "Falha ao buscar interações do PA %s — checagem abortada: %s",
+                    pa["pa_id"], interacoes_pa,
+                )
+                raise InteracoesIndisponiveisError(
+                    f"não foi possível consultar as interações de {pa['nome_dcb']}"
+                ) from interacoes_pa
             for interacao in interacoes_pa:
                 pa_b_id = interacao.get("pa_b", {}).get("id")
                 if pa_b_id not in pa_ids or pa_b_id == pa["pa_id"]:

@@ -18,7 +18,8 @@ e todo o resto que os dois compartilham já divergiu por ter sido copiado.
 
 from typing import Any
 
-from app.core.citacoes_fonte import Citacao, normalizar as normalizar_citacoes, para_json
+from app.core.citacoes_fonte import Citacao, para_json
+from app.core.citacoes_fonte import normalizar as normalizar_citacoes
 
 
 def build_response_metadata(

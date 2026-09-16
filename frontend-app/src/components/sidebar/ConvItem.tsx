@@ -97,6 +97,11 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
           <button
             ref={btnRef}
             onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); setShowFolderPicker(false); }}
+            // Mesmo motivo do `FolderRow`: sem nome acessível o leitor de tela
+            // anuncia só "botão", e numa lista de conversas há um por linha.
+            aria-label={`Opções de ${conv.title ?? 'conversa sem título'}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             style={{
               background: menuOpen ? 'var(--fill2)' : 'none',
               border: 'none',
