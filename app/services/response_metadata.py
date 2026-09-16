@@ -18,11 +18,13 @@ e todo o resto que os dois compartilham já divergiu por ter sido copiado.
 
 from typing import Any
 
+from app.core.citacoes_fonte import Citacao, normalizar as normalizar_citacoes, para_json
+
 
 def build_response_metadata(
     *,
     pubmed: Any = None,
-    citations: list[str] | None = None,
+    citations: list[Citacao] | None = None,
     tool_usage: dict | None = None,
 ) -> dict | None:
     """
@@ -37,7 +39,10 @@ def build_response_metadata(
     meta: dict = {}
 
     if citations:
-        meta["citations"] = list(citations)
+        # Grava `[{"url", "title"}]`. O JSONB já gravado antes desta mudança tem
+        # `["url"]` e continua assim — a normalização é na LEITURA, e vale para
+        # sempre: ver `read_response_metadata` e `app/core/citacoes_fonte.py`.
+        meta["citations"] = para_json(citations)
 
     # Consumo de ferramentas integradas (hoje só o Data Ocean/Maritaca).
     #
@@ -90,9 +95,9 @@ def build_metadata_from_cached(payload: dict) -> dict | None:
 
     meta: dict = {}
 
-    citations = payload.get("citations")
-    if isinstance(citations, list) and citations:
-        meta["citations"] = list(citations)
+    citations = normalizar_citacoes(payload.get("citations"))
+    if citations:
+        meta["citations"] = citations
 
     cited = [
         {"title": c.get("title"), "pmid": c.get("pmid"), "verified": bool(c.get("verified"))}
@@ -117,7 +122,7 @@ def build_metadata_from_cached(payload: dict) -> dict | None:
     return meta or None
 
 
-def read_response_metadata(extra_metadata: Any) -> tuple[list[str], dict | None]:
+def read_response_metadata(extra_metadata: Any) -> tuple[list[dict], dict | None]:
     """
     Lê `extra_metadata` de volta como (citations, pubmed_validation).
 
@@ -129,9 +134,8 @@ def read_response_metadata(extra_metadata: Any) -> tuple[list[str], dict | None]
     if not isinstance(extra_metadata, dict):
         return [], None
 
-    citations = extra_metadata.get("citations")
-    if not isinstance(citations, list):
-        citations = []
+    # Converte o legado `["url"]` e o atual `[{"url","title"}]` numa forma só.
+    citations = normalizar_citacoes(extra_metadata.get("citations"))
 
     pubmed = extra_metadata.get("pubmed_validation")
     if not isinstance(pubmed, dict):

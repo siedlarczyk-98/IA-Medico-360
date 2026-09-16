@@ -3,7 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { ModeChip } from './ModeChip';
-import type { Message, PubmedValidation } from '../api/orquestrador';
+import type { CitacaoBruta, Message, PubmedValidation } from '../api/orquestrador';
+import { normalizarCitacoes } from '../lib/citacoes';
+import { comMarcadoresDeCitacao } from '../lib/marcadoresCitacao';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de responsabilidade exclusiva do médico assistente.';
@@ -20,15 +22,15 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     <th style={{ border: '1px solid var(--line2)', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</th>
   ),
   td: ({ children }) => (
-    <td style={{ border: '1px solid var(--line2)', padding: '6px 10px', verticalAlign: 'top' }}>{children}</td>
+    <td style={{ border: '1px solid var(--line2)', padding: '6px 10px', verticalAlign: 'top' }}>{comMarcadoresDeCitacao(children)}</td>
   ),
   tr: ({ children }) => <tr style={{ borderBottom: '1px solid var(--line2)' }}>{children}</tr>,
-  p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{children}</p>,
+  p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{comMarcadoresDeCitacao(children)}</p>,
   strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
   em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
   ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ul>,
   ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ol>,
-  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+  li: ({ children }) => <li style={{ marginBottom: 2 }}>{comMarcadoresDeCitacao(children)}</li>,
   h1: ({ children }) => <h1 style={{ fontSize: 15, fontWeight: 700, margin: '12px 0 6px' }}>{children}</h1>,
   h2: ({ children }) => <h2 style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px' }}>{children}</h2>,
   h3: ({ children }) => <h3 style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>{children}</h3>,
@@ -85,7 +87,7 @@ export function ChatView({ messages, streaming, streamingMode, finalizing, scrol
         {messages.map((msg, i) => (
           msg.role === 'user'
             ? <UserMessage key={i} content={msg.content} attachments={msg.attachments} />
-            : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} />
+            : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} isFallback={msg.is_fallback} />
         ))}
         {streaming && <ThinkingIndicator mode={streamingMode} />}
         {!streaming && finalizing && <ReferencesPending />}
@@ -142,7 +144,46 @@ const UserMessage = memo(function UserMessage({ content, attachments }: {
   );
 });
 
-const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence, citations, pubmed_validation }: { content: string; mode?: string; confidence?: number; citations?: string[]; pubmed_validation?: PubmedValidation }) {
+/**
+ * Marca uma resposta que NÃO veio do modelo do modo.
+ *
+ * Vem ANTES do texto, não depois: o aviso existe para mudar como o médico LÊ o
+ * que está abaixo, e um rodapé chegaria tarde demais.
+ *
+ * Por que isto importa no Data Ocean: aquele modo não tem fallback por decisão
+ * — cair para outro modelo devolveria números plausíveis inventados no lugar de
+ * uma consulta ao DATASUS, e o desenho escolheu "falhar visivelmente". Só que a
+ * mensagem genérica de erro era gravada e reexibida com a mesma aparência de
+ * uma resposta legítima, e o médico que reabria a conversa lia "não salvou"
+ * onde o correto era "a consulta falhou".
+ */
+function AvisoFallback() {
+  return (
+    <div
+      role="note"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 6,
+        margin: '0 0 8px', padding: '6px 10px',
+        fontSize: 11.5, lineHeight: 1.45,
+        color: 'var(--pen2)', background: 'var(--fill2)',
+        border: '1px solid var(--line2)', borderRadius: 6,
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}>
+        <path d="M8 5.5v3.2M8 11h.01M8 1.8 1.5 13.2h13L8 1.8z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span>
+        A consulta não foi concluída — esta resposta <strong>não vem das bases consultadas
+        pelo modo escolhido</strong>. Vale refazer a pergunta.
+      </span>
+    </div>
+  );
+}
+
+const AssistantMessage = memo(function AssistantMessage({ content, mode, confidence, citations, pubmed_validation, isFallback }: { content: string; mode?: string; confidence?: number; citations?: CitacaoBruta[]; pubmed_validation?: PubmedValidation; isFallback?: boolean }) {
+  // Conversa antiga traz `string[]`; nova, objetos com titulo. Ver `citacoes.ts`.
+  const fontes = useMemo(() => normalizarCitacoes(citations ?? []), [citations]);
+
   const rendered = useMemo(() => (
     <ReactMarkdown rehypePlugins={rehypePlugins} remarkPlugins={remarkPlugins} components={mdComponents}>
       {content}
@@ -166,20 +207,28 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
             }
           </div>
         )}
+        {isFallback && <AvisoFallback />}
         <div style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.55, wordBreak: 'break-word' }}>
           {rendered}
         </div>
-        {citations && citations.length > 0 && (
+        {fontes.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line2)' }}>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>Fontes</div>
-            <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {citations.map((url, i) => (
+            <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {fontes.map((fonte, i) => (
                 <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
-                  <a href={url} target="_blank" rel="noopener noreferrer"
-                    style={{ color: 'var(--petrol)', textDecoration: 'none', wordBreak: 'break-all' }}
+                  <a href={fonte.url} target="_blank" rel="noopener noreferrer"
+                    title={fonte.url}
+                    style={{
+                      color: 'var(--petrol)', textDecoration: 'none',
+                      // Título de artigo quebra em palavras; domínio, que não
+                      // tem espaço, precisa de `break-all` para não estourar a
+                      // largura da coluna no celular.
+                      wordBreak: fonte.temTitulo ? 'break-word' : 'break-all',
+                    }}
                     onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
                     onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
-                  >{url}</a>
+                  >{fonte.rotulo}</a>
                 </li>
               ))}
             </ol>

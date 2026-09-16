@@ -10,6 +10,15 @@ function authHeaders(): HeadersInit {
   };
 }
 
+/**
+ * Uma fonte citada.
+ *
+ * `string` é o formato legado — conversas gravadas antes de o backend passar a
+ * guardar o título continuam assim no JSONB, e não há backfill. A normalização
+ * para exibição está em `lib/citacoes.ts`.
+ */
+export type CitacaoBruta = string | { url: string; title?: string | null };
+
 export interface PubmedValidation {
   cited_verified: Array<{ title: string; pmid: string | null; verified: boolean }>;
   newer_guidelines: Array<{ pmid: string; article_title: string; abstract_snippet: string }>;
@@ -28,8 +37,15 @@ export interface Message {
   content: string;
   mode?: string;
   confidence?: number;
-  citations?: string[];
+  citations?: CitacaoBruta[];
   pubmed_validation?: PubmedValidation;
+  /**
+   * A resposta veio de um fallback, não do modelo do modo. No DATA_OCEAN, que
+   * não tem fallback por decisão, significa a mensagem genérica de erro — e ela
+   * precisa se distinguir de uma consulta real ao DATASUS, senão "falhou" se
+   * parece com "deu certo".
+   */
+  is_fallback?: boolean;
   /**
    * Anexos da mensagem. Só metadados — o texto extraído já está no `content`,
    * e o base64 da imagem não volta do backend na listagem da conversa.
@@ -46,7 +62,7 @@ export type StreamEvent =
       conversation_id: string;
       mode: string;
       model_used: string;
-      citations?: string[];
+      citations?: CitacaoBruta[];
       cited_guidelines_verified?: Array<{ title: string; pmid: string | null; verified: boolean }>;
       newer_guidelines_found?: Array<{ pmid: string; title?: string; article_title?: string; abstract_snippet?: string }>;
     }
@@ -65,7 +81,9 @@ export type StreamEvent =
       conversation_id: string;
       mode: string;
       model_used: string;
-      citations?: string[];
+      /** Ver `Message.is_fallback`. O backend já emitia; o front ignorava. */
+      is_fallback?: boolean;
+      citations?: CitacaoBruta[];
       cited_guidelines_verified?: Array<{ title: string; pmid: string | null; verified: boolean }>;
       newer_guidelines_found?: Array<{ pmid: string; title?: string; article_title?: string; abstract_snippet?: string }>;
     }

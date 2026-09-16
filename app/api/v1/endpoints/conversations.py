@@ -124,6 +124,7 @@ async def get_conversation(
                         mode=resp.model_used,
                         citations=citations,
                         pubmed_validation=pubmed,
+                        is_fallback=bool(resp.is_fallback),
                     ))
         else:
             # ORQUESTRADOR — single response, mode comes from interaction
@@ -136,6 +137,7 @@ async def get_conversation(
                         mode=interaction.mode,
                         citations=citations,
                         pubmed_validation=pubmed,
+                        is_fallback=bool(resp.is_fallback),
                     ))
                     break
 

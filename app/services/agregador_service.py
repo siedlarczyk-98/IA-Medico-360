@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.citacoes_fonte import normalizar as normalizar_citacoes, para_json
 from app.core.prompts import DISCLAIMER_RESPOSTA
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
@@ -118,7 +119,9 @@ class AgregadorService:
 
         for model_id, result in model_responses.items():
             if isinstance(result, ProviderResponse):
-                citations = result.citations or []
+                # Serializado aqui, na borda do banco: `extra_metadata` é JSONB
+                # e não aceita o dataclass.
+                citations = para_json(result.citations) or []
                 cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
 
                 # DLP na resposta do modelo, NA ORIGEM — pelo mesmo motivo do
@@ -331,7 +334,7 @@ class AgregadorService:
                     is_fallback=False,
                 )
             else:
-                citations = data.get("citations") or []
+                citations = normalizar_citacoes(data.get("citations"))
                 cost = await calculate_cost(
                     self.db, model_id, data.get("tokens_in"), data.get("tokens_out")
                 )

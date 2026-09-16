@@ -65,8 +65,11 @@ class ValidationResult:
 
 async def _extract_citations(client: httpx.AsyncClient, agent_response: str) -> list[str]:
     """
-    Pede ao GPT-4o-mini para extrair as referências de guidelines/diretrizes
+    Pede a um modelo pequeno que extraia as referências de guidelines/diretrizes
     mencionadas na resposta clínica. Retorna lista de strings brutas.
+
+    É a PRIMEIRA etapa do pipeline: se ela falha, `_run_validation` retorna antes
+    de qualquer chamada ao eutils e o PubMed nunca chega a ser consultado.
     """
     resp = await client.post(
         "https://api.openai.com/v1/chat/completions",
@@ -76,7 +79,17 @@ async def _extract_citations(client: httpx.AsyncClient, agent_response: str) -> 
         },
         json={
             "model": "gpt-5.4-nano",
-            "max_tokens": 300,
+            # `max_completion_tokens`, não `max_tokens`: a família gpt-5 recusa o
+            # parâmetro antigo com HTTP 400. Este arquivo escapou da migração
+            # gpt-5 (tinha um único commit, o original) e o `except` amplo de
+            # `validate_with_pubmed` transformava o 400 em `fallback=True` com as
+            # listas vazias — então a seção "Referências verificadas no PubMed"
+            # nunca renderizava, em NENHUMA resposta, sem um erro visível.
+            #
+            # É o mesmo defeito que esvaziou a tabela `semantic_cache`; ver o
+            # comentário em `semantic_cache_service.py`. Se um terceiro caller
+            # aparecer, vale extrair o payload para um helper comum.
+            "max_completion_tokens": 300,
             "temperature": 0,
             "messages": [
                 {
@@ -427,8 +440,25 @@ async def validate_with_pubmed(
             _run_validation(agent_response, topic),
             timeout=timeout_s,
         )
-    except (TimeoutError, Exception) as exc:
-        logger.warning("[PubMed] Fallback ativado: %s", exc)
+    except TimeoutError:
+        # Timeout é operação normal: a validação tem orçamento de tempo e o
+        # PubMed às vezes demora. Não merece ERROR.
+        logger.warning("[PubMed] Fallback por timeout (%.1fs)", timeout_s)
+        return ValidationResult(confidence_score=0.0, low_evidence_alert=True, fallback=True)
+    except Exception as exc:
+        # ERROR com stack trace, e o corpo da resposta quando for erro HTTP.
+        #
+        # Isto era um WARNING sem traceback, junto com o timeout. Foi o que
+        # manteve invisível por toda a vida do arquivo um HTTP 400 determinístico
+        # (`max_tokens` numa família de modelo que exige `max_completion_tokens`):
+        # a validação falhava em 100% das respostas, a seção não renderizava, e o
+        # log não dizia o suficiente para alguém desconfiar. Falha determinística
+        # e falha intermitente não podem ter o mesmo nível.
+        corpo = ""
+        resposta = getattr(exc, "response", None)
+        if resposta is not None:
+            corpo = f" | resposta: {getattr(resposta, 'text', '')[:500]}"
+        logger.error("[PubMed] Fallback por erro: %s%s", exc, corpo, exc_info=True)
         # não cacheia falbacks de erro/timeout — deve retentar na próxima requisição
         return ValidationResult(confidence_score=0.0, low_evidence_alert=True, fallback=True)
 

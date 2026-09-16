@@ -191,6 +191,7 @@ organizado horizontalmente. Não há projeto para reorganizá-lo; a orientação
 | `medication_extractor.py` | Extrai fármacos mencionados na interação |
 | `orquestrador_shared.py` (cont.) | `decidir_rota` — **as regras de roteamento vivem aqui**, não nos dois serviços |
 | `response_metadata.py` | Serializa fontes/PubMed em `InteractionResponse.extra_metadata` |
+| `app/core/citacoes_fonte.py` | Forma das fontes (`{url, title}`) e leitura tolerante do formato legado |
 | `specialty_detector.py` | Detecta especialidade/tópico da interação |
 | `usage_service.py` | Limite semanal de custo por usuário |
 | `pricing.py` | Preços por modelo, cache TTL 1h |
@@ -214,7 +215,7 @@ e uma **decisão deliberada sobre o que fazer quando o outro lado não responde*
 | `ai_providers.py` | Anthropic / OpenAI / Gemini / Perplexity + `DlpEnforcingProvider` | cadeia de fallback entre modelos |
 | `curseduca_service.py` | API da Curseduca (validação de matrícula) | **fail-closed** — a dúvida é sobre direito de acesso |
 | `pharmadb_service.py` | PharmaDB (bula, interação, receita, genérico) | degrada com aviso |
-| `pubmed_service.py` / `pubmed_eutils.py` | PubMed (validação de citação, diretrizes) | degrada com aviso |
+| `pubmed_service.py` / `pubmed_eutils.py` | PubMed (validação de citação, diretrizes) | degrada com aviso — erro em ERROR+traceback, timeout em WARNING |
 | `news_pubmed.py` | PubMed (coleta do feed) | pula a rodada |
 
 ### 3.4 Autenticação e identidade profissional
@@ -388,7 +389,14 @@ Eventos SSE de `/stream`: `start` · `cache_hit` · `clarification` · `token` �
 | PATCH | /api/v1/folders/conversations/{id}/folder | folders.py:104 | 60/min | Move 1 conversa |
 | PATCH | /api/v1/folders/conversations/bulk | folders.py:134 | 30/min | Move até 100 conversas |
 
-`ConversationDetail` (`app/schemas/conversations.py:69`) carrega `messages[]` com `role`, `content`, `attachments[]`, `mode`, `citations[]` e `pubmed_validation` — é o que permite a conversa reabrir com as fontes intactas.
+`ConversationDetail` (`app/schemas/conversations.py`) carrega `messages[]` com `role`, `content`, `attachments[]`, `mode`, `citations[]` e `pubmed_validation` — é o que permite a conversa reabrir com as fontes intactas.
+
+**Formato de `citations[]`:** `{url, title}` por fonte. Os quatro provedores enviam o título junto
+com o resultado da busca, e a extração o descartava — a tela mostrava URL crua tendo o nome do
+artigo disponível. Conversas gravadas antes dessa mudança têm só a URL no JSONB e **não há
+backfill**: `read_response_metadata` converte na leitura, `title` vem `None`, e a interface mostra
+o domínio. Os dois formatos convivem na mesma conversa e a tolerância é permanente, não
+transitória. Ver `app/core/citacoes_fonte.py` e `frontend-app/src/lib/citacoes.ts`.
 
 ### 4.5 `/uploads`
 

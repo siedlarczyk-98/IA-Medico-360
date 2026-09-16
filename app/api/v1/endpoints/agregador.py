@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.citacoes_fonte import para_json
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -214,7 +215,10 @@ async def agregador_stream(
                         if token.done:
                             collected[mid]["tokens_in"] = token.tokens_in
                             collected[mid]["tokens_out"] = token.tokens_out
-                            collected[mid]["citations"] = token.citations or []
+                            # Serializado já aqui: `collected` vai para o JSONB
+                            # e o mesmo valor sai no SSE logo abaixo, onde um
+                            # dataclass estouraria no `json.dumps`.
+                            collected[mid]["citations"] = para_json(token.citations) or []
                             collected[mid]["search_cost_usd"] = token.search_cost_usd
                             elapsed = int((time.monotonic() - mstart) * 1000)
                             await shared_q.put({
@@ -224,7 +228,7 @@ async def agregador_stream(
                                     "response_time_ms": elapsed,
                                     "tokens_in": token.tokens_in,
                                     "tokens_out": token.tokens_out,
-                                    "citations": token.citations,
+                                    "citations": para_json(token.citations),
                                 }),
                             })
                 except Exception as e:

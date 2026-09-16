@@ -19,9 +19,17 @@ const ESTADO_ZERADO: EstadoMetronomo = {
   emVentilacao: false,
 }
 
+/**
+ * O metrônomo marca sempre o 30:2 — o toggle que permitia desligá-lo saiu da
+ * tela. O motor continua aceitando `modo302: false` (compressão contínua, que é
+ * o ritmo correto com via aérea avançada) e os testes cobrem os dois modos; o
+ * que se decidiu é que a escolha não cabe a quem está com as mãos no tórax.
+ * Para reexpor, basta voltar isto a um `useState` e devolver o checkbox.
+ */
+const MODO_302 = true
+
 export function MetronomoPage() {
   const [bpm, setBpm] = useState(BPM_PADRAO)
-  const [modo302, setModo302] = useState(true)
   const [rodando, setRodando] = useState(false)
   const [estado, setEstado] = useState<EstadoMetronomo>(ESTADO_ZERADO)
   const [pulso, setPulso] = useState<TipoBatida | null>(null)
@@ -54,18 +62,18 @@ export function MetronomoPage() {
    */
   const obterMetronomo = useCallback((): Metronomo => {
     if (metronomoRef.current === null) {
-      metronomoRef.current = new Metronomo({ bpm, modo302, aoBater, aoFecharCiclo })
+      metronomoRef.current = new Metronomo({ bpm, modo302: MODO_302, aoBater, aoFecharCiclo })
     }
     return metronomoRef.current
-  }, [bpm, modo302, aoBater, aoFecharCiclo])
+  }, [bpm, aoBater, aoFecharCiclo])
 
   // Os callbacks capturam estado; reinjeta-los a cada mudanca mantem o motor
   // falando com a versao atual sem recriar o metronomo (o que zeraria o compasso
   // no meio do atendimento). So atualiza se ja existir: criar aqui ligaria o
   // AudioContext antes de qualquer gesto do usuario, e o navegador o bloquearia.
   useEffect(() => {
-    metronomoRef.current?.atualizar({ bpm, modo302, aoBater, aoFecharCiclo })
-  }, [bpm, modo302, aoBater, aoFecharCiclo])
+    metronomoRef.current?.atualizar({ bpm, modo302: MODO_302, aoBater, aoFecharCiclo })
+  }, [bpm, aoBater, aoFecharCiclo])
 
   // Espelha o estado do motor na UI. 100ms e suficiente para o cronometro e bem
   // mais barato que redesenhar a cada batida.
@@ -178,16 +186,6 @@ export function MetronomoPage() {
         <p className="dica">
           A AHA recomenda de {BPM_MINIMO} a {BPM_MAXIMO} por minuto para adultos.
         </p>
-      </div>
-
-      <div className="campo campo--linha">
-        <label htmlFor="modo302">Marcar ventilações (30:2)</label>
-        <input
-          id="modo302"
-          type="checkbox"
-          checked={modo302}
-          onChange={(e) => setModo302(e.target.checked)}
-        />
       </div>
 
       <div className="painel">

@@ -19,6 +19,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.core.citacoes_fonte import Citacao, para_json
 from app.core.prompts import (
     DISCLAIMER_RESPOSTA,
     build_orquestrador_prompt,
@@ -313,7 +314,7 @@ class OrquestradorStreamService:
                 full_text = ""
                 tokens_in: int | None = None
                 tokens_out: int | None = None
-                perplexity_citations: list[str] | None = None
+                perplexity_citations: list[Citacao] | None = None
                 # Consumo de ferramentas integradas (Data Ocean), que só chega
                 # no token final do stream.
                 tool_usage: dict | None = None
@@ -541,7 +542,7 @@ class OrquestradorStreamService:
                         "disclaimer": DISCLAIMER_RESPOSTA,
                         # Sem esta chave, quem recebesse a resposta pelo cache
                         # a veria sem fontes — a original tem, a cacheada não.
-                        "citations": perplexity_citations,
+                        "citations": para_json(perplexity_citations),
                     }
                     await store_response(
                         db, mode, _cache_normalized, _cache_embedding, done_payload,
@@ -578,7 +579,7 @@ class OrquestradorStreamService:
                     ],
                     "total_response_time_ms": elapsed_ms,
                     "disclaimer": DISCLAIMER_RESPOSTA,
-                    "citations": perplexity_citations,
+                    "citations": para_json(perplexity_citations),
                 })
 
             except Exception as e:

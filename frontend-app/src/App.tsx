@@ -106,10 +106,8 @@ function MainApp() {
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [usageTick, setUsageTick] = useState(0);
   const pendingFolderIdRef = useRef<string | undefined>(undefined);
-  const pendingFolderNameRef = useRef<string | undefined>(undefined);
-  // O anexo em edição não é mais espelhado em estado do App: ele só servia para
-  // as checagens de visão do Agregador. O InputBar já entrega o anexo direto ao
-  // `sendMessage`, que é quem precisa dele.
+  // Pasta onde uma conversa NOVA vai nascer. Só rótulo — o id que vai no
+  // payload é o `pendingFolderIdRef` acima.
   const [pendingFolderName, setPendingFolderName] = useState<string | undefined>();
   // Pasta da conversa ABERTA (diferente de `pendingFolderName`, que é a pasta
   // onde uma conversa nova vai nascer). Alimenta o aviso de contexto cruzado.
@@ -260,6 +258,7 @@ function MainApp() {
                 mode: chipMode,
                 ...(event.citations && event.citations.length > 0 ? { citations: event.citations } : {}),
                 ...(pubmed ? { pubmed_validation: pubmed } : {}),
+                is_fallback: event.is_fallback,
               };
               return next;
             });
@@ -300,6 +299,9 @@ function MainApp() {
   }, [cancelFlush, scheduleFlush]);
 
 
+  // O anexo em edição não é espelhado em estado do App: ele só servia para as
+  // checagens de visão do Agregador. O InputBar entrega o anexo direto aqui,
+  // que é quem precisa dele.
   const sendMessage = useCallback((text: string, effort: Effort = 'detalhado', attachments?: Attachment[]) => {
     runOrquestrador({
       prompt: text, conversation_id: activeConvId, effort, mode: selectedMode,
@@ -333,7 +335,6 @@ function MainApp() {
     setActiveFolderName(folderName);
     setSelectedMode('QUICK_SEARCH');
     pendingFolderIdRef.current = folderId;
-    pendingFolderNameRef.current = folderName;
     setPendingFolderName(folderName);
   }, []);
 

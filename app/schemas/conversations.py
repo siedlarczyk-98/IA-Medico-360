@@ -58,6 +58,12 @@ class AttachmentOut(BaseModel):
     file_type: str  # "pdf" | "docx" | "xlsx" | "image"
 
 
+class CitacaoOut(BaseModel):
+    """Uma fonte citada. `title` é `None` em conversas anteriores à mudança."""
+    url: str
+    title: str | None = None
+
+
 class ConversationMessage(BaseModel):
     role: str        # "user" | "assistant"
     content: str
@@ -68,8 +74,18 @@ class ConversationMessage(BaseModel):
     # Referências da resposta. Vêm de InteractionResponse.extra_metadata e
     # chegam vazias em conversas anteriores à mudança que passou a gravá-las
     # (não há backfill) — a interface trata ausência como "sem fontes".
-    citations: list[str] = []
+    #
+    # `{"url", "title"}` por fonte. Conversas gravadas antes de o título passar
+    # a ser guardado têm só a URL no JSONB e são convertidas na leitura, por
+    # `read_response_metadata` — `title` vem `None` e a interface mostra o
+    # domínio. A conversão é permanente: não há backfill do título.
+    citations: list[CitacaoOut] = []
     pubmed_validation: PubmedValidationOut | None = None
+    # `True` quando o modelo do modo falhou e a resposta veio de um fallback —
+    # ou, nos modos sem fallback (DATA_OCEAN), quando é a mensagem genérica de
+    # erro. Sem isto, ao reabrir a conversa o médico não distingue uma consulta
+    # ao DATASUS que falhou de uma que deu certo: as duas são só texto.
+    is_fallback: bool = False
 
 
 class ConversationDetail(BaseModel):

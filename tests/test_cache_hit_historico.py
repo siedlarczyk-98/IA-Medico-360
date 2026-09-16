@@ -35,7 +35,7 @@ async def test_metadata_do_cache_preserva_citacoes():
     meta = build_metadata_from_cached(PAYLOAD_CACHEADO)
     citations, pubmed = read_response_metadata(meta)
 
-    assert citations == ["https://pubmed.gov/777"]
+    assert citations == [{"url": "https://pubmed.gov/777", "title": None}]
     assert pubmed["cited_verified"][0]["pmid"] == "5"
 
 

@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from app.core.citacoes_fonte import Citacao, criar_citacao
 from app.core.config import get_settings
 from app.core.http_client import get_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
@@ -33,6 +34,35 @@ WEB_SEARCH_COST_USD: dict[str, float] = {
 }
 
 
+def _citacoes_perplexity(data: dict) -> list[Citacao] | None:
+    """
+    Fontes de uma resposta da Perplexity.
+
+    A API expõe as mesmas fontes de duas formas: `search_results`, com
+    `{title, url, date}`, e o campo legado `citations`, um array só de URLs.
+    Preferimos o primeiro — é o único que tem título — e caímos no segundo
+    quando ele não vem, o que mantém o comportamento antigo intacto para
+    respostas (ou versões da API) que só trazem o legado.
+    """
+    resultados = data.get("search_results")
+    if isinstance(resultados, list) and resultados:
+        achadas = [
+            cit for r in resultados
+            if isinstance(r, dict)
+            if (cit := criar_citacao(r.get("url"), r.get("title"))) is not None
+        ]
+        if achadas:
+            return achadas
+
+    legado = data.get("citations")
+    if isinstance(legado, list) and legado:
+        return [
+            cit for u in legado
+            if (cit := criar_citacao(u if isinstance(u, str) else None)) is not None
+        ] or None
+    return None
+
+
 @dataclass
 class ProviderResponse:
     """Resposta padronizada de qualquer provider."""
@@ -41,7 +71,11 @@ class ProviderResponse:
     tokens_out: int | None = None
     model_id: str = ""
     provider: str = ""
-    citations: list[str] | None = None
+    # Fontes citadas pela busca web. `Citacao` carrega URL E título — os quatro
+    # provedores enviam o título junto com o resultado, e por muito tempo a
+    # extração descartava, deixando a tela mostrar URL crua. Ver
+    # `app/core/citacoes_fonte.py`.
+    citations: list[Citacao] | None = None
     search_cost_usd: float = 0.0
     # Consumo de ferramentas integradas, quando o provider as executa do lado
     # dele (hoje, só a Maritaca). `search_cost_usd` acima não serve: ele é um
@@ -62,7 +96,7 @@ class StreamToken:
     done: bool = False
     tokens_in: int | None = None
     tokens_out: int | None = None
-    citations: list[str] | None = None
+    citations: list[Citacao] | None = None
     search_cost_usd: float = 0.0
     # Ver `ProviderResponse.tool_usage`. Só vem no token final (`done=True`).
     tool_usage: dict | None = None
@@ -236,13 +270,15 @@ class AnthropicProvider(BaseProvider):
             text = "".join(
                 block["text"] for block in data["content"] if block["type"] == "text"
             )
-            citations: list[str] | None = None
+            citations: list[Citacao] | None = None
             if web_search:
+                # O `web_search_result` traz `title` e `page_age` além da URL.
                 citations = [
-                    r.get("url") for block in data["content"]
+                    c for block in data["content"]
                     if block.get("type") == "tool_result"
                     for r in (block.get("content") or [])
-                    if r.get("type") == "web_search_result" and r.get("url")
+                    if r.get("type") == "web_search_result"
+                    if (c := criar_citacao(r.get("url"), r.get("title"))) is not None
                 ] or None
             usage = data.get("usage", {})
             result = ProviderResponse(
@@ -291,7 +327,7 @@ class AnthropicProvider(BaseProvider):
                 timeout=timeout,
             ) as response:
                 response.raise_for_status()
-                citations: list[str] = []
+                citations: list[Citacao] = []
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -309,9 +345,9 @@ class AnthropicProvider(BaseProvider):
                             full_text.append(text)
                             yield StreamToken(delta=text)
                         elif web_search and delta.get("type") == "web_search_result_delta":
-                            url = delta.get("url")
-                            if url:
-                                citations.append(url)
+                            citacao = criar_citacao(delta.get("url"), delta.get("title"))
+                            if citacao is not None:
+                                citations.append(citacao)
                     elif event_type == "message_delta":
                         usage = event.get("usage", {})
                         token = StreamToken(
@@ -407,15 +443,17 @@ class OpenAIProvider(BaseProvider):
                     if c.get("type") == "output_text" and "text" in c
                 ) or data.get("output_text", "")
                 # extrai citations de annotations
-                citations: list[str] | None = None
+                citations: list[Citacao] | None = None
+                # A annotation `url_citation` traz `title` além de `url`.
                 raw_citations = [
-                    ann.get("url")
+                    cit
                     for item in data.get("output", [])
                     if item.get("type") == "message"
                     for c in item.get("content", [])
                     if c.get("type") == "output_text"
                     for ann in c.get("annotations", [])
-                    if ann.get("type") == "url_citation" and ann.get("url")
+                    if ann.get("type") == "url_citation"
+                    if (cit := criar_citacao(ann.get("url"), ann.get("title"))) is not None
                 ]
                 if raw_citations:
                     citations = raw_citations
@@ -491,7 +529,7 @@ class OpenAIProvider(BaseProvider):
                     response.raise_for_status()
                     tokens_in: int | None = None
                     tokens_out: int | None = None
-                    citations: list[str] = []
+                    citations: list[Citacao] = []
                     async for line in response.aiter_lines():
                         if not line.startswith("data: "):
                             continue
@@ -514,8 +552,11 @@ class OpenAIProvider(BaseProvider):
                             for out_item in resp_data.get("output", []):
                                 for c in out_item.get("content", []):
                                     for ann in c.get("annotations", []):
-                                        if ann.get("type") == "url_citation" and ann.get("url"):
-                                            citations.append(ann["url"])
+                                        if ann.get("type") != "url_citation":
+                                            continue
+                                        cit = criar_citacao(ann.get("url"), ann.get("title"))
+                                        if cit is not None:
+                                            citations.append(cit)
                 token = StreamToken(delta="", done=True, tokens_in=tokens_in, tokens_out=tokens_out, citations=citations or None, search_cost_usd=WEB_SEARCH_COST_USD["openai"])
                 if span:
                     _set_llm_output(span, "".join(full_text), token.tokens_in, token.tokens_out)
@@ -631,13 +672,19 @@ class GeminiProvider(BaseProvider):
             data = resp.json()
             candidate = data["candidates"][0]
             text = candidate["content"]["parts"][0]["text"]
-            citations: list[str] | None = None
+            citations: list[Citacao] | None = None
             if web_search:
                 chunks = (
                     data.get("groundingMetadata", {}).get("groundingChunks", [])
                     or candidate.get("groundingMetadata", {}).get("groundingChunks", [])
                 )
-                raw_cit = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
+                # `web` tem `uri` e `title`.
+                raw_cit = [
+                    cit for c in chunks
+                    if (cit := criar_citacao(
+                        c.get("web", {}).get("uri"), c.get("web", {}).get("title")
+                    )) is not None
+                ]
                 citations = raw_cit or None
             usage = data.get("usageMetadata", {})
             result = ProviderResponse(
@@ -672,7 +719,7 @@ class GeminiProvider(BaseProvider):
                 "POST", url, json=payload, headers={"x-goog-api-key": settings.google_ai_api_key}, timeout=timeout
             ) as response:
                 response.raise_for_status()
-                citations: list[str] = []
+                citations: list[Citacao] = []
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -691,7 +738,13 @@ class GeminiProvider(BaseProvider):
                                     event.get("groundingMetadata", {}).get("groundingChunks", [])
                                     or candidates[0].get("groundingMetadata", {}).get("groundingChunks", [])
                                 )
-                                citations = [c.get("web", {}).get("uri") for c in chunks if c.get("web", {}).get("uri")]
+                                citations = [
+                                    cit for c in chunks
+                                    if (cit := criar_citacao(
+                                        c.get("web", {}).get("uri"),
+                                        c.get("web", {}).get("title"),
+                                    )) is not None
+                                ]
                             usage = event.get("usageMetadata", {})
                             token = StreamToken(
                                 delta="", done=True,
@@ -776,7 +829,7 @@ class PerplexityProvider(BaseProvider):
             data = resp.json()
             choice = data["choices"][0]
             usage = data.get("usage", {})
-            citations = data.get("citations") or None
+            citations = _citacoes_perplexity(data)
             result = ProviderResponse(
                 text=choice["message"]["content"],
                 tokens_in=usage.get("prompt_tokens"),
@@ -860,8 +913,9 @@ class PerplexityProvider(BaseProvider):
 
                     # As citações chegam em algum evento do meio, não no último.
                     # Sobrescrever a cada ocorrência mantém a lista mais completa.
-                    if event.get("citations"):
-                        citations = event["citations"]
+                    achadas = _citacoes_perplexity(event)
+                    if achadas:
+                        citations = achadas
 
                     choices = event.get("choices", [])
                     if choices:

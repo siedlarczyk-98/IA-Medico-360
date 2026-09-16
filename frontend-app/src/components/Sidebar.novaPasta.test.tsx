@@ -35,10 +35,12 @@ vi.mock('../api/conversations', () => ({
 }));
 
 const listFolders = vi.fn(async () => [] as unknown[]);
+const createFolder = vi.fn();
 
 vi.mock('../api/folders', () => ({
   listFolders: (...args: unknown[]) => listFolders(...(args as [])),
-  createFolder: vi.fn(), renameFolder: vi.fn(), updateFolder: vi.fn(), deleteFolder: vi.fn(),
+  createFolder: (...args: unknown[]) => createFolder(...(args as [])),
+  renameFolder: vi.fn(), updateFolder: vi.fn(), deleteFolder: vi.fn(),
   moveConversation: vi.fn(), bulkMoveConversations: vi.fn(),
   MAX_CHARS_EVOLUCAO: 8000,
 }));
@@ -56,18 +58,27 @@ const PASTA = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-function renderSidebarAberta() {
+function renderSidebarAberta(onNew: () => void = vi.fn()) {
   Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true });
   // No desktop o painel só fica visível se estiver FIXADO (ou sob hover); o
   // prop `open` governa apenas o mobile.
   localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
   return renderComProvedores(
-    <Sidebar onNew={vi.fn()} onSelect={vi.fn()} open onToggle={vi.fn()} />,
+    <Sidebar onNew={onNew} onSelect={vi.fn()} open onToggle={vi.fn()} />,
   );
+}
+
+/** Preenche o nome no modal e confirma. */
+async function criarPasta(user: ReturnType<typeof userEvent.setup>, nome: string) {
+  await user.click(await screen.findByRole('button', { name: /nova pasta/i }));
+  const modal = screen.getByRole('dialog', { name: /nova pasta/i });
+  await user.type(within(modal).getByRole('textbox', { name: /nome/i }), nome);
+  await user.click(within(modal).getByRole('button', { name: /crie|criar|salvar/i }));
 }
 
 beforeEach(() => {
   listFolders.mockResolvedValue([]);
+  createFolder.mockResolvedValue(PASTA);
 });
 
 describe('Botão de nova pasta', () => {
@@ -104,5 +115,56 @@ describe('Botão de nova pasta', () => {
 
     const modal = screen.getByRole('dialog', { name: /nova pasta/i });
     expect(within(modal).getByText('Esta pasta é sobre um paciente?')).toBeInTheDocument();
+  });
+});
+
+
+describe('Criar pasta leva para dentro dela', () => {
+  it('aponta a próxima conversa para a pasta recém-criada', async () => {
+    // O comportamento que isto trava: antes, a `Folder` devolvida pelo POST era
+    // descartada — a mutation só invalidava a lista. Quem criava "Paciente
+    // Jorge" e digitava em seguida via a conversa nascer na RAIZ.
+    //
+    // Não é só arrumação: a pasta injeta a evolução do paciente em toda
+    // mensagem, então nascer fora dela é perder a evolução sem sinal na tela.
+    const user = userEvent.setup();
+    const onNew = vi.fn();
+    renderSidebarAberta(onNew);
+
+    await criarPasta(user, 'Paciente Jorge');
+
+    await vi.waitFor(() => {
+      expect(onNew).toHaveBeenCalledWith(PASTA.id, PASTA.name);
+    });
+  });
+
+  it('usa o id REAL da resposta, nunca o otimista', async () => {
+    // O update otimista insere um id `optimistic-<timestamp>`, que não é UUID:
+    // mandá-lo como `folder_id` faria a API recusar o envio. Só o id que volta
+    // do POST serve.
+    const user = userEvent.setup();
+    const onNew = vi.fn();
+    renderSidebarAberta(onNew);
+
+    await criarPasta(user, 'Paciente Jorge');
+
+    await vi.waitFor(() => expect(onNew).toHaveBeenCalled());
+    const [idUsado] = onNew.mock.calls[0];
+    expect(idUsado).toBe('f1');
+    expect(String(idUsado)).not.toMatch(/^optimistic-/);
+  });
+
+  it('não entra em pasta nenhuma se a criação falhar', async () => {
+    // Sem isto, um POST que falha ainda apontaria a conversa para uma pasta que
+    // não existe — e o envio seguinte quebraria no backend.
+    const user = userEvent.setup();
+    const onNew = vi.fn();
+    createFolder.mockRejectedValue(new Error('500'));
+    renderSidebarAberta(onNew);
+
+    await criarPasta(user, 'Paciente Jorge');
+
+    await vi.waitFor(() => expect(createFolder).toHaveBeenCalled());
+    expect(onNew).not.toHaveBeenCalled();
   });
 });

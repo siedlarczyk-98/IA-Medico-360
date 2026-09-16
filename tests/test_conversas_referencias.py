@@ -54,9 +54,12 @@ async def test_citacoes_voltam_ao_reabrir_a_conversa(as_user, db, user, conversa
     assert resp.status_code == 200
 
     assistente = [m for m in resp.json()["messages"] if m["role"] == "assistant"]
+    # Gravado no formato LEGADO (só a URL) e convertido na leitura: `title` vem
+    # `None` e a interface mostra o domínio. Sem backfill, este é o estado
+    # permanente de toda conversa anterior à mudança.
     assert assistente[0]["citations"] == [
-        "https://pubmed.gov/123",
-        "https://diretrizes.org/x",
+        {"url": "https://pubmed.gov/123", "title": None},
+        {"url": "https://diretrizes.org/x", "title": None},
     ]
 
 
@@ -115,7 +118,7 @@ async def test_conversa_do_agregador_tambem_devolve_citacoes(as_user, db, user, 
 
     resp = await as_user.get(f"/api/v1/conversations/{conv.id}")
     assistente = [m for m in resp.json()["messages"] if m["role"] == "assistant"][0]
-    assert assistente["citations"] == ["https://a.com"]
+    assert assistente["citations"] == [{"url": "https://a.com", "title": None}]
 
 
 async def test_referencias_de_outro_usuario_seguem_inacessiveis(
@@ -131,3 +134,23 @@ async def test_referencias_de_outro_usuario_seguem_inacessiveis(
     resp = await as_user.get(f"/api/v1/conversations/{conv.id}")
     assert resp.status_code == 404
     assert "segredo" not in resp.text
+
+
+async def test_conversa_nova_devolve_o_titulo_da_fonte(as_user, db, user, conversation_factory):
+    """
+    O caminho que motivou a mudança: com título gravado, a tela mostra o nome do
+    artigo em vez da URL. Os provedores sempre mandaram esse título — a extração
+    é que o descartava.
+    """
+    conv = await conversation_factory(user)
+    await _interacao_com_resposta(db, conv, user, extra_metadata={
+        "citations": [
+            {"url": "https://pubmed.gov/42661420", "title": "2026 ESC Guidelines"},
+        ],
+    })
+
+    resp = await as_user.get(f"/api/v1/conversations/{conv.id}")
+    assistente = [m for m in resp.json()["messages"] if m["role"] == "assistant"][0]
+    assert assistente["citations"] == [
+        {"url": "https://pubmed.gov/42661420", "title": "2026 ESC Guidelines"},
+    ]

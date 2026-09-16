@@ -40,6 +40,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const usage = useUserUsage(usageTick);
   const queryClient = useQueryClient();
 
+  /**
+   * Pasta criada agora, para nascer aberta na lista. É só o estado INICIAL do
+   * `FolderRow`: depois disso, abrir e fechar é do usuário.
+   *
+   * Declarado aqui, acima das mutations, porque `createFolderMutation` o usa.
+   */
+  const [pastaRecemCriadaId, setPastaRecemCriadaId] = useState<string | null>(null);
+
   const { data: todasConversas = [] } = useQuery<ConversationSummary[]>({
     queryKey: ['conversations'],
     queryFn: listConversations,
@@ -79,6 +87,22 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
     },
     onError: (_err, _name, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(['folders'], ctx.previous);
+    },
+    /**
+     * Criar uma pasta é um ato de intenção: quem acabou de criar "Paciente
+     * Jorge" quer a próxima conversa lá dentro, não na raiz. Antes, a `Folder`
+     * devolvida pelo POST era descartada e a conversa seguinte nascia fora —
+     * silenciosamente, e com consequência clínica: a pasta injeta a evolução do
+     * paciente em toda mensagem, então nascer fora dela é perder a evolução sem
+     * nenhum sinal na tela.
+     *
+     * Aqui e não no `onMutate`: o id otimista (`optimistic-<timestamp>`) não é
+     * um UUID, e mandá-lo como `folder_id` faria a API recusar o envio. Só o id
+     * real serve, e ele só existe depois da resposta.
+     */
+    onSuccess: (pasta) => {
+      setPastaRecemCriadaId(pasta.id);
+      onNew(pasta.id, pasta.name);
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['folders'] }),
   });
@@ -550,6 +574,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 onDelete={handleDeleteFolder}
                 onEdit={setFolderModal}
                 onNewInFolder={handleNewInFolder}
+                defaultOpen={folder.id === pastaRecemCriadaId}
                 selectedConvIds={selectedConvIds}
                 selectionMode={selectionMode}
                 onToggleSelect={toggleSelect}

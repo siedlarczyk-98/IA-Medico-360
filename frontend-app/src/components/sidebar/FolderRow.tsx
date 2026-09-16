@@ -16,6 +16,11 @@ interface FolderRowProps {
   /** Abre o modal da pasta para editar nome e evolução do paciente. */
   onEdit: (folder: Folder) => void;
   onNewInFolder: (folderId: string, folderName: string) => void;
+  /**
+   * Abre a pasta já no primeiro render. Serve à pasta recém-criada: quem acabou
+   * de criar uma pasta quer vê-la, não procurá-la fechada na lista.
+   */
+  defaultOpen?: boolean;
   selectedConvIds?: Set<string>;
   selectionMode?: boolean;
   onToggleSelect?: (convId: string) => void;
@@ -23,8 +28,10 @@ interface FolderRowProps {
   onDropConv?: (folderId: string | null) => void;
 }
 
-function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onEdit, onNewInFolder, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
-  const [open, setOpen] = useState(false);
+function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onEdit, onNewInFolder, defaultOpen = false, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
+  // Só o valor INICIAL: depois disso quem manda é o clique do usuário. Se fosse
+  // efeito sincronizando com a prop, reabriria a pasta que ele acabou de fechar.
+  const [open, setOpen] = useState(defaultOpen);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
   const [menuOpen, setMenuOpen] = useState(false);

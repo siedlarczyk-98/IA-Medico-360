@@ -46,7 +46,15 @@ def test_sem_nada_devolve_none():
 
 def test_guarda_citacoes():
     meta = build_response_metadata(citations=["https://a.com", "https://b.com"])
-    assert meta == {"citations": ["https://a.com", "https://b.com"]}
+    # `{"url", "title"}` por fonte. A URL crua na ENTRADA continua aceita (é o
+    # que provider antigo e payload cacheado mandam) e vira título `None`, que
+    # a interface mostra como domínio.
+    assert meta == {
+        "citations": [
+            {"url": "https://a.com", "title": None},
+            {"url": "https://b.com", "title": None},
+        ]
+    }
 
 
 def test_guarda_pubmed_nas_duas_listas():
@@ -83,7 +91,7 @@ def test_pubmed_vazio_nao_cria_bloco():
     # Bloco "Referências verificadas" vazio na tela é pior que bloco nenhum.
     meta = build_response_metadata(pubmed=PubmedFake(), citations=["https://a.com"])
     assert "pubmed_validation" not in meta
-    assert meta["citations"] == ["https://a.com"]
+    assert meta["citations"] == [{"url": "https://a.com", "title": None}]
 
 
 def test_snippet_vazio_vira_none():
@@ -99,7 +107,7 @@ def test_citacoes_sao_copiadas_e_nao_referenciadas():
     original = ["https://a.com"]
     meta = build_response_metadata(citations=original)
     original.append("https://intruso.com")
-    assert meta["citations"] == ["https://a.com"]
+    assert meta["citations"] == [{"url": "https://a.com", "title": None}]
 
 
 # ── read_response_metadata ───────────────────────────────────────────────────
@@ -110,7 +118,7 @@ def test_le_de_volta_o_que_gravou():
         citations=["https://a.com"],
     )
     citations, pubmed = read_response_metadata(meta)
-    assert citations == ["https://a.com"]
+    assert citations == [{"url": "https://a.com", "title": None}]
     assert pubmed["cited_verified"][0]["pmid"] == "12345"
 
 
@@ -123,7 +131,7 @@ def test_conversa_antiga_sem_metadata_nao_quebra():
 def test_metadata_do_agregador_so_com_citations():
     # O agregador já gravava {"citations": [...]} — precisa continuar legível.
     citations, pubmed = read_response_metadata({"citations": ["https://a.com"]})
-    assert citations == ["https://a.com"]
+    assert citations == [{"url": "https://a.com", "title": None}]
     assert pubmed is None
 
 
@@ -132,3 +140,43 @@ def test_metadata_corrompido_nao_derruba_a_conversa():
     assert read_response_metadata("texto solto") == ([], None)
     assert read_response_metadata({"citations": "nao-e-lista"}) == ([], None)
     assert read_response_metadata({"pubmed_validation": []}) == ([], None)
+
+
+# ── Compatibilidade permanente dos dois formatos ─────────────────────────────
+
+def test_le_o_formato_antigo_e_o_novo_na_mesma_lista():
+    """
+    Conversa gravada antes da mudança tem `["url"]`; a partir da mudança,
+    `[{"url","title"}]`. Os dois convivem na mesma conversa quando uma antiga
+    recebe mensagem nova, e não há backfill — então a leitura precisa aceitar a
+    mistura para sempre, não só durante uma transição.
+    """
+    citations, _ = read_response_metadata(
+        {
+            "citations": [
+                "https://antigo.com",
+                {"url": "https://novo.com", "title": "Um artigo"},
+            ]
+        }
+    )
+    assert citations == [
+        {"url": "https://antigo.com", "title": None},
+        {"url": "https://novo.com", "title": "Um artigo"},
+    ]
+
+
+def test_titulo_vazio_vira_ausente():
+    """
+    Provider às vezes manda `title: ""`. Guardar a string vazia faria a tela
+    renderizar um link sem texto — pior que mostrar o domínio.
+    """
+    meta = build_response_metadata(citations=[{"url": "https://a.com", "title": "   "}])
+    assert meta["citations"] == [{"url": "https://a.com", "title": None}]
+
+
+def test_fonte_sem_url_e_descartada():
+    """Sem endereço não há fonte; um item sem link só ocuparia a lista."""
+    citations, _ = read_response_metadata(
+        {"citations": [{"title": "orfa"}, "", {"url": "https://ok.com"}]}
+    )
+    assert citations == [{"url": "https://ok.com", "title": None}]
