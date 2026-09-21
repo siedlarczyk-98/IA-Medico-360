@@ -20,6 +20,7 @@ from xml.etree import ElementTree
 
 from app.core.http_client import get_client
 from app.services.integracoes.pubmed_eutils import EUTILS_BASE, eutils_params
+from app.services.integracoes.pubmed_service import vez_no_pubmed
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ async def buscar_artigos_por_issn(
         sort="pub+date",
     )
 
+    await vez_no_pubmed()  # mesma cota da NCBI, mesmo IP: uma fila só
     resp = await client.get(f"{EUTILS_BASE}/esearch.fcgi", params=search_params, timeout=timeout)
     resp.raise_for_status()
     pmids = resp.json().get("esearchresult", {}).get("idlist", [])
@@ -95,6 +97,7 @@ async def buscar_artigos_por_issn(
         retmode="xml",
         rettype="abstract",
     )
+    await vez_no_pubmed()  # mesma cota da NCBI, mesmo IP: uma fila só
     fetch_resp = await client.get(f"{EUTILS_BASE}/efetch.fcgi", params=fetch_params, timeout=timeout)
     fetch_resp.raise_for_status()
 

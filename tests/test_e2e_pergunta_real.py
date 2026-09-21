@@ -42,7 +42,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.models import Interaction, InteractionResponse
-from tests.conftest import auth_headers
+from tests.conftest import auth_headers, fabrica_sobre
 
 # Dois portões, e os dois são necessários:
 # `rede_real` desarma o bloqueio de rede; a variável de ambiente impede que uma
@@ -298,7 +298,6 @@ async def test_modo_clinico_streama_no_sonnet_5(
     em `ForeignKeyViolationError` antes de chegar à Anthropic. Mesmo padrão de
     `tests/test_orquestrador_stream.py::servico`.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     # Mira no MÓDULO DO ENDPOINT, não no do serviço: quem resolve o nome
     # `async_session_factory` é `app/api/v1/endpoints/orquestrador.py`, que o
@@ -310,7 +309,7 @@ async def test_modo_clinico_streama_no_sonnet_5(
     # `get_provider_by_type`.)
     monkeypatch.setattr(
         "app.api.v1.endpoints.orquestrador.async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
     await model_pricing_factory(

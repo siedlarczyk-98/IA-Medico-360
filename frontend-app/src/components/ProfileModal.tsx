@@ -63,7 +63,6 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
     try {
       const res = await updateProfile({
         name: name.trim(),
-        email: email.trim(),
         ...(especialidadeEditavel && especialidade ? { specialty_slug: especialidade } : {}),
       });
       setToken(res.access_token);
@@ -130,13 +129,17 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
                 />
               </Field>
               <Field label="Email">
-                <input
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  type="email"
-                  style={inputStyle}
-                  placeholder="seu@email.com"
-                />
+                {/* Somente leitura (2026-09-21). A troca não pedia prova de posse
+                    do endereço novo: dava para pôr o e-mail de um colega, e ele
+                    caía nesta conta ao entrar pela área de membros. Para quem
+                    entra por lá o e-mail já vem sincronizado; para quem entra por
+                    código, ele é o login. Trocar é caminho de suporte. */}
+                <div
+                  data-testid="perfil-email"
+                  style={{ ...inputStyle, background: 'var(--fill)', color: 'var(--pen)' }}
+                >
+                  {email}
+                </div>
               </Field>
               {crmLabel && (
                 <Field label="Registro">
@@ -178,7 +181,7 @@ export function ProfileModal({ onClose, onSuccess }: Props) {
               {error && <p style={{ fontSize: 12, color: '#ef4444', margin: '8px 0 0' }}>{error}</p>}
               <button
                 onClick={handleSave}
-                disabled={saving || !name.trim() || !email.trim()}
+                disabled={saving || !name.trim()}
                 style={{
                   width: '100%', marginTop: 16,
                   background: 'var(--ink)', color: '#fff',

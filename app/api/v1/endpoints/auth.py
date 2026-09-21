@@ -3,10 +3,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, field_validator, model_validator
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import COOKIE_NAME, get_current_user
+from app.api.deps import (
+    COOKIE_NAME,
+    auth_time_da_sessao,
+    get_current_user,
+    get_current_user_opcional,
+)
 from app.core.alarme import alarmar
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -62,6 +66,50 @@ def _set_session_cookie(response: Response, token: str) -> None:
         samesite="none" if settings.is_production else "lax",
         domain=settings.cookie_domain or None,
         max_age=settings.jwt_access_token_expire_minutes * 60,
+    )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
+async def logout(
+    request: Request,
+    response: Response,
+    revogar: bool = True,
+    current_user: User | None = Depends(get_current_user_opcional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Encerra a sessão NO SERVIDOR.
+
+    O "Sair" dos apps só limpava o armazenamento local. O cookie de sessão é
+    `HttpOnly` — o JavaScript não consegue apagá-lo —, e o JWT seguia válido por
+    até uma hora: em estação compartilhada de hospital, o próximo usuário lia o
+    histórico do anterior.
+
+    Duas coisas acontecem, e as duas são necessárias. O cookie é apagado com as
+    MESMAS flags com que foi criado (o navegador ignora um `delete` com domínio
+    ou `SameSite` diferentes). E `token_version` sobe, o que invalida todo token
+    já emitido para o usuário — inclusive uma cópia guardada em outro lugar, e
+    inclusive as outras abas e aparelhos dele. É o preço de um JWT sem
+    identificador: revoga-se tudo ou nada.
+
+    Sem sessão válida ainda responde 204 e apaga o cookie: sair nunca falha.
+
+    `?revogar=false` apaga SÓ o cookie deste navegador. É para a entrada do embed
+    quando a Waid não confirma a identidade: a sessão que estava no navegador
+    pode ser de outra pessoa e não deve ser herdada, mas revogá-la derrubaria as
+    outras abas e aparelhos de quem, na maioria das vezes, é o mesmo médico.
+    """
+    if revogar and current_user is not None:
+        current_user.token_version = (current_user.token_version or 0) + 1
+        await db.commit()
+
+    settings = get_settings()
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="none" if settings.is_production else "lax",
+        domain=settings.cookie_domain or None,
     )
 
 
@@ -289,7 +337,32 @@ async def _entrar_por_token_waid(db: AsyncSession, token_waid: str) -> User:
 
     await _throttle_by_email("embed_token", identidade.uuid, limit=20, window_seconds=900)
 
-    user, _ = await auth_service.get_or_create_por_identidade_waid(db, identidade)
+    try:
+        user, _ = await auth_service.get_or_create_por_identidade_waid(db, identidade)
+    except auth_service.IdentidadeDivergente as exc:
+        # Auditoria na conta que FOI PROTEGIDA: é o dono dela que precisa saber
+        # que alguém chegou com o e-mail dele e outra identidade.
+        db.add(
+            AuditLog(
+                user_id=exc.user_id,
+                action="auth.identidade_divergente_recusada",
+                entity_type="user",
+                entity_id=exc.user_id,
+                metadata_={"email": exc.email, "waid_uuid_recebido": identidade.uuid},
+            )
+        )
+        await db.commit()
+        alarmar(
+            tag="embed_identidade_divergente",
+            mensagem="Embed recusou identidade: e-mail já vinculado a outro waid_uuid",
+            contexto={"user_id": str(exc.user_id)},
+        )
+        # 403 e não 401: no 401 o cliente pede outro token à Waid e tenta de
+        # novo — aqui o resultado seria o mesmo, em laço.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Não foi possível confirmar sua identidade. Fale com o suporte.",
+        ) from exc
 
     anterior = await auth_service.sincronizar_email_da_waid(db, user, identidade)
     if anterior:
@@ -405,7 +478,7 @@ async def complete_onboarding(
     await db.commit()
     await db.refresh(current_user)
     from app.services.auth_service import create_access_token
-    token = create_access_token(current_user)
+    token = create_access_token(current_user, auth_time=auth_time_da_sessao(request))
     return TokenResponse(
         access_token=token,
         onboarding_complete=current_user.onboarding_complete,
@@ -437,11 +510,17 @@ async def update_me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if body.email and body.email != current_user.email:
-        result = await db.execute(select(User).where(User.email == body.email))
-        if result.scalar_one_or_none():
-            raise HTTPException(status.HTTP_409_CONFLICT, "Email já está em uso")
-        current_user.email = body.email
+    # O E-MAIL NÃO SE TROCA POR AQUI (decisão de 2026-09-21). A troca não exigia
+    # prova de posse do endereço novo: um médico punha o e-mail de um colega, e
+    # quando o colega entrava pelo embed caía dentro da conta dele. Para quem
+    # entra pela Waid o e-mail já é sincronizado de lá
+    # (`sincronizar_email_da_waid`); para quem entra por código, ele É o login.
+    # Mandar o e-mail atual continua aceito, para não quebrar cliente antigo.
+    if body.email and body.email.strip().lower() != current_user.email.strip().lower():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "O e-mail não pode ser alterado por aqui. Fale com o suporte se precisar trocá-lo.",
+        )
     if body.name is not None:
         current_user.name = body.name
 
@@ -472,7 +551,7 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     from app.services.auth_service import create_access_token
-    token = create_access_token(current_user)
+    token = create_access_token(current_user, auth_time=auth_time_da_sessao(request))
     return TokenResponse(access_token=token, onboarding_complete=current_user.onboarding_complete)
 
 

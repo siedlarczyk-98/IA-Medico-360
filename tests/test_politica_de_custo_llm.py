@@ -47,7 +47,6 @@ POLITICA_DE_CUSTO: dict[tuple[str, str], str] = {
     # ── Gastam LLM com o médico na frente ────────────────────────────────
     ("POST", "/api/v1/orquestrador/query"): DESCONTA,
     ("POST", "/api/v1/orquestrador/stream"): DESCONTA,
-    ("POST", "/api/v1/agregador/query"): DESCONTA,
     ("POST", "/api/v1/agregador/stream"): DESCONTA,
     # Caminho de imagem chama o Haiku para descrever o anexo.
     ("POST", "/api/v1/uploads/extract"): DESCONTA,
@@ -64,7 +63,6 @@ POLITICA_DE_CUSTO: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/calculators/{slug}/favorite"): NAO_GASTA,
     ("DELETE", "/api/v1/folders/{folder_id}"): NAO_GASTA,
     ("DELETE", "/api/v1/news/me/keywords/{termo}"): NAO_GASTA,
-    ("GET", "/api/v1/agregador/history"): NAO_GASTA,
     ("GET", "/api/v1/agregador/models"): NAO_GASTA,
     ("GET", "/api/v1/auth/me"): NAO_GASTA,
     ("GET", "/api/v1/auth/me/consentimentos"): NAO_GASTA,
@@ -96,6 +94,7 @@ POLITICA_DE_CUSTO: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/embed/identidade"): NAO_GASTA,
     ("POST", "/api/v1/auth/embed/token"): NAO_GASTA,
     ("POST", "/api/v1/auth/invite/accept"): NAO_GASTA,
+    ("POST", "/api/v1/auth/logout"): NAO_GASTA,
     ("POST", "/api/v1/auth/invite/generate"): NAO_GASTA,
     ("POST", "/api/v1/auth/me/consentimentos/{tipo}/revogar"): NAO_GASTA,
     ("POST", "/api/v1/auth/onboarding"): NAO_GASTA,
@@ -206,10 +205,6 @@ ARQUIVOS_POR_ROTA: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/api/v1/orquestrador/stream"): (
         "api/v1/endpoints/orquestrador.py",
         "services/orquestrador_stream_service.py",
-    ),
-    ("POST", "/api/v1/agregador/query"): (
-        "api/v1/endpoints/agregador.py",
-        "services/agregador_service.py",
     ),
     ("POST", "/api/v1/agregador/stream"): (
         "api/v1/endpoints/agregador.py",

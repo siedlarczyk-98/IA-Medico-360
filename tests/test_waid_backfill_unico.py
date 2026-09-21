@@ -40,13 +40,19 @@ async def test_conta_com_uuid_divergente_nao_e_sobrescrita(db, user_factory):
     user.waid_uuid = UUID_ORIGINAL
     await db.flush()
 
-    achado, criado = await auth_service.get_or_create_por_identidade_waid(
-        db, _identidade(UUID_NOVO, "medico@empresa.com")
-    )
+    # INVERTIDO em 2026-09-21. Este teste exigia `achado.id == user.id`: a conta
+    # existente era DEVOLVIDA a quem chegava com outra identidade. O vínculo
+    # ficava intacto, e era só isso que se conferia — mas o desconhecido entrava
+    # na conta e lia o histórico clínico dela. Agora não há conta devolvida.
+    user_id = user.id
+    with pytest.raises(auth_service.IdentidadeDivergente) as recusa:
+        await auth_service.get_or_create_por_identidade_waid(
+            db, _identidade(UUID_NOVO, "medico@empresa.com")
+        )
 
-    assert criado is False
-    assert achado.id == user.id, "Deve reencontrar a conta existente pelo e-mail"
-    assert achado.waid_uuid == UUID_ORIGINAL, (
+    assert recusa.value.user_id == user_id
+    await db.refresh(user)
+    assert user.waid_uuid == UUID_ORIGINAL, (
         "A vinculação foi sobrescrita — o backfill tem de ser único"
     )
 
@@ -88,7 +94,8 @@ async def test_alternancia_entre_duas_identidades_nao_acontece(db, user_factory)
     """
     O sintoma descrito na análise, reproduzido: dois logins alternados com uuids
     diferentes no mesmo e-mail. Antes da guarda, `waid_uuid` trocava a cada
-    chamada. Agora o primeiro vínculo vence e permanece.
+    chamada. Agora o primeiro vínculo vence e permanece — e, desde 2026-09-21,
+    a identidade nova nem recebe a conta: é recusada toda vez.
     """
     await user_factory(email="alterna@empresa.com")
 
@@ -98,7 +105,15 @@ async def test_alternancia_entre_duas_identidades_nao_acontece(db, user_factory)
     assert primeiro.waid_uuid == UUID_ORIGINAL
 
     for _ in range(3):
-        achado, _ = await auth_service.get_or_create_por_identidade_waid(
-            db, _identidade(UUID_NOVO, "alterna@empresa.com")
-        )
-        assert achado.waid_uuid == UUID_ORIGINAL, "A vinculação alternou entre identidades"
+        with pytest.raises(auth_service.IdentidadeDivergente):
+            await auth_service.get_or_create_por_identidade_waid(
+                db, _identidade(UUID_NOVO, "alterna@empresa.com")
+            )
+        await db.refresh(primeiro)
+        assert primeiro.waid_uuid == UUID_ORIGINAL, "A vinculação alternou entre identidades"
+
+    # E o dono legítimo continua entrando normalmente.
+    de_novo, _ = await auth_service.get_or_create_por_identidade_waid(
+        db, _identidade(UUID_ORIGINAL, "alterna@empresa.com")
+    )
+    assert de_novo.id == primeiro.id

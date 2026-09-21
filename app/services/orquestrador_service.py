@@ -721,15 +721,21 @@ class OrquestradorService:
         # virava "PharmaDB indisponível" — a base no ar, o médico recebendo o
         # aviso de indisponibilidade, e nada no log apontando para a causa real.
         buscar = getattr(pharmadb, buscar_attr)
+        #
+        # `mensagem_nao_encontrado` fica DENTRO: ela consulta produto e histórico
+        # para enriquecer o texto, e a base pode cair entre uma chamada e outra.
+        # Só se afirma "não encontrado" quando todas as consultas responderam.
         try:
             resultado = await self._buscar_com_fallback(buscar, raw, normalized)
+            msg_nao_encontrado = None
+            if not resultado:
+                msg_nao_encontrado = await pharmadb.mensagem_nao_encontrado(raw or normalized, label)
         except Exception as e:
-            logger.warning("PharmaDB %s indisponível: %s", label, e)
+            logger.warning("PharmaDB %s indisponível: %s: %s", label, type(e).__name__, e)
             return await self._pharma_fallback(prompt)
 
         if not resultado:
-            msg = await pharmadb.mensagem_nao_encontrado(raw or normalized, label)
-            return {"text": msg, "model_id": "pharmadb", "is_fallback": False}
+            return {"text": msg_nao_encontrado, "model_id": "pharmadb", "is_fallback": False}
 
         # formatar_bula é async; formatar_receita/genericos são síncronos.
         formatado = getattr(pharmadb, formatar_attr)(resultado)

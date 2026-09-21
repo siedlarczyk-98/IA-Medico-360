@@ -154,7 +154,9 @@ async def test_revogacao_de_consentimento_nao_grava_de_origem_hostil(client, use
 
 
 @pytest.mark.parametrize(("metodo", "caminho"), ROTAS_SEM_BODY_PARAM)
-async def test_origem_do_app_continua_funcionando(client, user, admin, metodo, caminho):
+async def test_origem_do_app_continua_funcionando(
+    client, user, admin, metodo, caminho, monkeypatch
+):
     """
     Um 403 aqui significaria que a lista de origens confiáveis divergiu da que
     alimenta o CORS — exatamente o que `origens_confiaveis` existe para evitar.
@@ -162,10 +164,25 @@ async def test_origem_do_app_continua_funcionando(client, user, admin, metodo, c
     `/news/admin/pipeline` exige `role == "admin"` e responde 403 para quem não
     é — mesmo status da recusa por origem. Usar o usuário comum ali tornaria o
     teste ambíguo: ele passaria a "detectar" um 403 que nada tem a ver com CSRF.
+
+    O PIPELINE DE NOTÍCIAS É NEUTRALIZADO, e isto não é detalhe. A rota executa
+    coleta, tagging e redação de verdade — ou seja, sai para o PubMed com a
+    chave de API do `.env`. Como o handler embrulha tudo num `except Exception`
+    que vira 500, a violação da guarda de rede produzia um 500 que satisfazia o
+    `!= 403` deste teste: ele passava confirmando um erro interno em vez do
+    caminho bom. Era um dos 23 casos da varredura de 2026-09-18.
     """
     from app.core.config import get_settings
 
     quem = admin if caminho.endswith("/admin/pipeline") else user
+
+    if caminho.endswith("/admin/pipeline"):
+        async def _pipeline_falso(_db):
+            return {"coletados": 0, "redigidos": 0}
+
+        monkeypatch.setattr(
+            "app.services.news_agendado.rodar_pipeline", _pipeline_falso
+        )
 
     resp = await client.request(
         metodo,
@@ -174,6 +191,12 @@ async def test_origem_do_app_continua_funcionando(client, user, admin, metodo, c
     )
 
     assert resp.status_code != 403
+    if caminho.endswith("/admin/pipeline"):
+        assert resp.status_code == 200, (
+            f"O pipeline respondeu {resp.status_code}. Com a coleta neutralizada, "
+            "a rota tem de completar — um 500 aqui esconde erro real atrás do "
+            "`except Exception` do handler."
+        )
 
 
 async def test_leitura_cross_origin_nao_e_barrada(client, user):

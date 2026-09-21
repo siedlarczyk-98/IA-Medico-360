@@ -28,14 +28,42 @@ TTL_PUBMED = 2592000     # 30 dias
 _redis: redis.Redis | None = None
 
 
+# Um segundo é muito para o Redis (que responde em menos de 1 ms na mesma rede)
+# e pouco para o médico: é o máximo que uma requisição aceita perder com cache.
+REDIS_TIMEOUT_S = 1.0
+REDIS_MAX_CONEXOES = 50
+
+
+def novo_cliente_redis(url: str | None = None) -> redis.Redis:
+    """Cliente Redis com pool BLOQUEANTE e timeouts. O único jeito de criar um.
+
+    Eram dois pools de 20 conexões (este e um dentro do PharmaDB), sem timeout
+    nenhum, e os dois defeitos apareciam juntos sob carga:
+
+    - Pool comum CHEIO levanta `ConnectionError` na hora. Como toda falha de Redis
+      aqui é silenciosa, o erro virava cache miss — e cache miss na triagem é uma
+      chamada paga ao modelo. Carga alta = custo extra, sem aviso. O pool
+      bloqueante espera até `timeout` por uma conexão antes de desistir.
+    - Sem `socket_timeout`, um Redis travado (não caído: TRAVADO) prendia toda
+      requisição indefinidamente, porque o cache está no caminho de todas.
+
+    Continua falhando ABERTO: passado o timeout, quem chama trata como miss.
+    """
+    pool = redis.BlockingConnectionPool.from_url(
+        url or settings.redis_url,
+        decode_responses=True,
+        max_connections=REDIS_MAX_CONEXOES,
+        timeout=REDIS_TIMEOUT_S,
+        socket_timeout=REDIS_TIMEOUT_S,
+        socket_connect_timeout=REDIS_TIMEOUT_S,
+    )
+    return redis.Redis(connection_pool=pool)
+
+
 def _get_redis() -> redis.Redis:
     global _redis
     if _redis is None:
-        _redis = redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            max_connections=20,
-        )
+        _redis = novo_cliente_redis()
     return _redis
 
 

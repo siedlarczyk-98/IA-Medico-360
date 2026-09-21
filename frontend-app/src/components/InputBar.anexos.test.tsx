@@ -41,6 +41,53 @@ beforeEach(() => {
 const input = () => document.querySelector('input[type="file"]') as HTMLInputElement;
 
 describe('InputBar com vários anexos', () => {
+  // ── Anexo perdido (varredura de 2026-09-18, item 12) ─────────────────────
+  // A resposta clínica saía SEM o exame, e o médico não ficava sabendo.
+
+  it('Enter durante a extração NÃO envia a mensagem sem o exame', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    let concluir!: () => void;
+    extractFileMock.mockImplementation(
+      (f: File) => new Promise(resolve => {
+        concluir = () => resolve({ file_id: 'id-1', file_name: f.name, file_type: 'pdf' });
+      }),
+    );
+    render(<InputBar onSend={onSend} />);
+
+    await user.upload(input(), [arquivo('hemograma.pdf')]);
+    await screen.findByText(/processando/i);
+    await user.type(screen.getByRole('textbox'), 'interprete este exame{Enter}');
+
+    // Extração ainda em andamento: nada pode ter saído.
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /enviar/i })).toBeDisabled();
+
+    concluir();
+    await screen.findByTestId('anexo-chip');
+    await user.click(screen.getByRole('button', { name: /enviar/i }));
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][2]).toEqual([expect.objectContaining({ name: 'hemograma.pdf' })]);
+  });
+
+  it('um arquivo com erro não descarta os que já foram processados', async () => {
+    const user = userEvent.setup();
+    extractFileMock.mockImplementation(async (f: File) => {
+      if (f.name === 'corrompido.pdf') throw new Error('Não foi possível ler o arquivo.');
+      return { file_id: `id-${f.name}`, file_name: f.name, file_type: 'pdf' };
+    });
+    render(<InputBar onSend={vi.fn()} />);
+
+    await user.upload(input(), [arquivo('laudo.pdf'), arquivo('corrompido.pdf'), arquivo('ecg.pdf')]);
+
+    // Os dois bons ficam; o ruim é nomeado no erro.
+    expect(await screen.findAllByTestId('anexo-chip')).toHaveLength(2);
+    expect(screen.getByText('laudo.pdf')).toBeInTheDocument();
+    expect(screen.getByText('ecg.pdf')).toBeInTheDocument();
+    expect(screen.getByText(/corrompido\.pdf/)).toBeInTheDocument();
+  });
+
   it('aceita mais de um arquivo na mesma mensagem', async () => {
     const user = userEvent.setup();
     render(<InputBar onSend={vi.fn()} />);

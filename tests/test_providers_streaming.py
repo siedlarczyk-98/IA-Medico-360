@@ -90,7 +90,7 @@ def instalar_cliente(monkeypatch):
     def _instalar(linhas) -> ClienteSSE:
         cliente = ClienteSSE(linhas)
         monkeypatch.setattr(
-            "app.services.integracoes.ai_providers.get_client", lambda: cliente
+            "app.services.integracoes.ai_providers.get_stream_client", lambda: cliente
         )
         return cliente
 
@@ -403,10 +403,11 @@ async def test_erro_http_propaga_em_vez_de_virar_stream_vazio(instalar_cliente):
 
     import app.services.integracoes.ai_providers as mod
 
-    original = mod.get_client
-    mod.get_client = lambda: ClienteQueFalha()
+    # O stream usa o pool próprio (`get_stream_client`), separado das chamadas curtas.
+    original = mod.get_stream_client
+    mod.get_stream_client = lambda: ClienteQueFalha()
     try:
         with pytest.raises(RuntimeError):
             [t async for t in AnthropicProvider().stream("claude-sonnet-5", "p")]
     finally:
-        mod.get_client = original
+        mod.get_stream_client = original

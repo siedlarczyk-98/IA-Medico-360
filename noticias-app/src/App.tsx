@@ -17,7 +17,7 @@ import { buscarMeusTemas } from './api/news';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
 import { useIdentidadeWaid } from '@shared/embed/identidade';
 import { LoginOtp } from '@shared/embed/LoginOtp';
-import { clearToken, getToken, setToken } from './lib/auth';
+import { clearToken, descartarSessaoDesteNavegador, getToken, isTokenExpired, setToken } from './lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
@@ -48,10 +48,13 @@ export default function App() {
 
   // A identidade vem do handshake com a Waid, não mais do `?email=` da URL.
   //
-  // `clearToken()` antes de tudo é o que substitui o antigo `tokenPertenceA`:
-  // como agora se autentica a CADA carregamento, o token do médico anterior
-  // nunca sobrevive — nem é preciso guardar de quem ele era para descobrir. A
-  // proteção que só este app tinha passou a valer para os três, por construção.
+  // O token guardado NÃO é mais apagado na montagem. Apagar era a proteção contra
+  // herdar a sessão de outro médico, mas cobrava de quem não tinha nada a ver com
+  // o risco: nos aplicativos da Waid a seção abre SEM iframe, o handshake é
+  // impossível, e o médico digitava um código por e-mail A CADA ABERTURA. A
+  // proteção continua, só que mirada (ver o efeito de `identidade.fase` abaixo):
+  // o token só é usado depois que o handshake se resolve, e é descartado quando a
+  // plataforma deveria ter dito quem é o médico e não disse.
   const identidade = useIdentidadeWaid({
     apiBase: API_BASE,
     waidOrigin: WAID_ORIGIN,
@@ -62,20 +65,39 @@ export default function App() {
   });
 
   useEffect(() => {
-    clearToken();
-  }, []);
-
-  useEffect(() => {
     if (identidade.fase !== 'erro') return;
-    // Sem identidade da plataforma sobra o login por e-mail. É o caso do
-    // aplicativo da Waid, que abre a seção sem iframe — ali o handshake é
-    // impossível, e antes deste caminho o médico simplesmente não entrava.
-    setEstado({
+    const semIframe = identidade.erro?.tipo === 'sem_iframe';
+
+    const pedirLogin = () => setEstado({
       fase: 'login',
-      motivo: identidade.erro?.tipo === 'sem_iframe'
+      motivo: semIframe
         ? 'No aplicativo, entre pelo seu e-mail. Pelo navegador, o acesso é automático.'
         : 'Não conseguimos confirmar sua identidade com a plataforma.',
     });
+
+    if (!semIframe) {
+      // DENTRO do iframe e sem identidade confirmada: a sessão que estava neste
+      // navegador pode ser de quem usou a máquina antes. Não se herda.
+      descartarSessaoDesteNavegador();
+      pedirLogin();
+      return;
+    }
+
+    // Fora de iframe — o aplicativo da Waid, aparelho pessoal. Se o login por
+    // e-mail de antes ainda vale, é ele que entra; só pede código de novo quando
+    // a sessão venceu (no máximo uma vez por dia).
+    if (!getToken() || isTokenExpired()) {
+      clearToken();
+      pedirLogin();
+      return;
+    }
+    buscarMeusTemas()
+      .then(temas => setEstado(temas.ja_escolheu ? { fase: 'feed' } : { fase: 'temas', primeiraVez: true }))
+      .catch(() => {
+        // O servidor recusou (sessão revogada por um "Sair" em outro lugar).
+        clearToken();
+        pedirLogin();
+      });
   }, [identidade.fase, identidade.erro]);
 
   if (estado.fase === 'carregando') {

@@ -67,30 +67,107 @@ interface Props {
   streamingMode?: string;
   /** Texto pronto, metadados a caminho. Não bloqueia a digitação. */
   finalizing?: boolean;
+  /** Muda a cada pergunta ENVIADA: ancora a pergunta no topo da área visível. */
   scrollToBottomTrigger?: number;
+  /** Muda a cada conversa ABERTA: vai direto ao fim, sem herdar a rolagem anterior. */
+  conversationOpenedTrigger?: number;
+  /** Conversa escolhida na lateral, ainda chegando da rede. */
+  loading?: boolean;
+  /** Repete o último envio. Aparece só na mensagem marcada `podeTentarDeNovo`. */
+  onRetry?: () => void;
 }
 
-export function ChatView({ messages, streaming, streamingMode, finalizing, scrollToBottomTrigger }: Props) {
+export function ChatView({ messages, streaming, streamingMode, finalizing, scrollToBottomTrigger, conversationOpenedTrigger, loading, onRetry }: Props) {
   const isMobile = useIsMobile();
+  const areaRef = useRef<HTMLDivElement>(null);
+  const turnoRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // O turno que está ancorado agora, para desfazer a âncora quando ela muda de dono.
+  const ancoradoRef = useRef<HTMLDivElement | null>(null);
 
-  // Só rola quando o usuário envia uma nova mensagem (scrollToBottomTrigger muda)
+  const soltarAncora = () => {
+    if (ancoradoRef.current) ancoradoRef.current.style.minHeight = '';
+    ancoradoRef.current = null;
+  };
+
+  // AO ENVIAR: a pergunta sobe para o topo e o turno ganha a altura da área
+  // visível, de modo que a resposta preenche a tela de cima para baixo sem o
+  // médico encostar na rolagem. Antes rolava-se até o fim UMA vez, no envio: a
+  // resposta crescia para fora da tela e era preciso rolar à mão por até um
+  // minuto, a cada pergunta.
+  //
+  // A altura vai DIRETO no estilo do elemento, sem estado: é um valor medido no
+  // DOM e aplicado no DOM, e passar por `setState` custaria um render a mais só
+  // para transportar um número (além de ser `setState` síncrono em efeito).
   useEffect(() => {
-    if (scrollToBottomTrigger !== undefined && scrollToBottomTrigger > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (scrollToBottomTrigger === undefined || scrollToBottomTrigger === 0) return;
+    const turno = turnoRef.current;
+    if (!turno) return;
+    soltarAncora(); // o turno anterior não pode ficar com um vão da altura da tela
+    turno.style.minHeight = `${areaRef.current?.clientHeight ?? 0}px`;
+    ancoradoRef.current = turno;
+    turno.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [scrollToBottomTrigger]);
 
+  // AO ABRIR uma conversa: fim da conversa, na hora. Sem isto a rolagem da
+  // conversa anterior ficava, e a recém-aberta aparecia num ponto qualquer. E a
+  // âncora sai, senão sobraria um vão em branco do tamanho da tela no fim.
+  useEffect(() => {
+    if (conversationOpenedTrigger === undefined || conversationOpenedTrigger === 0) return;
+    soltarAncora();
+    bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+  }, [conversationOpenedTrigger]);
+
+  // Um contêiner POR TURNO (pergunta + resposta), com chave estável. No React a
+  // chave vale por pai: com um contêiner só para "o último turno", cada pergunta
+  // nova fazia a resposta anterior mudar de pai e ser REMONTADA — Markdown
+  // reinterpretado e estado perdido (referências expandidas). Assim o turno
+  // antigo nunca muda de lugar; só a âncora passa para o turno novo.
+  const turnos: { inicio: number; mensagens: Message[] }[] = [];
+  messages.forEach((msg, i) => {
+    if (msg.role === 'user' || turnos.length === 0) turnos.push({ inicio: i, mensagens: [] });
+    turnos[turnos.length - 1].mensagens.push(msg);
+  });
+  if (turnos.length === 0) turnos.push({ inicio: 0, mensagens: [] });
+
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 20px 0' : '24px 40px 0', display: 'flex', justifyContent: 'center' }}>
+    <div ref={areaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 20px 0' : '24px 40px 0', display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: 720, maxWidth: '100%', paddingBottom: 16 }}>
-        {messages.map((msg, i) => (
-          msg.role === 'user'
-            ? <UserMessage key={i} content={msg.content} attachments={msg.attachments} />
-            : <AssistantMessage key={i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} isFallback={msg.is_fallback} />
-        ))}
-        {streaming && <ThinkingIndicator mode={streamingMode} />}
-        {!streaming && finalizing && <ReferencesPending />}
+        {turnos.map((turno, n) => {
+          const ultimo = n === turnos.length - 1;
+          return (
+            <div
+              key={turno.inicio}
+              ref={ultimo ? turnoRef : undefined}
+              data-testid={ultimo ? 'ultimo-turno' : undefined}
+            >
+              {turno.mensagens.map((msg, i) => (
+                msg.role === 'user'
+                  ? <UserMessage key={turno.inicio + i} content={msg.content} attachments={msg.attachments} />
+                  : <AssistantMessage key={turno.inicio + i} content={msg.content} mode={msg.mode} confidence={msg.confidence} citations={msg.citations} pubmed_validation={msg.pubmed_validation} isFallback={msg.is_fallback} />
+              ))}
+              {ultimo && onRetry && !streaming && turno.mensagens.at(-1)?.podeTentarDeNovo && (
+                <button
+                  onClick={onRetry}
+                  style={{
+                    margin: '0 0 16px', padding: '7px 14px', borderRadius: 8,
+                    border: '1px solid var(--line)', background: '#fff', color: 'var(--petrol)',
+                    fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Tentar novamente
+                </button>
+              )}
+              {ultimo && streaming && <ThinkingIndicator mode={streamingMode} />}
+              {ultimo && !streaming && finalizing && <ReferencesPending />}
+            </div>
+          );
+        })}
+        {loading && (
+          <p role="status" style={{ fontSize: 13, color: 'var(--pen2)', margin: '8px 0' }}>
+            Carregando conversa…
+          </p>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>

@@ -85,7 +85,7 @@ async def test_o_texto_sai_em_pedacos_conforme_chega(monkeypatch):
         _evento(usage={"prompt_tokens": 100, "completion_tokens": 50}),
         "data: [DONE]",
     ])
-    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_stream_client", lambda: cliente)
 
     tokens = [t async for t in PerplexityProvider().stream("sonar-pro", "pergunta")]
 
@@ -99,7 +99,7 @@ async def test_pede_o_usage_no_streaming(monkeypatch):
     """`stream_options` é o que faz a contagem de tokens chegar — sem ele, a
     justificativa antiga (usar complete()) voltaria a valer."""
     cliente = _ClienteFake(["data: [DONE]"])
-    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_stream_client", lambda: cliente)
 
     [t async for t in PerplexityProvider().stream("sonar-pro", "pergunta")]
 
@@ -115,7 +115,7 @@ async def test_tokens_e_citacoes_voltam_no_token_final(monkeypatch):
         _evento(usage={"prompt_tokens": 120, "completion_tokens": 45}),
         "data: [DONE]",
     ])
-    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_stream_client", lambda: cliente)
 
     tokens = [t async for t in PerplexityProvider().stream("sonar-pro", "pergunta")]
 
@@ -138,7 +138,7 @@ async def test_usage_ausente_vira_aviso_e_nao_silencio(monkeypatch, caplog):
     buraco silencioso na contabilidade era o risco que a versão antiga evitava.
     """
     cliente = _ClienteFake([_evento("texto sem usage"), "data: [DONE]"])
-    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_stream_client", lambda: cliente)
 
     with caplog.at_level("WARNING"):
         tokens = [t async for t in PerplexityProvider().stream("sonar-pro", "pergunta")]
@@ -183,7 +183,7 @@ async def test_search_results_moderno_traz_o_titulo(monkeypatch):
         _evento(usage={"prompt_tokens": 10, "completion_tokens": 5}),
         "data: [DONE]",
     ])
-    monkeypatch.setattr("app.services.integracoes.ai_providers.get_client", lambda: cliente)
+    monkeypatch.setattr("app.services.integracoes.ai_providers.get_stream_client", lambda: cliente)
 
     tokens = [t async for t in PerplexityProvider().stream("sonar-pro", "pergunta")]
 

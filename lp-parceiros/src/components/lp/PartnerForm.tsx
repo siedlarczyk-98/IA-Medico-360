@@ -41,6 +41,11 @@ export function PartnerForm() {
     // Terminou SEM identidade (LP aberta fora do embed, ou pelo app da Waid,
     // que abre sem iframe). Sem isto a tela ficaria em skeleton para sempre.
     if (!leadEmail) {
+      // Sai do skeleton quando a identificação termina SEM e-mail. A regra
+      // abaixo aponta um render a mais, não um defeito; derivar o estado mexeria
+      // no fluxo de um formulário sem nenhum teste. Reavaliar ao unificar as
+      // três LPs (item 56 da varredura).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver acima
       setStatus('idle')
       return
     }

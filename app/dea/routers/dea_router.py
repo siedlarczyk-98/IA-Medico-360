@@ -65,6 +65,8 @@ def _limiares(settings: Settings) -> confianca_service.LimiaresConfianca:
 def _para_saida(
     dispositivo: Dispositivo,
     limiares: confianca_service.LimiaresConfianca,
+    *,
+    remocao_relatada: bool = False,
 ) -> DispositivoOut:
     agora = utcnow()
     avaliacao = confianca_service.avaliar(
@@ -85,6 +87,7 @@ def _para_saida(
         confirmacoes=avaliacao.confirmacoes,
         contestacoes=avaliacao.contestacoes,
         dias_desde_ultima_verificacao=avaliacao.dias_desde_ultima_verificacao,
+        remocao_relatada=remocao_relatada,
     )
 
 
@@ -129,6 +132,12 @@ async def buscar_locais(
     for dispositivo in resultado.scalars():
         por_local.setdefault(dispositivo.local_id, []).append(dispositivo)
 
+    # Também numa consulta só. Um relato de remoção não esconde o aparelho — só
+    # duas origens escondem —, mas quem está socorrendo precisa saber da dúvida.
+    com_relato = await locais_repository.origens_que_relataram_remocao(
+        db, [d.id for lista in por_local.values() for d in lista]
+    )
+
     limiares = _limiares(settings)
     locais = [
         LocalOut(
@@ -142,7 +151,10 @@ async def buscar_locais(
             horario_texto=linha["horario_texto"],
             acesso_24h=linha["acesso_24h"],
             distancia_km=round(linha["distancia_km"], 3),
-            dispositivos=[_para_saida(d, limiares) for d in por_local.get(linha["id"], [])],
+            dispositivos=[
+                _para_saida(d, limiares, remocao_relatada=d.id in com_relato)
+                for d in por_local.get(linha["id"], [])
+            ],
         )
         for linha in linhas
         # Um local cujos dispositivos foram todos removidos não é resultado útil.
@@ -282,12 +294,14 @@ async def verificar_dispositivo(
     dispositivo = await cadastro_service.registrar_verificacao(db, dispositivo, body, ip_hash=ip_hash)
     await db.commit()
 
-    saida = _para_saida(dispositivo, _limiares(settings))
+    com_relato = await locais_repository.origens_que_relataram_remocao(db, [dispositivo.id])
+    saida = _para_saida(dispositivo, _limiares(settings), remocao_relatada=dispositivo.id in com_relato)
     return VerificacaoResponse(
         dispositivo_id=dispositivo.id,
         status=saida.status,
         confianca=saida.confianca,
         confirmacoes=saida.confirmacoes,
         contestacoes=saida.contestacoes,
+        remocao_relatada=saida.remocao_relatada,
         mensagem="Verificação registrada. Obrigado por manter o mapa atualizado.",
     )

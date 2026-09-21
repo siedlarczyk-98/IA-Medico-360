@@ -63,6 +63,9 @@ from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
+# Interação criada e commitada, com a resposta do modelo ainda por vir.
+STATUS_EM_ANDAMENTO = "em_andamento"
+
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -196,13 +199,6 @@ class OrquestradorStreamService:
                     })
                     return
 
-                if mode in PHARMA_MODES:
-                    yield _sse("error", {
-                        "status": "unsupported_mode",
-                        "message": "Modos PharmaDB não suportam streaming. Use /query.",
-                    })
-                    return
-
                 # 4. Clarification check (apenas CLINICAL_REASONING, sem force, sem answers)
                 if mode == "CLINICAL_REASONING" and not force and not clarification_answers:
                     clarification = await check_clarification(sanitized_prompt, contexto=history_messages)
@@ -289,80 +285,116 @@ class OrquestradorStreamService:
                     triage_confidence=confidence,
                     triage_category=mode,
                     cache_hit=False,
+                    # Nasce `em_andamento` e só vira `completed` quando a resposta
+                    # é gravada (passo 6). `load_history` lê apenas `completed`,
+                    # então uma pergunta cujo modelo falhou ou cujo stream foi
+                    # abortado não entra no contexto das seguintes.
+                    status=STATUS_EM_ANDAMENTO,
                     started_at=datetime.now(UTC),
                 )
                 db.add(interaction)
                 await db.flush()
                 await link_attachments(db, self.user_id, interaction.id, attachment_ids)
 
-                # 5. Streaming do modelo
-                model_id = MODE_MODEL_MAP.get(mode)
-                system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
-                if effort == "rápido" and system_prompt:
-                    system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
-                temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
-                max_tokens = EFFORT_MAX_TOKENS.get(effort, 4096)
-
-                model_info = await get_model_pricing(db, model_id)
-
-                if not model_info:
-                    yield _sse("error", {"message": f"Modelo {model_id} não disponível."})
-                    return
-
-                provider = get_provider_by_type(model_info.provider_type)
-
-                full_text = ""
-                tokens_in: int | None = None
-                tokens_out: int | None = None
-                perplexity_citations: list[Citacao] | None = None
-                # Consumo de ferramentas integradas (Data Ocean), que só chega
-                # no token final do stream.
-                tool_usage: dict | None = None
-                is_fallback = False
-
-                try:
-                    async for token in provider.stream(
-                        model_id,
-                        sanitized_prompt,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        image_content=image_content,
-                        max_tokens=max_tokens,
-                        history=history_messages,
-                    ):
-                        if token.delta:
-                            full_text += token.delta
-                            yield _sse("token", {"text": token.delta})
-                        if token.done:
-                            tokens_in = token.tokens_in
-                            tokens_out = token.tokens_out
-                            perplexity_citations = token.citations
-                            tool_usage = token.tool_usage
-
-                except Exception as e:
-                    # `type(e).__name__` junto da mensagem: um `httpx.ReadTimeout`
-                    # tem `str()` VAZIO, e o log saía como "Stream falhou em
-                    # sabia-4-thinking: ." — sem dizer que a causa era timeout.
-                    # Foi assim que o Data Ocean falhou em produção sem deixar
-                    # pista nenhuma.
-                    logger.warning(
-                        "Stream falhou em %s: %s: %s. Tentando fallback completo...",
-                        model_id, type(e).__name__, e or "(sem mensagem)",
-                    )
-                    is_fallback = True
-                    fallback_result = await self._fallback_complete(
-                        db,
-                        mode,
-                        sanitized_prompt,
-                        system_prompt,
-                        history=history_messages,
-                        image_content=image_content,
-                    )
-                    full_text = fallback_result.get("text", "")
-                    tokens_in = fallback_result.get("tokens_in")
-                    tokens_out = fallback_result.get("tokens_out")
-                    model_id = fallback_result.get("model_id", model_id)
+                # 5. A resposta: PharmaDB ou modelo
+                if mode in PHARMA_MODES:
+                    # Os modos de farmácia eram RECUSADOS aqui ("unsupported_mode")
+                    # e o frontend refazia a pergunta inteira em `/query`: DLP,
+                    # triagem e extração de medicamento pagos DUAS vezes, no
+                    # segundo modo mais usado do produto. Agora o stream atende —
+                    # com os mesmos handlers do `/query`, para os dois caminhos não
+                    # divergirem — e o texto sai num evento só, porque a base
+                    # responde de uma vez. Todo o resto (custo, auditoria,
+                    # `text_done`, `done`) é o pipeline normal, abaixo.
+                    await db.commit()  # mesma regra: sem conexão presa durante a espera
+                    resposta = await self._responder_pharma(db, mode, sanitized_prompt, interaction.id)
+                    full_text = resposta.get("text", "")
+                    model_id = resposta.get("model_id", "pharmadb")
+                    is_fallback = bool(resposta.get("is_fallback"))
+                    tokens_in = resposta.get("tokens_in")
+                    tokens_out = resposta.get("tokens_out")
+                    perplexity_citations = None
+                    tool_usage = resposta.get("tool_usage")
                     yield _sse("token", {"text": full_text})
+                else:
+                    model_id = MODE_MODEL_MAP.get(mode)
+                    system_prompt = build_orquestrador_prompt(mode, self.user_specialty, self.user_med_status)
+                    if effort == "rápido" and system_prompt:
+                        system_prompt = "Responda de forma direta e concisa, foco nos pontos essenciais.\n\n" + system_prompt
+                    temperature = MODE_TEMPERATURE_MAP.get(mode, 1.0)
+                    max_tokens = EFFORT_MAX_TOKENS.get(effort, 4096)
+
+                    model_info = await get_model_pricing(db, model_id)
+
+                    if not model_info:
+                        yield _sse("error", {"message": f"Modelo {model_id} não disponível."})
+                        return
+
+                    provider = get_provider_by_type(model_info.provider_type)
+
+                    # DEVOLVE A CONEXÃO ANTES DE CHAMAR O MODELO. Havia só um `flush`
+                    # aqui: a transação ficava aberta, com a conexão presa, durante
+                    # toda a geração — que é onde a requisição passa 95% do tempo, sem
+                    # tocar no banco. Commitar grava a pergunta e libera a conexão; a
+                    # sessão pega outra, sozinha, quando for gravar a resposta.
+                    #
+                    # O preço: a pergunta fica no banco mesmo se o modelo falhar ou o
+                    # stream for abortado (antes o rollback a apagava). Por isso o
+                    # status `em_andamento` acima.
+                    await db.commit()
+
+                    full_text = ""
+                    tokens_in: int | None = None
+                    tokens_out: int | None = None
+                    perplexity_citations: list[Citacao] | None = None
+                    # Consumo de ferramentas integradas (Data Ocean), que só chega
+                    # no token final do stream.
+                    tool_usage: dict | None = None
+                    is_fallback = False
+
+                    try:
+                        async for token in provider.stream(
+                            model_id,
+                            sanitized_prompt,
+                            system_prompt=system_prompt,
+                            temperature=temperature,
+                            image_content=image_content,
+                            max_tokens=max_tokens,
+                            history=history_messages,
+                        ):
+                            if token.delta:
+                                full_text += token.delta
+                                yield _sse("token", {"text": token.delta})
+                            if token.done:
+                                tokens_in = token.tokens_in
+                                tokens_out = token.tokens_out
+                                perplexity_citations = token.citations
+                                tool_usage = token.tool_usage
+
+                    except Exception as e:
+                        # `type(e).__name__` junto da mensagem: um `httpx.ReadTimeout`
+                        # tem `str()` VAZIO, e o log saía como "Stream falhou em
+                        # sabia-4-thinking: ." — sem dizer que a causa era timeout.
+                        # Foi assim que o Data Ocean falhou em produção sem deixar
+                        # pista nenhuma.
+                        logger.warning(
+                            "Stream falhou em %s: %s: %s. Tentando fallback completo...",
+                            model_id, type(e).__name__, e or "(sem mensagem)",
+                        )
+                        is_fallback = True
+                        fallback_result = await self._fallback_complete(
+                            db,
+                            mode,
+                            sanitized_prompt,
+                            system_prompt,
+                            history=history_messages,
+                            image_content=image_content,
+                        )
+                        full_text = fallback_result.get("text", "")
+                        tokens_in = fallback_result.get("tokens_in")
+                        tokens_out = fallback_result.get("tokens_out")
+                        model_id = fallback_result.get("model_id", model_id)
+                        yield _sse("token", {"text": full_text})
 
                 # 6. Persistência da resposta
                 elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -419,6 +451,7 @@ class OrquestradorStreamService:
                 interaction.response_time_ms = elapsed_ms
                 interaction.token_cost_usd = cost
                 interaction.completed_at = datetime.now(UTC)
+                interaction.status = "completed"
 
                 # A auditoria nasce aqui, com o que já se sabe. Deixá-la só no
                 # commit final abriria um buraco de LGPD: um abort durante o
@@ -582,10 +615,36 @@ class OrquestradorStreamService:
                     "citations": para_json(perplexity_citations),
                 })
 
-            except Exception as e:
-                logger.error(f"ERRO NO STREAM: {e}")
+            except Exception:
+                # `logger.exception`: um `httpx.ReadTimeout` tem `str()` vazio, e o
+                # `logger.error(f"... {e}")` de antes gravava uma linha em branco,
+                # sem pilha — impossível de diagnosticar.
+                logger.exception("ERRO NO STREAM")
                 await db.rollback()
                 yield _sse("error", {"message": "Erro interno. Tente novamente."})
+
+    async def _responder_pharma(self, db, mode: str, prompt: str, interaction_id) -> dict:
+        """Atende PHARMA_CHECK / BULA / RECEITA / GENERICO com os handlers do `/query`.
+
+        Importado aqui dentro para não criar ciclo entre os dois serviços. Devolve o
+        mesmo dicionário dos handlers: `text`, `model_id` (`"pharmadb"` quando veio
+        da base, o id do modelo quando caiu para o aviso de indisponibilidade) e
+        `is_fallback`.
+        """
+        from app.services.orquestrador_service import PHARMA_MODE_CONFIG, OrquestradorService
+
+        servico = OrquestradorService(
+            db=db,
+            user_id=self.user_id,
+            company_id=self.company_id,
+            user_specialty=self.user_specialty,
+            user_med_status=self.user_med_status,
+        )
+        if mode == "PHARMA_CHECK":
+            return await servico._handle_pharma_check(prompt, interaction_id)
+        if mode in PHARMA_MODE_CONFIG:
+            return await servico._handle_pharma(prompt, mode)
+        raise ValueError(f"modo de farmácia sem handler: {mode}")
 
     async def _fallback_complete(
         self,
@@ -616,6 +675,11 @@ class OrquestradorStreamService:
 
         for fallback_model in candidatos:
             model_info = await get_model_pricing(db, fallback_model)
+            # A consulta de preço (quando não está em cache) abre transação.
+            # Solta a conexão antes de esperar o modelo: o fallback roda
+            # justamente quando um provedor caiu, com TODOS os streams passando
+            # por aqui ao mesmo tempo — o pior momento para prender conexão.
+            await db.commit()
             if not model_info:
                 continue
             try:

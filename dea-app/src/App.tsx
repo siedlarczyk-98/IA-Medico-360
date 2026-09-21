@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 
-import { MapaPage } from './pages/MapaPage'
 import { MetronomoPage } from './pages/MetronomoPage'
+
+// O mapa traz o Leaflet (~150 KB, mais o CSS dele) e so e usado na segunda aba. O
+// app abre no METRONOMO — a tela que alguem precisa com uma parada em andamento e
+// rede ruim —, e antes pagava o download do mapa inteiro para mostrar um botao
+// "Iniciar". Agora o mapa so baixa quando a aba dele e aberta.
+const MapaPage = lazy(() => import('./pages/MapaPage').then((m) => ({ default: m.MapaPage })))
 
 type Aba = 'metronomo' | 'mapa'
 
@@ -9,8 +14,7 @@ type Aba = 'metronomo' | 'mapa'
  * Roteamento manual por hash, no mesmo espirito do `noticias-app`: sao duas
  * telas, e uma lib de roteamento seria mais codigo que o app inteiro.
  *
- * Hash e nao path porque o app e servido por `serve -s` (SPA fallback), e o hash
- * dispensa qualquer configuracao de servidor — inclusive se um dia for aberto de
+ * Hash e nao path porque o hash dispensa qualquer configuracao de servidor — inclusive se um dia for aberto de
  * `file://` num tablet sem rede, que e um cenario plausivel num curso.
  */
 function abaDoHash(): Aba {
@@ -50,7 +54,13 @@ export function App() {
       </header>
 
       <main className="conteudo">
-        {aba === 'metronomo' ? <MetronomoPage /> : <MapaPage />}
+        {aba === 'metronomo' ? (
+          <MetronomoPage />
+        ) : (
+          <Suspense fallback={<p className="estado">Carregando o mapa...</p>}>
+            <MapaPage />
+          </Suspense>
+        )}
       </main>
 
       <footer className="rodape">

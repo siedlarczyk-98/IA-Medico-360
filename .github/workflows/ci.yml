@@ -49,8 +49,13 @@ jobs:
       # Piso de cobertura como catraca: o número é o medido hoje, arredondado
       # para baixo. Serve para impedir REGRESSÃO, não para atestar qualidade —
       # subir o piso conforme a cobertura crescer (ver plano de prontidão).
+      #
+      # 75 e não 50: a medição de 2026-09-21 deu 77% de linhas e ramos, já com
+      # `concurrency = greenlet` no `.coveragerc`. O piso antigo tinha sido
+      # tirado de uma medição subestimada e deixava passar uma perda de quase
+      # 30 pontos sem avisar.
       - name: pytest
-        run: pytest -q --cov=app --cov-report=term --cov-fail-under=50
+        run: pytest -q --cov=app --cov-report=term --cov-fail-under=75
 
       # A cadeia de migrations precisa aplicar num banco vazio. Isso ficou
       # QUEBRADO por muito tempo (o schema nasceu de um create_all fora do
@@ -70,6 +75,15 @@ jobs:
           export JWT_SECRET_KEY="$(openssl rand -hex 32)"
           psql -h localhost -p 55433 -U test -d medico360_test -c 'CREATE DATABASE medico360_migrations_test'
           alembic upgrade head
+          # Ida e volta da migration mais recente. Um `downgrade()` quebrado so
+          # aparece no dia em que alguem precisa reverter um deploy — que e o pior
+          # dia para descobrir. Cobre a ULTIMA porque e a que acabou de ser escrita.
+          alembic downgrade -1
+          alembic upgrade head
+          # `alembic check` NAO entra ainda: hoje ele acusa como "tabela nova" tudo
+          # que vive nos schemas news/landing_pages/calculators/dea — o `env.py` nao
+          # passa `include_schemas`. Sao falsos positivos; ligar o check antes de
+          # arrumar isso seria um job vermelho permanente. Ver docs/pendencias.md.
 
       # Falha em vulnerabilidade conhecida nas dependências fixadas.
       # `pdfplumber`/`openpyxl` processam arquivo enviado pelo usuário, então
@@ -156,6 +170,34 @@ jobs:
       # O motor do metrônomo tem consequência clínica (deriva de compasso numa
       # RCP), então é testado — diferente do noticias-app, que não tem suite.
       - run: npm test
+      - run: npm run build
+
+  # As três páginas de captação são o mesmo app copiado (item 56 da varredura de
+  # 2026-09-18) e não tinham CI nenhum: lint e versões já tinham divergido entre
+  # elas sem ninguém ver. Matriz, e não três jobs, para que a quarta LP entre
+  # acrescentando uma linha. Não há `npm test`: as páginas não têm suíte.
+  landing-pages:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [lp-contabilidade, lp-financas, lp-parceiros]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          # Mesma armadilha do noticias-app: lockfile gerado no Windows não
+          # registra as dependências opcionais de plataforma, e o `npm ci` do
+          # Linux o recusa como incompleto.
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b --noEmit
       - run: npm run build
 
   # E2E depende de Postgres + backend rodando + usuário/calculadoras seedados

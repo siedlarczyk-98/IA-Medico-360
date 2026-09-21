@@ -204,14 +204,6 @@ async def test_alheio_e_inexistente_sao_indistinguiveis(
     assert r_alheio.json() == r_inexistente.json()
 
 
-# ── Histórico do agregador ───────────────────────────────────────────────
-
-async def test_historico_do_agregador_e_por_usuario(client, dono, intruso):
-    resp = await client.get("/api/v1/agregador/history", headers=auth_headers(intruso))
-    assert resp.status_code == 200
-    assert "dono@example.com" not in resp.text
-
-
 # ── Conta ────────────────────────────────────────────────────────────────
 
 async def test_me_devolve_apenas_o_proprio_usuario(client, dono, intruso):

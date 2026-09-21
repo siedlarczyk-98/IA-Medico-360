@@ -1,6 +1,7 @@
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,11 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import async_session_factory, get_db
 from app.core.limiter import limiter
+from app.core.sse import com_heartbeat
 from app.models.models import User
 from app.services.file_extractor_service import resolve_files_context
 from app.services.orquestrador_service import OrquestradorService
 from app.services.orquestrador_stream_service import OrquestradorStreamService
 from app.services.usage_service import check_limit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orquestrador", tags=["Orquestrador Multi-Agente"])
 
@@ -71,15 +75,29 @@ class OrquestradorRequest(BaseModel):
         return ids
 
 
-@router.post("/query")
+@router.post("/query", deprecated=True)
 @limiter.limit("30/minute")
 async def orquestrador_query(
     request: Request,
+    response: Response,
     body: OrquestradorRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
+    OBSOLETA desde 2026-09-21 — use `/stream`. Em observação antes de sair.
+
+    Era o caminho dos modos de farmácia, que o stream recusava. O stream passou a
+    atendê-los, e o único chamador conhecido (o ramo `unsupported_mode` do chat)
+    nunca mais é acionado. Manter os dois caminhos do orquestrador em paralelo já
+    causou três bugs de divergência num dia.
+
+    Não foi apagada de uma vez porque NÃO SE SABE se existe chamador de fora do
+    monorepo. Cada chamada agora deixa rastro (`orquestrador_query_obsoleto` no
+    log, com origem e user-agent): uma ou duas semanas sem nenhuma ocorrência é o
+    sinal para remover a rota, o `OrquestradorService.query` e os testes de
+    paridade. Os handlers de farmácia do serviço FICAM — o stream os usa.
+
     Orquestrador Multi-Agente.
     Faz triagem automática da pergunta e roteia pro agente especializado:
     - QUICK_SEARCH → Perplexity (respostas rápidas com fontes)
@@ -94,6 +112,20 @@ async def orquestrador_query(
       streama de verdade e pode levar dezenas de segundos: o fluxo agêntico
       roda inteiro na Maritaca antes de devolver a resposta.
     """
+    logger.warning(
+        "orquestrador_query_obsoleto: rota /orquestrador/query ainda em uso",
+        extra={
+            "user_id": str(user.id),
+            "origem": request.headers.get("origin"),
+            "referer": request.headers.get("referer"),
+            "user_agent": request.headers.get("user-agent"),
+            "modo": body.mode,
+        },
+    )
+    # Cabeçalhos padrão (RFC 9745 / 8594): um cliente bem-comportado os registra.
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = '</api/v1/orquestrador/stream>; rel="successor-version"'
+
     await check_limit(db, user)
     prompt, images, extractions = await resolve_files_context(body.prompt, body.anexos(), user.id, db)
 
@@ -139,10 +171,22 @@ async def orquestrador_stream(
     - done       → metadados finais (PubMed, custo, specialty, etc.)
     - error      → erro fatal
 
-    Não suporta PHARMA_CHECK — use /query para interações medicamentosas.
+    Os modos de farmácia também são atendidos aqui: a base responde de uma vez,
+    então o texto chega num único evento `token`.
     """
     await check_limit(db, user)
     prompt, images, extractions = await resolve_files_context(body.prompt, body.anexos(), user.id, db)
+    attachment_ids = [e.id for e in extractions]
+
+    # DEVOLVE A CONEXÃO AGORA. O FastAPI só encerra a dependência `get_db` depois
+    # de enviar o corpo — e o corpo aqui é um stream de 13 a 57 segundos. Sem este
+    # commit a sessão da requisição ficava ociosa DENTRO de uma transação por
+    # toda a resposta, segurando uma conexão do pool sem fazer nada. Somada à do
+    # serviço de stream eram DUAS por resposta: cerca de 20 respostas simultâneas
+    # esgotavam o pool (30+10), e a partir daí toda requisição autenticada
+    # esperava 30 s e falhava. Depois do commit a sessão continua válida, só não
+    # segura conexão; o `get_db` a fecha no fim como sempre.
+    await db.commit()
 
     service = OrquestradorStreamService(
         session_factory=async_session_factory,
@@ -152,7 +196,9 @@ async def orquestrador_stream(
         user_med_status=user.med_status,
     )
     return StreamingResponse(
-        service.stream(
+        # `com_heartbeat`: `: ping` a cada 15 s de silêncio, para proxy e
+        # balanceador não cortarem o stream enquanto o modelo pensa.
+        com_heartbeat(service.stream(
             prompt=prompt,
             conversation_id=body.conversation_id,
             force=body.force,
@@ -161,8 +207,8 @@ async def orquestrador_stream(
             mode=body.mode,
             folder_id=body.folder_id,
             image_content=images,
-            attachment_ids=[e.id for e in extractions],
-        ),
+            attachment_ids=attachment_ids,
+        )),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

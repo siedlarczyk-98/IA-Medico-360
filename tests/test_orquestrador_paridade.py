@@ -346,8 +346,14 @@ async def test_fallback_do_stream_nao_perde_a_imagem(monkeypatch):
         orquestrador_stream_service.OrquestradorStreamService
     )
 
+    class SessaoQueSoComita:
+        """`_fallback_complete` solta a conexão (commit) antes de esperar o modelo."""
+
+        async def commit(self):
+            return None
+
     await servico._fallback_complete(
-        None, "EXAM_REVIEW", "leia o exame", "sys", image_content=IMAGEM
+        SessaoQueSoComita(), "EXAM_REVIEW", "leia o exame", "sys", image_content=IMAGEM
     )
 
     assert capturador.image_content == IMAGEM, (

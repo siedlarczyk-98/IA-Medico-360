@@ -27,6 +27,7 @@ contabilizado e rastreamento sem tocar no contrato da chamada.
 
 import logging
 from decimal import Decimal
+from html import escape
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,7 @@ from app.core.telemetry import async_llm_span
 from app.models.models import utcnow
 from app.models.news import Article, ArticleStatus
 from app.news.journals import JOURNALS_BY_SLUG
+from app.services.html_seguro import sanitizar_html_de_post
 from app.services.pricing import calculate_cost
 
 logger = logging.getLogger(__name__)
@@ -105,8 +107,12 @@ def _citacao_html(article: Article, journal: str) -> str:
     Monta a referência à fonte sem passar pelo LLM, para garantir que autores,
     título e journal fiquem exatamente como foram coletados.
     """
-    autores = f"{article.authors}. " if article.authors else ""
-    return f"<p><em>Fonte: {autores}{article.original_title or ''} — {journal}.</em></p>"
+    # Autores e título vêm do PubMed — texto de terceiro interpolado em HTML. Um
+    # título com `<` (existem: "p<0.05", "IL-6 <10 pg/mL") já quebrava a marcação;
+    # um título hostil injetava o que quisesse. Escapa tudo que não é nosso.
+    autores = f"{escape(article.authors)}. " if article.authors else ""
+    titulo = escape(article.original_title or "")
+    return f"<p><em>Fonte: {autores}{titulo} — {escape(journal)}.</em></p>"
 
 
 async def redigir(
@@ -155,6 +161,11 @@ async def redigir(
     corpo = bloco.get("input", {}).get("body_html")
     if not titulo or not corpo:
         raise ValueError("Resposta do modelo veio com título ou corpo vazio")
+
+    # O corpo passa pela lista de permissão ANTES de ser gravado. Ver `html_seguro`.
+    corpo = sanitizar_html_de_post(corpo)
+    if not corpo.strip():
+        raise ValueError("Corpo do post ficou vazio depois da sanitização")
 
     return titulo, f"{corpo}\n{_citacao_html(article, journal)}", (data.get("usage") or {})
 

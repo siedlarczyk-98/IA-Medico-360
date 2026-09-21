@@ -9,6 +9,7 @@ import { InputBar } from './components/InputBar';
 import { ClarificationPrompt } from './components/ClarificationPrompt';
 import type { Effort, OrchestratorMode, Attachment } from './components/InputBar';
 import { streamQuery, queryOrquestrador, type Message, type StreamEvent, type PubmedValidation } from './api/orquestrador';
+import { mensagemDeErro, valeTentarDeNovo } from './api/erros';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
 import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth';
 
@@ -16,6 +17,9 @@ import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth'
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 import { useCurrentUser } from './lib/useCurrentUser';
 import { getConversation } from './api/conversations';
+
+/** Intervalo entre atualizações do texto em streaming. Ver `scheduleFlush`. */
+const INTERVALO_DE_FLUSH_MS = 100;
 
 // Páginas de auth são carregadas sob demanda (não fazem parte da rota principal).
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -104,6 +108,10 @@ function MainApp() {
   const [selectedMode, setSelectedMode] = useState<OrchestratorMode>('QUICK_SEARCH');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const [conversaAbertaTrigger, setConversaAbertaTrigger] = useState(0);
+  const [carregandoConversa, setCarregandoConversa] = useState(false);
+  const selecaoRef = useRef(0);
+  const ultimoEnvioRef = useRef<(Parameters<typeof streamQuery>[0] & { effort?: Effort; file_ids?: string[] }) | null>(null);
   const [usageTick, setUsageTick] = useState(0);
   const pendingFolderIdRef = useRef<string | undefined>(undefined);
   // Pasta onde uma conversa NOVA vai nascer. Só rótulo — o id que vai no
@@ -119,22 +127,28 @@ function MainApp() {
   // qualquer outra mensagem entra na lista.
   const streamMsgIdRef = useRef<string | null>(null);
   // Flush em lote dos tokens de streaming: acumulamos em refs e aplicamos ao
-  // state uma vez por frame (requestAnimationFrame), evitando re-render por token.
-  const rafRef = useRef<number | null>(null);
+  // state a cada `INTERVALO_DE_FLUSH_MS`, evitando re-render por token.
+  //
+  // Era uma vez por QUADRO (requestAnimationFrame). Só que cada flush faz o
+  // Markdown da resposta inteira ser interpretado de novo, e esse custo cresce
+  // com o texto: no terço final de uma resposta longa, 60 reinterpretações por
+  // segundo engasgavam a tela — pior no celular e dentro do iframe. A 10 por
+  // segundo o texto continua parecendo contínuo e o trabalho cai seis vezes.
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelFlush = useCallback(() => {
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    if (flushTimerRef.current != null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
   }, []);
 
   const scheduleFlush = useCallback((flush: () => void) => {
-    if (rafRef.current != null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
+    if (flushTimerRef.current != null) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
       flush();
-    });
+    }, INTERVALO_DE_FLUSH_MS);
   }, []);
 
   const topbarTitle = useMemo(() =>
@@ -147,6 +161,7 @@ function MainApp() {
   const runOrquestrador = useCallback(async (params: Parameters<typeof streamQuery>[0] & { effort?: Effort; file_ids?: string[] }) => {
     abortRef.current?.abort();
     cancelFlush();
+    ultimoEnvioRef.current = params;
 
     // Remove a mensagem parcial deixada por um stream anterior abortado.
     // Filtra pelo id em vez de truncar a lista a partir de um índice: o índice
@@ -238,6 +253,15 @@ function MainApp() {
           pendingFolderIdRef.current = undefined;
           setPendingFolderName(undefined);
           queryClient.invalidateQueries({ queryKey: ['conversations'] });
+          // O texto está COMPLETO a partir daqui: o que resta até o `done` são
+          // metadados (citações, PubMed). Então a marcação de "mensagem em
+          // streaming" sai agora, junto com a liberação do campo — e não no
+          // `finally`. Enquanto ela ficava, uma pergunta enviada nesta janela
+          // tratava a resposta concluída como parcial de um stream abortado e a
+          // REMOVIA da tela; o médico perdia o que estava lendo.
+          cancelFlush();
+          flushAssistant();
+          if (streamMsgIdRef.current === assistantId) streamMsgIdRef.current = null;
           setStreaming(false);
           setFinalizing(true);
         }
@@ -284,7 +308,13 @@ function MainApp() {
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Erro ao conectar com o servidor.' }]);
+      // A frase depende do QUE falhou: cota semanal, sessão expirada e queda de
+      // rede pedem reações diferentes do médico. Ver `api/erros.ts`.
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `⚠️ ${mensagemDeErro(err)}`,
+        podeTentarDeNovo: valeTentarDeNovo(err),
+      }]);
     } finally {
       cancelFlush();
       flushAssistant();
@@ -292,8 +322,14 @@ function MainApp() {
       // aborta já leu a ref e a reatribuiu antes deste `finally` rodar —
       // limpar sem checar apagaria a marcação do stream que acabou de começar.
       if (streamMsgIdRef.current === assistantId) streamMsgIdRef.current = null;
-      setStreaming(false);
-      setFinalizing(false);
+      // Mesma regra para os indicadores: só mexe quem ainda é o stream atual.
+      // Um stream abortado por uma pergunta nova termina DEPOIS de o novo ter
+      // ligado `streaming`; sem esta checagem ele o desligava, e o campo ficava
+      // liberado no meio da resposta nova.
+      if (abortRef.current === ctrl) {
+        setStreaming(false);
+        setFinalizing(false);
+      }
       setUsageTick(t => t + 1);
     }
   }, [cancelFlush, scheduleFlush]);
@@ -325,8 +361,28 @@ function MainApp() {
     });
   }, [clarification, runOrquestrador]);
 
+  /**
+   * "Tentar novamente": repete o último envio, sem o médico redigitar. Tira o
+   * aviso de erro da tela primeiro; a pergunta dele continua lá.
+   */
+  const tentarDeNovo = useCallback(() => {
+    const params = ultimoEnvioRef.current;
+    if (!params) return;
+    setMessages(prev => prev.filter(m => !m.podeTentarDeNovo));
+    void runOrquestrador(params);
+  }, [runOrquestrador]);
+
+  /** "Parar": cancela a resposta em andamento. O texto já recebido fica na tela. */
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+    setStreaming(false);
+    setFinalizing(false);
+  }, []);
+
   const handleNew = useCallback((folderId?: string, folderName?: string) => {
     abortRef.current?.abort();
+    selecaoRef.current += 1; // uma conversa ainda carregando não pode cair em cima desta
+    setCarregandoConversa(false);
     setMessages([]);
     setStreaming(false);
     setFinalizing(false);
@@ -340,6 +396,18 @@ function MainApp() {
 
   const handleSelectConversation = useCallback(async (id: string) => {
     abortRef.current?.abort();
+    // CORRIDA: clicar em duas conversas em sequência disparava dois pedidos, e a
+    // resposta que chegasse POR ÚLTIMO ganhava — que não é necessariamente a do
+    // último clique. O médico clicava na conversa B e via a A, com o título da B
+    // destacado na lateral. Cada clique ganha um número; resposta de número velho
+    // é descartada.
+    const pedido = ++selecaoRef.current;
+    // Resposta imediata ao clique: a lateral já destaca a conversa e a área
+    // central mostra que está carregando. Antes não acontecia NADA até a rede
+    // responder.
+    setActiveConvId(id);
+    setMessages([]);
+    setCarregandoConversa(true);
     setStreaming(false);
     setFinalizing(false);
     setClarification(null);
@@ -347,6 +415,7 @@ function MainApp() {
     setPendingFolderName(undefined);
     try {
       const detail = await getConversation(id);
+      if (pedido !== selecaoRef.current) return;
       // O backend devolve o modo cru ("PRODUCTIVITY"); ao vivo a mensagem passa
       // por chipModeFor. Sem esta conversão a conversa reaberta mostrava o nome
       // interno do modo no lugar do chip — mesma resposta com duas aparências.
@@ -357,8 +426,10 @@ function MainApp() {
       ));
       setActiveConvId(detail.id);
       setActiveFolderName(detail.folder_name ?? undefined);
+      setConversaAbertaTrigger(n => n + 1);
+      setCarregandoConversa(false);
     } catch {
-      handleNew();
+      if (pedido === selecaoRef.current) handleNew();
     }
   }, [handleNew]);
 
@@ -369,7 +440,7 @@ function MainApp() {
   const showClarification = clarification && !streaming;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <div className="app-raiz" style={{ display: 'flex', overflow: 'hidden' }}>
       <Sidebar activeId={activeConvId} onNew={handleNew} onSelect={handleSelectConversation} open={sidebarOpen} onToggle={toggleSidebar} usageTick={usageTick} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -393,17 +464,17 @@ function MainApp() {
         )}
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {messages.length === 0 && !streaming ? (
+          {messages.length === 0 && !streaming && !carregandoConversa ? (
             <>
               <EmptyState userName={currentUser?.firstName} onModeSelect={setSelectedMode} selectedMode={selectedMode} />
-              <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
+              <InputBar onSend={sendMessage} sendBlocked={streaming || carregandoConversa} onStop={streaming ? handleStop : undefined} mode={selectedMode} onModeChange={setSelectedMode} />
             </>
           ) : (
             <>
-              <ChatView messages={messages} streaming={streaming} streamingMode={selectedMode} finalizing={finalizing} scrollToBottomTrigger={scrollTrigger} />
+              <ChatView messages={messages} streaming={streaming} streamingMode={selectedMode} finalizing={finalizing} scrollToBottomTrigger={scrollTrigger} conversationOpenedTrigger={conversaAbertaTrigger} onRetry={tentarDeNovo} loading={carregandoConversa} />
               {showClarification
                 ? <ClarificationPrompt onSend={sendClarification} />
-                : <InputBar onSend={sendMessage} disabled={streaming} mode={selectedMode} onModeChange={setSelectedMode} />
+                : <InputBar onSend={sendMessage} sendBlocked={streaming || carregandoConversa} onStop={streaming ? handleStop : undefined} mode={selectedMode} onModeChange={setSelectedMode} />
               }
             </>
           )}

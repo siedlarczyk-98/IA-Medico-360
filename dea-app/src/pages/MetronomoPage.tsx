@@ -34,6 +34,8 @@ export function MetronomoPage() {
   const [estado, setEstado] = useState<EstadoMetronomo>(ESTADO_ZERADO)
   const [pulso, setPulso] = useState<TipoBatida | null>(null)
   const [avisoTroca, setAvisoTroca] = useState(false)
+  // O sistema cortou o audio com o metronomo ligado (ligacao, tela bloqueada).
+  const [semSom, setSemSom] = useState(false)
 
   const metronomoRef = useRef<Metronomo | null>(null)
   const { solicitar: pedirWakeLock, liberar: liberarWakeLock } = useWakeLock()
@@ -62,10 +64,27 @@ export function MetronomoPage() {
    */
   const obterMetronomo = useCallback((): Metronomo => {
     if (metronomoRef.current === null) {
-      metronomoRef.current = new Metronomo({ bpm, modo302: MODO_302, aoBater, aoFecharCiclo })
+      metronomoRef.current = new Metronomo({
+        bpm,
+        modo302: MODO_302,
+        aoBater,
+        aoFecharCiclo,
+        aoMudarAudio: setSemSom,
+      })
     }
     return metronomoRef.current
   }, [bpm, aoBater, aoFecharCiclo])
+
+  // Ao voltar para o app (fim da ligacao, tela desbloqueada), tenta devolver o
+  // som sozinho. No iOS isso so funciona com gesto do usuario — por isso o botao
+  // "Retomar som" no aviso continua sendo o caminho garantido.
+  useEffect(() => {
+    const aoVoltar = () => {
+      if (!document.hidden) void metronomoRef.current?.retomarAudio()
+    }
+    document.addEventListener('visibilitychange', aoVoltar)
+    return () => document.removeEventListener('visibilitychange', aoVoltar)
+  }, [])
 
   // Os callbacks capturam estado; reinjeta-los a cada mudanca mantem o motor
   // falando com a versao atual sem recriar o metronomo (o que zeraria o compasso
@@ -146,6 +165,21 @@ export function MetronomoPage() {
         <span className="pulso__bpm">{bpm}</span>
         <span className="pulso__unidade">/min</span>
       </div>
+
+      {/* Uma ligacao para o 192 suspende o audio do navegador. Sem este aviso a
+          tela seguia mostrando "Parar", com o contador parado e em silencio. */}
+      {rodando && semSom && (
+        <p className="erro" role="alert">
+          O som foi interrompido (ligação ou tela bloqueada).{' '}
+          <button
+            type="button"
+            className="link"
+            onClick={() => void metronomoRef.current?.retomarAudio()}
+          >
+            Retomar som
+          </button>
+        </p>
+      )}
 
       {/* aria-live separado do pulso visual: leitor de tela nao deve anunciar
           cada batida, so a mudanca de fase. */}

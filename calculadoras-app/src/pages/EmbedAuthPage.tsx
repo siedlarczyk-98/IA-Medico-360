@@ -11,11 +11,12 @@
  * porque falta cadastro seria hostil.
  */
 
+import { useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { useIdentidadeWaid } from '@shared/embed/identidade';
 
-import { setToken } from '../lib/auth';
+import { descartarSessaoDesteNavegador, setToken } from '../lib/auth';
 
 // Mesma convenção de `api/auth.ts`: vazio em dev (o proxy do Vite cuida do
 // CORS), domínio do backend em produção.
@@ -36,6 +37,13 @@ export function EmbedAuthPage() {
       navigate('/', { replace: true });
     },
   });
+
+  // Identidade não confirmada DENTRO do iframe: a sessão que já estava no
+  // navegador não pode ser herdada. Ver `descartarSessaoDesteNavegador`.
+  const tipoDoErro = fase === 'erro' ? erro?.tipo : undefined;
+  useEffect(() => {
+    if (tipoDoErro && tipoDoErro !== 'sem_iframe') descartarSessaoDesteNavegador();
+  }, [tipoDoErro]);
 
   if (fase === 'pronto') return <Navigate to="/" replace />;
 

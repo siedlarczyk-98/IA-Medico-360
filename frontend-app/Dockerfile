@@ -54,4 +54,10 @@ COPY --from=build /repo/frontend-app/dist ./dist
 
 # `-s` (single page application): qualquer rota cai no index.html, senão um F5
 # em /onboarding devolve 404.
-CMD ["sh", "-c", "serve dist -s -l tcp://0.0.0.0:${PORT:-3000}"]
+# SEM `-s`, de proposito. O `-s` injeta um rewrite `**` -> index.html NA FRENTE das
+# regras do `public/serve.json`, e ai um `/assets/app-<hash antigo>.js` pedido por
+# uma aba aberta antes do deploy recebe HTML com status 200: tela branca. O
+# fallback de SPA agora vive no `serve.json`, restrito ao que esta fora de
+# `/assets`, junto com a politica de cache (imutavel para arquivo com hash,
+# `no-cache` para o resto).
+CMD ["sh", "-c", "serve dist -l tcp://0.0.0.0:${PORT:-3000}"]

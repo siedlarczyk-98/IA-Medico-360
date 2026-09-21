@@ -1,3 +1,6 @@
+/* eslint-disable react-refresh/only-export-components --
+   componente gerado pelo shadcn/ui: exportar a variante junto do componente é o
+   formato da biblioteca. O custo é só o Fast Refresh recarregar o módulo inteiro. */
 import * as React from 'react'
 import * as AccordionPrimitive from '@radix-ui/react-accordion'
 import { ChevronDown } from 'lucide-react'

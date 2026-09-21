@@ -1,23 +1,28 @@
 """
-Resiliência do Agregador — RN-AGR-001 (item 1.3 do plano de prontidão).
+Resiliência do Agregador — pelo caminho que ESTÁ EM USO.
 
-A regra está escrita no código desde sempre ("Se um modelo falhar, não impacta
-os demais") mas nunca teve teste. É o comportamento que sustenta a proposta do
-Agregador: consultar vários modelos em paralelo e mostrar o que cada um respondeu.
+REESCRITO em 2026-09-21. Estes seis testes exercitavam `AgregadorService.query`,
+o método da rota `/agregador/query` — que não tinha NENHUM chamador em todo o
+monorepo. Enquanto isso o `/agregador/stream`, que é o caminho de verdade, não
+tinha um único teste de comportamento: a falha de um modelo derrubar os outros, o
+custo do modelo que falhou, o prompt gravado sem sanitizar — nada disso era
+conferido onde importava. É o padrão recorrente deste projeto: o teste confirmava
+o fluxo imaginado, não o real.
 
-Nenhum teste aqui toca a rede — os providers são substituídos por fakes.
+A rota e o método mortos foram removidos; as mesmas seis propriedades (RN-AGR-001,
+contabilização de custo e DLP) agora são conferidas pela rota, via HTTP.
 """
 
+import json
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app.models.models import InteractionResponse, UserWeeklyUsage
-from app.schemas.agregador import AgregadorRequest
-from app.services.agregador_service import AgregadorService
+from app.models.models import Interaction, InteractionResponse, UserWeeklyUsage
 from app.services.integracoes import ai_providers
-from app.services.integracoes.ai_providers import ProviderResponse
+from app.services.integracoes.ai_providers import StreamToken
+from tests.conftest import auth_headers
 
 
 class ProviderQueResponde:
@@ -25,14 +30,12 @@ class ProviderQueResponde:
         self.texto, self.tokens_in, self.tokens_out = texto, tokens_in, tokens_out
 
     async def complete(self, model_id, prompt, **kwargs):
-        return ProviderResponse(
-            text=f"{self.texto} ({model_id})",
-            tokens_in=self.tokens_in,
-            tokens_out=self.tokens_out,
-        )
+        raise NotImplementedError
 
     async def stream(self, model_id, prompt, **kwargs):
-        raise NotImplementedError
+        yield StreamToken(delta=f"{self.texto} ")
+        yield StreamToken(delta=f"({model_id})")
+        yield StreamToken(delta="", done=True, tokens_in=self.tokens_in, tokens_out=self.tokens_out)
 
 
 class ProviderQueFalha:
@@ -40,26 +43,30 @@ class ProviderQueFalha:
         self.erro = erro
 
     async def complete(self, model_id, prompt, **kwargs):
-        raise RuntimeError(self.erro)
+        raise NotImplementedError
 
     async def stream(self, model_id, prompt, **kwargs):
-        raise NotImplementedError
+        raise RuntimeError(self.erro)
+        yield  # pragma: no cover — torna a função um gerador
 
 
 @pytest.fixture(autouse=True)
 def sem_enriquecimento(monkeypatch):
-    """
-    Desliga o pós-processamento best-effort (especialidade, medicamentos, PubMed).
-    Ele já é tolerante a falha no código; aqui só evita ruído e lentidão.
-    """
+    """Desliga o pós-processamento best-effort (especialidade, medicamentos, PubMed)."""
     async def _especialidade(_texto):
         return {"specialty": None, "topic": None}
 
     async def _medicamentos(*args, **kwargs):
         return []
 
+    async def _sem_pubmed(*args, **kwargs):
+        from app.services.integracoes.pubmed_service import ValidationResult
+
+        return ValidationResult(confidence_score=0.0, fallback=True)
+
     monkeypatch.setattr("app.services.agregador_service.detect_specialty_and_topic", _especialidade)
     monkeypatch.setattr("app.services.agregador_service.extract_from_interaction", _medicamentos)
+    monkeypatch.setattr("app.services.agregador_service.validate_with_pubmed", _sem_pubmed, raising=False)
 
 
 @pytest.fixture
@@ -72,67 +79,89 @@ def registra_providers(monkeypatch):
     return _registra
 
 
+def _eventos(corpo: str) -> list[tuple[str, dict]]:
+    """Frames SSE → [(evento, dados)]."""
+    eventos = []
+    for frame in corpo.replace("\r\n", "\n").split("\n\n"):
+        nome, dados = None, None
+        for linha in frame.split("\n"):
+            if linha.startswith("event:"):
+                nome = linha[6:].strip()
+            elif linha.startswith("data:"):
+                dados = json.loads(linha[5:].strip())
+        if nome and dados is not None:
+            eventos.append((nome, dados))
+    return eventos
+
+
+async def _consultar(client, user, prompt, modelos):
+    resp = await client.post(
+        "/api/v1/agregador/stream",
+        json={"prompt": prompt, "models": modelos},
+        headers=auth_headers(user),
+    )
+    assert resp.status_code == 200, resp.text
+    return _eventos(resp.text)
+
+
+def _texto_de(eventos, modelo) -> str:
+    return "".join(d["delta"] for e, d in eventos if e == "delta" and d["model_id"] == modelo)
+
+
 # ── RN-AGR-001 ───────────────────────────────────────────────────────────
 
 async def test_falha_de_um_modelo_nao_derruba_os_demais(
-    db, user, model_pricing_factory, registra_providers
+    client, user, model_pricing_factory, registra_providers
 ):
     await model_pricing_factory(model_id="modelo-bom", provider_type="anthropic")
     await model_pricing_factory(model_id="modelo-ruim", provider_type="openai")
     registra_providers(anthropic=ProviderQueResponde(), openai=ProviderQueFalha("503 do provedor"))
 
-    servico = AgregadorService(db, user.id)
-    resposta = await servico.query(
-        AgregadorRequest(prompt="Conduta em pneumonia adquirida na comunidade?",
-                         models=["modelo-bom", "modelo-ruim"])
+    eventos = await _consultar(
+        client, user, "Conduta em pneumonia adquirida na comunidade?", ["modelo-bom", "modelo-ruim"]
     )
 
-    por_modelo = {r.model_id: r for r in resposta.responses}
-    assert por_modelo["modelo-bom"].response_text, "O modelo saudável deveria ter respondido"
-    assert not por_modelo["modelo-bom"].error
-    assert "503 do provedor" in por_modelo["modelo-ruim"].error
-    assert por_modelo["modelo-ruim"].response_text == ""
+    assert _texto_de(eventos, "modelo-bom") == "resposta ok (modelo-bom)"
+    erros = [d for e, d in eventos if e == "error"]
+    assert [d["model_id"] for d in erros] == ["modelo-ruim"]
+    # O cliente recebe uma frase fixa; o texto cru do provedor não sai do servidor.
+    assert "503" not in json.dumps(erros)
+    assert eventos[-1][0] == "done"
 
 
-async def test_todos_os_modelos_falhando_ainda_devolve_resposta(
-    db, user, model_pricing_factory, registra_providers
+async def test_todos_os_modelos_falhando_ainda_encerra_o_stream(
+    client, user, model_pricing_factory, registra_providers
 ):
-    """Falha total precisa virar erro por modelo, não exceção que perde a interação."""
     await model_pricing_factory(model_id="m1", provider_type="anthropic")
     await model_pricing_factory(model_id="m2", provider_type="openai")
     registra_providers(anthropic=ProviderQueFalha(), openai=ProviderQueFalha())
 
-    resposta = await AgregadorService(db, user.id).query(
-        AgregadorRequest(prompt="Pergunta qualquer", models=["m1", "m2"])
-    )
+    eventos = await _consultar(client, user, "Pergunta qualquer", ["m1", "m2"])
 
-    assert len(resposta.responses) == 2
-    assert all(r.error for r in resposta.responses)
+    assert sorted(d["model_id"] for e, d in eventos if e == "error") == ["m1", "m2"]
+    assert eventos[-1][0] == "done", "com tudo falhando o stream ainda precisa terminar limpo"
 
 
 async def test_erro_de_um_modelo_e_persistido(
-    db, user, model_pricing_factory, registra_providers
+    client, db, user, model_pricing_factory, registra_providers
 ):
-    """O erro precisa ficar registrado, senão não há como investigar depois."""
     await model_pricing_factory(model_id="modelo-bom", provider_type="anthropic")
     await model_pricing_factory(model_id="modelo-ruim", provider_type="openai")
-    registra_providers(anthropic=ProviderQueResponde(), openai=ProviderQueFalha("timeout"))
+    registra_providers(anthropic=ProviderQueResponde(), openai=ProviderQueFalha("timeout de conexão"))
 
-    await AgregadorService(db, user.id).query(
-        AgregadorRequest(prompt="Pergunta", models=["modelo-bom", "modelo-ruim"])
-    )
+    await _consultar(client, user, "Pergunta", ["modelo-bom", "modelo-ruim"])
 
-    linhas = (await db.execute(select(InteractionResponse))).scalars().all()
-    por_modelo = {r.model_used: r for r in linhas}
-    assert por_modelo["modelo-ruim"].error_message
+    por_modelo = {r.model_used: r for r in (await db.execute(select(InteractionResponse))).scalars()}
+    # O diagnóstico fica no banco, mesmo não indo para a tela.
     assert "timeout" in por_modelo["modelo-ruim"].error_message
     assert por_modelo["modelo-bom"].error_message is None
+    assert por_modelo["modelo-bom"].response_text == "resposta ok (modelo-bom)"
 
 
 # ── Contabilização de custo ──────────────────────────────────────────────
 
 async def test_so_cobra_pelos_modelos_que_responderam(
-    db, user, model_pricing_factory, registra_providers
+    client, db, user, model_pricing_factory, registra_providers
 ):
     """Modelo que falhou não pode gerar custo."""
     await model_pricing_factory(
@@ -145,46 +174,73 @@ async def test_so_cobra_pelos_modelos_que_responderam(
         openai=ProviderQueFalha(),
     )
 
-    await AgregadorService(db, user.id).query(
-        AgregadorRequest(prompt="Pergunta", models=["modelo-bom", "modelo-ruim"])
-    )
+    await _consultar(client, user, "Pergunta", ["modelo-bom", "modelo-ruim"])
 
-    uso = (await db.execute(select(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user.id))).scalar_one()
+    uso = (
+        await db.execute(
+            select(UserWeeklyUsage)
+            .where(UserWeeklyUsage.user_id == user.id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     # 1M tokens de entrada a 10 + 1M de saída a 30 = 40 USD, só do modelo que respondeu.
     assert uso.total_cost_usd == Decimal("40.000000")
 
 
 async def test_modelo_desconhecido_e_ignorado_sem_quebrar(
-    db, user, model_pricing_factory, registra_providers
+    client, user, model_pricing_factory, registra_providers
 ):
     """Model id que não está na tabela de preços não pode derrubar a consulta."""
     await model_pricing_factory(model_id="modelo-bom", provider_type="anthropic")
     registra_providers(anthropic=ProviderQueResponde())
 
-    resposta = await AgregadorService(db, user.id).query(
-        AgregadorRequest(prompt="Pergunta", models=["modelo-bom", "modelo-que-nao-existe"])
-    )
+    eventos = await _consultar(client, user, "Pergunta", ["modelo-bom", "modelo-que-nao-existe"])
 
-    assert [r.model_id for r in resposta.responses] == ["modelo-bom"]
+    assert {d["model_id"] for e, d in eventos if e in ("delta", "complete", "error")} == {"modelo-bom"}
+    assert eventos[-1][0] == "done"
 
 
 # ── DLP no caminho do Agregador ──────────────────────────────────────────
 
-async def test_prompt_persistido_vai_sanitizado(
-    db, user, model_pricing_factory, registra_providers
+async def test_prompt_persistido_e_o_enviado_ao_modelo_vao_sanitizados(
+    client, db, user, model_pricing_factory, monkeypatch
 ):
     await model_pricing_factory(model_id="modelo-bom", provider_type="anthropic")
-    registra_providers(anthropic=ProviderQueResponde())
+    recebidos: list[str] = []
 
-    await AgregadorService(db, user.id).query(
-        AgregadorRequest(prompt="Paciente João da Silva, CPF 123.456.789-00, com febre",
-                         models=["modelo-bom"])
+    class ProviderEspiao(ProviderQueResponde):
+        async def stream(self, model_id, prompt, **kwargs):
+            recebidos.append(prompt)
+            async for token in super().stream(model_id, prompt, **kwargs):
+                yield token
+
+    monkeypatch.setitem(ai_providers.PROVIDER_TYPE_REGISTRY, "anthropic", ProviderEspiao())
+
+    await _consultar(
+        client, user, "Paciente João da Silva, CPF 123.456.789-00, com febre", ["modelo-bom"]
     )
 
-    from app.models.models import Interaction
-
     interacao = (await db.execute(select(Interaction))).scalar_one()
-    assert "123.456.789-00" not in interacao.prompt_text
-    assert "João da Silva" not in interacao.prompt_text
-    assert interacao.prompt_sanitized is True
-    assert "febre" in interacao.prompt_text
+    for texto in (interacao.prompt_text, recebidos[0]):
+        assert "123.456.789-00" not in texto
+        assert "João da Silva" not in texto
+
+
+async def test_resposta_do_modelo_tambem_e_gravada_mascarada(
+    client, db, user, model_pricing_factory, registra_providers
+):
+    """
+    Achado de 2026-09-21: só o `query()` morto mascarava a RESPOSTA antes de gravar.
+    O caminho em uso gravava o texto cru — um modelo que repete o CPF do paciente na
+    resposta deixava o dado no histórico, mesmo com o prompt mascarado.
+    """
+    await model_pricing_factory(model_id="modelo-bom", provider_type="anthropic")
+    registra_providers(
+        anthropic=ProviderQueResponde(texto="Para o paciente de CPF 123.456.789-00, a conduta é")
+    )
+
+    await _consultar(client, user, "Qual a conduta?", ["modelo-bom"])
+
+    gravada = (await db.execute(select(InteractionResponse.response_text))).scalar_one()
+    assert "123.456.789-00" not in gravada
+    assert "a conduta é" in gravada, "o mascaramento não pode comer o resto da resposta"

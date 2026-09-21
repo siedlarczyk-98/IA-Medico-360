@@ -26,12 +26,12 @@ estes testes cobrem.
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.models import Interaction, InteractionResponse
 from app.services.integracoes import ai_providers
 from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
+from tests.conftest import fabrica_sobre
 from tests.test_orquestrador_stream import (  # noqa: F401 — fixtures reusadas
     parse_sse,
     sem_dependencias_externas,
@@ -68,7 +68,7 @@ class MaritacaQueFalha:
 
 @pytest.fixture
 def servico(db_conn, user):
-    factory = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    factory = fabrica_sobre(db_conn)
     return OrquestradorStreamService(factory, user.id)
 
 

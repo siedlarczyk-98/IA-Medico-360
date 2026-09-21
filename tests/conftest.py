@@ -41,7 +41,28 @@ if "test" not in _nome_banco.lower():
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("JWT_SECRET_KEY", "chave-de-teste-nao-usar-em-producao-com-32-bytes-ou-mais")
 os.environ.setdefault("APP_ENV", "development")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
+
+# Redis de teste numa porta FECHADA, por atribuição e não `setdefault`. A app
+# trata toda falha de Redis como silenciosa, então um Redis local ligado na 6379
+# mudava o comportamento da suíte sem ninguém perceber: cache de triagem
+# respondendo, rate limit por e-mail contando entre testes. Na máquina de um
+# passava, na do outro não. Porta fechada dá o mesmo resultado em todo lugar.
+os.environ["REDIS_URL"] = "redis://127.0.0.1:1/15"
+
+# Chaves de provedores: FALSAS, também por atribuição. O `.env` do projeto tem as
+# chaves reais, e o pydantic-settings as carregava na suíte — a `PUBMED_API_KEY`
+# de produção apareceu na URL de uma chamada que a guarda de rede bloqueou. A
+# guarda segura a chamada, mas a chave não tem por que estar na memória do teste.
+# A exceção é o E2E deliberado, que precisa delas (ver `test_e2e_pergunta_real`).
+if os.environ.get("E2E_REDE_REAL") != "1":
+    for _chave in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_AI_API_KEY",
+        "PERPLEXITY_API_KEY", "MARITACA_API_KEY", "PHARMADB_API_KEY",
+        "PUBMED_API_KEY", "SENDGRID_API_KEY", "CURSEDUCA_API_KEY",
+        "CURSEDUCA_ACCESS_TOKEN", "INTERCOM_IDENTITY_SECRET", "PHOENIX_API_KEY",
+        "SENTRY_DSN",
+    ):
+        os.environ[_chave] = "" if _chave in ("PHOENIX_API_KEY", "SENTRY_DSN") else "chave-falsa-de-teste"
 
 import pytest
 import pytest_asyncio
@@ -125,13 +146,82 @@ async def db_conn(engine):
             await trans.rollback()
 
 
+def fabrica_sobre(db_conn) -> async_sessionmaker:
+    """
+    A ÚNICA forma de montar sessão sobre a conexão do teste.
+
+    `join_transaction_mode="create_savepoint"` é o ponto. O padrão do SQLAlchemy
+    para uma conexão que já está em transação é `rollback_only`: o `commit()` da
+    sessão não faz nada, mas o `rollback()` reverte a transação EXTERNA — a do
+    harness. Todo caminho da app que chama `db.rollback()` (recuperação de
+    erro no stream, no `/query`, no digest, no cache semântico) apagava os
+    dados que o próprio teste tinha preparado, e por isso esses caminhos eram
+    intestáveis. Com savepoint, `commit()` e `rollback()` da sessão agem só
+    sobre o savepoint dela, e o rollback final de `db_conn` continua limpando
+    tudo.
+
+    Existiam 18 cópias de `async_sessionmaker(bind=db_conn, ...)` espalhadas
+    pelos testes. Uma só, para que esta decisão valha em todas.
+    """
+    return async_sessionmaker(
+        bind=db_conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+    )
+
+
+@pytest.fixture
+def fabrica_de_sessao(db_conn) -> async_sessionmaker:
+    """Para serviços que abrem a própria sessão via `async_session_factory`."""
+    return fabrica_sobre(db_conn)
+
+
+@pytest_asyncio.fixture
+async def fabrica_com_conexoes_reais(engine):
+    """
+    Fábrica de sessão sobre um pool REAL de duas conexões, com commit de verdade.
+
+    OPCIONAL, e cara — só para o que o harness normal não consegue exprimir:
+    bloqueio entre transações, esgotamento de pool, corrida entre sessões. Em
+    `db_conn` tudo divide UMA conexão, então duas sessões nunca disputam linha
+    nem conexão, e um teste de concorrência ali passa sem provar nada.
+
+    O preço é o isolamento: aqui o commit é real, então a limpeza é por
+    TRUNCATE de todas as tabelas no fim. Não misture com `db`/`client` no mesmo
+    teste — a transação aberta de `db_conn` não enxerga o que for comitado aqui
+    e ainda pode segurar bloqueio contra o TRUNCATE.
+
+    `pool_size=2, max_overflow=0, pool_timeout=2`: o teste de esgotamento de
+    pool falha em 2s em vez de pendurar a suíte.
+    """
+    tabelas = ", ".join(
+        f'"{t.schema}"."{t.name}"' if t.schema else f'"{t.name}"'
+        for t in Base.metadata.sorted_tables
+    )
+
+    async def _truncar():
+        async with engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE {tabelas} RESTART IDENTITY CASCADE"))
+
+    # Antes TAMBÉM: aqui o commit é real, então uma execução anterior morta no
+    # meio (Ctrl+C, processo encerrado) deixa linhas que o rollback do harness
+    # normal nunca alcança — e elas contaminariam a suíte inteira.
+    await _truncar()
+    eng = create_async_engine(
+        TEST_DATABASE_URL, pool_size=2, max_overflow=0, pool_timeout=2
+    )
+    try:
+        yield async_sessionmaker(bind=eng, expire_on_commit=False)
+    finally:
+        await eng.dispose()
+        await _truncar()
+
+
 @pytest_asyncio.fixture
 async def db(db_conn) -> AsyncSession:
     """
     Sessão por teste. Nada do que o teste escreve sobrevive: a conexão está
     numa transação externa revertida em `db_conn`.
     """
-    session = async_sessionmaker(bind=db_conn, expire_on_commit=False)()
+    session = fabrica_sobre(db_conn)()
     try:
         yield session
     finally:
@@ -169,7 +259,7 @@ async def user_factory(db):
             name=name,
         )
         db.add(user)
-        await db.flush()
+        await db.commit()
         await db.refresh(user)
         return user
 
@@ -189,7 +279,7 @@ async def folder_factory(db):
     ) -> Folder:
         folder = Folder(user_id=dono.id, name=name, clinical_context=clinical_context)
         db.add(folder)
-        await db.flush()
+        await db.commit()
         await db.refresh(folder)
         return folder
 
@@ -213,7 +303,7 @@ async def conversation_factory(db):
             folder_id=folder.id if folder else None,
         )
         db.add(conv)
-        await db.flush()
+        await db.commit()
         await db.refresh(conv)
         return conv
 
@@ -249,7 +339,7 @@ async def model_pricing_factory(db):
             status=status,
         )
         db.add(mp)
-        await db.flush()
+        await db.commit()
         pricing._pricing_cache.clear()
         return mp
 
@@ -324,7 +414,7 @@ async def calculator_factory(db):
             formula_key=formula_key, is_active=True,
             clinical_reference="Cockcroft & Gault, 1976",
         ))
-        await db.flush()
+        await db.commit()
         await db.refresh(calc)
         catalogo_cache.clear()
         return calc
@@ -366,17 +456,47 @@ async def admin(user_factory) -> User:
 # Nenhum teste pode tocar Anthropic, OpenAI, PharmaDB, PubMed, Curseduca ou
 # SendGrid. Um teste que vaze para a rede é lento, instável e gasta cota real —
 # além de poder mandar dado de teste para um serviço de verdade.
+#
+# A guarda tem DUAS camadas, e a segunda existe porque a primeira não basta:
+#
+#  1. `VazamentoDeRede` herda de `BaseException`, não de `Exception`. A app está
+#     cheia de `except Exception` em volta de chamada de modelo — é o caminho de
+#     contingência, e é legítimo. Mas ele transformava a violação da guarda em
+#     "provedor falhou", e o teste passava exercitando o fallback em vez do
+#     caminho principal que o nome dele promete. Eram 23 testes assim.
+#
+#  2. Ainda assim alguém pode escrever `except BaseException` (ou o
+#     `asyncio.gather` de um TaskGroup pode empacotar a exceção). Por isso toda
+#     tentativa também é REGISTRADA, e o registro é conferido no encerramento do
+#     teste. Engolir a exceção não salva mais ninguém: o teste reprova no fim.
+
+class VazamentoDeRede(BaseException):
+    """
+    Chamada HTTP externa durante um teste.
+
+    Herda de `BaseException` de propósito, para atravessar os `except Exception`
+    do código sob teste. Não capture isto.
+    """
+
 
 @pytest.fixture(autouse=True)
 def bloqueia_rede_externa(request, monkeypatch):
     """Falha o teste se ele tentar sair para a rede. Use a marca `rede_real` para optar por fora."""
     if request.node.get_closest_marker("rede_real"):
+        # `yield` e não `return`: fixture generator precisa produzir um valor em
+        # todos os caminhos, senão o pytest levanta "did not yield a value".
+        yield
         return
 
-    async def _proibido(*args, **kwargs):
-        raise AssertionError(
-            "Teste tentou fazer uma chamada HTTP externa. Use um fake do provider "
-            "ou marque o teste com @pytest.mark.rede_real se a chamada for intencional."
+    tentativas: list[str] = []
+
+    async def _proibido(self, requisicao, *args, **kwargs):
+        alvo = f"{requisicao.method} {requisicao.url}"
+        tentativas.append(alvo)
+        raise VazamentoDeRede(
+            f"Teste tentou fazer uma chamada HTTP externa: {alvo}. Use um fake do "
+            "provider ou marque o teste com @pytest.mark.rede_real se a chamada "
+            "for intencional."
         )
 
     # Bloqueia o TRANSPORTE de rede, não o `AsyncClient`: o cliente de teste também
@@ -385,6 +505,51 @@ def bloqueia_rede_externa(request, monkeypatch):
     monkeypatch.setattr(
         "httpx.AsyncHTTPTransport.handle_async_request", _proibido, raising=False
     )
+
+    yield tentativas
+
+    if tentativas:
+        distintas = sorted(set(tentativas))
+        raise AssertionError(
+            f"O teste passou, mas tentou {len(tentativas)} chamada(s) HTTP externa(s) "
+            "e alguém engoliu o erro da guarda — provavelmente um `except Exception` "
+            "em volta da chamada de modelo. O que o teste exercitou foi o caminho de "
+            "contingência, não o principal.\nAlvos: " + ", ".join(distintas)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Estado de processo que vaza entre testes
+# ─────────────────────────────────────────────────────────────────────────────
+# Disjuntores e rate limiter são objetos de MÓDULO: o rollback do banco não os
+# alcança. Um teste que provoca falhas de integração deixava o contador do
+# disjuntor a uma falha de abrir para os 170 testes seguintes, e um teste que
+# martela uma rota gastava a cota por IP dos próximos — falha que só aparecia
+# conforme a ordem de execução.
+
+#
+# O terceiro é o POOL DO ENGINE GLOBAL da app (`app.core.database.engine`). O
+# pytest-asyncio dá um event loop novo a cada teste, e uma conexão asyncpg só
+# funciona no loop em que nasceu. Quem usa o engine global sem override — o
+# `_checa_postgres` do health check, as tarefas de background — podia receber do
+# pool uma conexão do loop de um teste anterior. Às vezes o SQLAlchemy conseguia
+# descartá-la (o aviso `Connection._cancel was never awaited`), às vezes virava
+# erro: `test_readiness_ok_com_tudo_no_ar` falhava em ~2 de cada 7 rodadas.
+# `dispose(close=False)` troca o pool por um vazio sem tentar fechar, no loop
+# errado, conexões que já não podem ser fechadas.
+
+@pytest.fixture(autouse=True)
+def estado_de_processo_limpo():
+    from app.core import circuit_breaker
+    from app.core.database import engine as engine_da_app
+    from app.core.limiter import limiter
+
+    circuit_breaker.reset_todos()
+    limiter.reset()
+    engine_da_app.sync_engine.dispose(close=False)
+    yield
+    circuit_breaker.reset_todos()
+    limiter.reset()
 
 
 def pytest_configure(config):

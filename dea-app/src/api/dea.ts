@@ -20,6 +20,11 @@ export type Dispositivo = {
   confirmacoes: number
   contestacoes: number
   dias_desde_ultima_verificacao: number | null
+  /**
+   * Alguém disse que o aparelho foi retirado e ninguém o encontrou depois. Um
+   * relato só não tira do mapa (são precisas duas origens), mas a tela avisa.
+   */
+  remocao_relatada: boolean
 }
 
 export type Local = {
@@ -75,6 +80,7 @@ export type VerificacaoResposta = {
   confianca: Confianca
   confirmacoes: number
   contestacoes: number
+  remocao_relatada: boolean
   mensagem: string
 }
 

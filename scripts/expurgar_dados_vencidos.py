@@ -1,7 +1,15 @@
 """
 Expurgo de dados vencidos (LGPD art. 16).
 
-Rodar diariamente. No Railway, como cron job:
+NÃO AGENDE ISTO COMO CRON. O expurgo diário roda DENTRO da aplicação
+(`app/services/expurgo_agendado.py`, ligado no `lifespan`). Este cabeçalho mandava
+configurar um cron job no Railway — e foi exatamente esse cron que parou sem avisar
+e deixou a retenção 39 dias sem rodar (2026-08-27). Um agendamento fora do processo
+não tem quem perceba que ele morreu; o de dentro tem teste
+(`tests/test_agendadores_ciclo_de_vida.py`) e vigilância.
+
+Este script ficou para execução MANUAL — conferir depois de um incidente, ou forçar
+uma rodada:
 
     python -m scripts.expurgar_dados_vencidos
 

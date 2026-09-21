@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from app.core.citacoes_fonte import Citacao, criar_citacao
 from app.core.config import get_settings
-from app.core.http_client import get_client
+from app.core.http_client import get_client, get_stream_client
 from app.core.prompts import SYSTEM_PROMPT_AGREGADOR
 from app.core.telemetry import _set_llm_output, async_llm_span, start_llm_span
 from app.middleware.dlp import sanitize_prompt_async
@@ -294,7 +294,7 @@ class AnthropicProvider(BaseProvider):
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
-        client = get_client()
+        client = get_stream_client()
         tokens_in: int | None = None
         payload: dict = {
             "model": model_id,
@@ -502,7 +502,7 @@ class OpenAIProvider(BaseProvider):
 
     async def stream(self, model_id: str, prompt: str, timeout: int = 30, system_prompt: str | None = None, temperature: float = 1.0, web_search: bool = False, image_content: dict | None = None, max_tokens: int = 4096, history: list[dict] | None = None) -> AsyncIterator[StreamToken]:
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
-        client = get_client()
+        client = get_stream_client()
         span = start_llm_span("openai", model_id, prompt)
         full_text: list[str] = []
         try:
@@ -704,7 +704,7 @@ class GeminiProvider(BaseProvider):
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}"
             f":streamGenerateContent?alt=sse"
         )
-        client = get_client()
+        client = get_stream_client()
         payload: dict = {
             "system_instruction": {"parts": [{"text": sys_prompt}]},
             "contents": [*self._history_to_contents(history), {"role": "user", "parts": self._build_parts(prompt, image_content)}],
@@ -867,7 +867,7 @@ class PerplexityProvider(BaseProvider):
         """
         prompt = self._apply_image_fallback(prompt, image_content)
         sys_prompt = system_prompt or SYSTEM_PROMPT_AGREGADOR
-        client = get_client()
+        client = get_stream_client()
         span = start_llm_span("perplexity", model_id, prompt)
         full_text: list[str] = []
         tokens_in = None

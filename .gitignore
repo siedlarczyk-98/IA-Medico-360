@@ -35,3 +35,8 @@ htmlcov/
 # Dumps de backup: dado real de producao, NUNCA versionado.
 backups/
 *.dump
+
+# Configuracao LOCAL do Claude Code (permissoes da maquina de cada um). Estava
+# versionada; para parar de rastrear o arquivo que ja esta no repositorio:
+#   git rm --cached .claude/settings.local.json
+.claude/settings.local.json

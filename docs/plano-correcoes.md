@@ -3,7 +3,7 @@
 > Origem: revisão externa de 12 itens, verificada linha a linha contra o código em
 > 2026-09-15. Este documento é o plano de execução, não a análise original.
 >
-> **Status:** proposto, aguardando revisão. Nada implementado ainda.
+> **Status:** EM PARTE IMPLEMENTADO — este cabeçalho dizia "nada implementado ainda" enquanto `debitos.md` já registrava itens daqui como feitos. O estado de cada item está no próprio item e em `debitos.md`; o que ainda depende de alguém está em `docs/pendencias.md`. Não arquivar: dois testes leem este arquivo pelo caminho.
 
 ## Como ler este documento
 

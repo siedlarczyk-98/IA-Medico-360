@@ -45,6 +45,36 @@ class InteracoesIndisponiveisError(RuntimeError):
     """
 
 
+class PharmaDBIndisponivelError(RuntimeError):
+    """
+    A consulta ao PharmaDB não pôde ser concluída — e isso NÃO é "não encontrado".
+
+    Mesma distinção de `InteracoesIndisponiveisError`, agora para bula,
+    receituário, genéricos, produto e princípio ativo. Todas essas funções
+    terminavam em `except Exception: return None`, e o orquestrador lê `None`
+    como "a base respondeu e não tem": com o PharmaDB fora do ar o médico recebia
+    "não encontrado na base PharmaDB. Verifique o nome do medicamento". No
+    receituário isso é perigoso — "não encontrado" se lê como "não é controlado".
+
+    `None` agora significa UMA coisa: a base respondeu e não achou (lista vazia ou
+    404). Todo o resto — timeout, erro de conexão, 5xx, circuito aberto, 401 que
+    sobrevive à renovação do token, resposta malformada — levanta esta exceção,
+    e `OrquestradorService._handle_pharma` cai para o modelo COM o aviso de que a
+    base está indisponível. Aquele ramo já existia; só nunca era alcançado.
+    """
+
+
+def _nao_encontrado_ou_levanta(contexto: str, exc: Exception) -> None:
+    """Devolve `None` se a base respondeu 404; senão levanta indisponibilidade."""
+    if isinstance(exc, PharmaDBIndisponivelError):
+        raise exc
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
+        return None
+    # Tipo junto da mensagem: `httpx.ReadTimeout` tem `str()` vazio.
+    logger.error("PharmaDB indisponível em %s: %s: %s", contexto, type(exc).__name__, exc)
+    raise PharmaDBIndisponivelError(f"falha ao consultar {contexto}") from exc
+
+
 SEMAFORO = {
     "grave":    {"level": 4, "color": "RED",    "emoji": "🔴"},
     "moderada": {"level": 3, "color": "YELLOW", "emoji": "🟡"},
@@ -121,9 +151,11 @@ class PharmaDBService:
 
     async def _get_redis(self) -> redis.Redis:
         if self._redis is None:
-            self._redis = redis.from_url(
-                settings.redis_url, decode_responses=True, max_connections=20
-            )
+            # O MESMO cliente do resto da app — pool bloqueante, com timeouts. Era
+            # um segundo pool de 20 conexões, sem timeout, só para o PharmaDB.
+            from app.services.cache_service import _get_redis
+
+            self._redis = _get_redis()
         return self._redis
 
     async def _cache_get(self, key: str) -> dict | list | None:
@@ -199,12 +231,6 @@ class PharmaDBService:
     async def _get(self, path: str, params: dict | None = None) -> dict:
         return await self._request("GET", path, params=params)
 
-    async def _post(self, path: str, body: dict) -> dict:
-        return await self._request(
-            "POST", path,
-            headers={"Content-Type": "application/json"},
-            json=body,
-        )
 
     # ── Princípios Ativos ─────────────────────────────────────────────────────
 
@@ -236,8 +262,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, result, TTL_PA)
             return result
         except Exception as e:
-            logger.error(f"Erro ao buscar PA '{nome}': {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"princípio ativo '{nome}'", e)
 
     # ── Produtos ──────────────────────────────────────────────────────────────
 
@@ -266,8 +291,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, result, TTL_PRODUTO)
             return result
         except Exception as e:
-            logger.error(f"Erro ao buscar produto '{nome}': {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"produto '{nome}'", e)
 
     # ── Interações ────────────────────────────────────────────────────────────
 
@@ -303,8 +327,13 @@ class PharmaDBService:
         )
         for nome, pa in zip(nomes_genericos, pa_results):
             if isinstance(pa, BaseException):
-                logger.error(f"Erro ao resolver PA de '{nome}': {pa}")
-                nao_encontrados.append(nome)
+                # Mesma regra das interações, um passo antes: o fármaco cuja
+                # busca FALHOU ia para `nao_encontrados`, e com a base fora do ar
+                # o médico lia "Encontrei apenas 0 fármaco(s) na base".
+                logger.error("Falha ao resolver o PA de '%s' — checagem abortada: %s", nome, pa)
+                raise InteracoesIndisponiveisError(
+                    f"não foi possível consultar o princípio ativo de {nome}"
+                ) from pa
             elif pa:
                 pas.append(pa)
             else:
@@ -452,8 +481,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, result, TTL_BULA)
             return result
         except Exception as e:
-            logger.error(f"Erro ao buscar bula '{nome}': {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"bula de '{nome}'", e)
 
     # ── Receita / Dispensação ─────────────────────────────────────────────────
 
@@ -489,8 +517,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, result, TTL_RECEITA)
             return result
         except Exception as e:
-            logger.error(f"Erro ao buscar receita '{nome}': {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"receituário de '{nome}'", e)
 
     # ── Genéricos / Intercambiáveis ───────────────────────────────────────────
 
@@ -522,8 +549,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, result, TTL_GENERICOS)
             return result
         except Exception as e:
-            logger.error(f"Erro ao buscar genéricos de '{nome}': {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"genéricos de '{nome}'", e)
 
     # ── Histórico de Comercialização ──────────────────────────────────────────
 
@@ -538,8 +564,7 @@ class PharmaDBService:
             await self._cache_set(cache_key, data, TTL_PRODUTO)
             return data
         except Exception as e:
-            logger.error(f"Erro ao buscar histórico do produto {produto_id}: {e}")
-            return None
+            return _nao_encontrado_ou_levanta(f"histórico do produto {produto_id}", e)
 
     async def mensagem_nao_encontrado(self, nome: str, contexto: str) -> str:
         """

@@ -30,8 +30,10 @@ que era no térreo" é ordens de grandeza maior.
 
 import math
 
-from sqlalchemy import text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.dea import Dispositivo, ResultadoVerificacaoEnum, Verificacao
 
 # Raio médio da Terra, em km — o mesmo valor usado do lado do cliente.
 RAIO_TERRA_KM = 6371.0
@@ -140,3 +142,48 @@ async def buscar_por_raio(
         },
     )
     return [dict(linha) for linha in resultado.mappings()]
+
+
+async def origens_que_relataram_remocao(db, dispositivo_ids) -> dict:
+    """Por dispositivo, as ORIGENS distintas com relato de remoção ainda pendente.
+
+    "Pendente" = feito depois da última vez que alguém encontrou o aparelho. Uma
+    confirmação zera os relatos anteriores: se o aparelho foi visto depois de
+    alguém dizer que sumiu, o relato estava errado ou o aparelho voltou.
+
+    Conta ORIGEM, não linha. É isso que torna os relatos independentes: a mesma
+    máquina relatando dez vezes continua valendo um. `ip_hash` nulo (ambiente
+    sem sal configurado) conta como uma única origem.
+
+    Limite conhecido, e aceito: o hash de origem rotaciona a cada 24h por
+    desenho (ver `anonimato.py`), então a mesma pessoa em dois dias diferentes
+    conta como duas origens. É um degrau, não um muro — o mesmo que o docstring
+    de `registrar_verificacao` já admite para a promoção a `ativo`.
+    """
+    ids = list(dispositivo_ids)
+    if not ids:
+        return {}
+
+    ultimo_encontrado = (
+        select(func.max(Verificacao.verificado_em))
+        .where(
+            Verificacao.dispositivo_id == Dispositivo.id,
+            Verificacao.resultado == ResultadoVerificacaoEnum.ENCONTRADO.value,
+        )
+        .correlate(Dispositivo)
+        .scalar_subquery()
+    )
+    consulta = (
+        select(Verificacao.dispositivo_id, func.coalesce(Verificacao.ip_hash, ""))
+        .join(Dispositivo, Dispositivo.id == Verificacao.dispositivo_id)
+        .where(
+            Verificacao.dispositivo_id.in_(ids),
+            Verificacao.resultado == ResultadoVerificacaoEnum.REMOVIDO.value,
+            or_(ultimo_encontrado.is_(None), Verificacao.verificado_em > ultimo_encontrado),
+        )
+        .distinct()
+    )
+    origens: dict = {}
+    for dispositivo_id, origem in await db.execute(consulta):
+        origens.setdefault(dispositivo_id, set()).add(origem)
+    return origens

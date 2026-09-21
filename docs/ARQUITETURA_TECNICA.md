@@ -317,10 +317,10 @@ especialidade" seria prometer o que aquele app não entrega.
 |---|---|---|---|---|
 | POST | /api/v1/auth/register | não | 5/min | Cadastro público (se `allow_public_registration`); envia convite por e-mail |
 | POST | /api/v1/auth/invite/generate | sim (admin) | 30/min | Gera token de convite; grava `AuditLog action=invite.generate` |
-| POST | /api/v1/auth/invite/accept | não | 10/min | Aceita convite por token+e-mail; seta cookie SSO |
+| POST | /api/v1/auth/invite/accept | não | 10/min | Aceita convite por token+e-mail; seta o cookie de sessão (por host — não há SSO entre apps, ver §2) |
 | POST | /api/v1/auth/embed/token | não | 5/min | SSO para embeds; valida `Origin` e o membro via Curseduca; cria usuário se necessário; **reconcilia nome e especialidade** (§3.4) |
 | POST | /api/v1/auth/otp/request | não | 3/15min (+3/900s por e-mail) | Solicita OTP por e-mail |
-| POST | /api/v1/auth/otp/verify | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta cookie SSO |
+| POST | /api/v1/auth/otp/verify | não | 5/min (+10/900s por e-mail) | Verifica OTP; seta o cookie de sessão (por host — não há SSO entre apps, ver §2) |
 | POST | /api/v1/auth/onboarding | sim | 30/min | Aplica o que veio e o SERVIDOR decide se acabou; consentimento na mesma transação |
 | GET | /api/v1/auth/me | sim | — | Usuário logado + `onboarding_pendencias`, `med_status_opcoes`, `specialty_editavel` |
 | PATCH | /api/v1/auth/me | sim | 30/min | Nome, e-mail, CRM+UF e especialidade — esta última só se `specialty_editavel` (senão 409) |
@@ -372,9 +372,7 @@ Eventos SSE de `/stream`: `start` · `cache_hit` · `clarification` · `token` �
 | Método | Path | Linha | Rate limit | Descrição |
 |---|---|---|---|---|
 | GET | /api/v1/agregador/models | 45 | — | Modelos ativos, com disponibilidade derivada da chave configurada e `cost_tier` |
-| POST | /api/v1/agregador/query | 93 | 30/min | Consulta a N modelos em paralelo (`MAX_MODELS_PER_QUERY`) |
 | POST | /api/v1/agregador/stream | 123 | 30/min | SSE multi-modelo; eventos `delta`/`complete`/`error`/`pubmed`/`disclaimer`/`done` |
-| GET | /api/v1/agregador/history | 292 | — | Histórico pesquisável por query/modelo/data |
 
 ### 4.4 `/conversations` e `/folders`
 
@@ -483,8 +481,8 @@ flowchart TD
 | Modo | Modelo primário | Fallback | Temp. |
 |---|---|---|---|
 | `QUICK_SEARCH` | `sonar-pro` (Perplexity) | `gemini-2.5-flash` | 0.0 |
-| `CLINICAL_REASONING` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` | 0.0 |
-| `EXAM_REVIEW` | `claude-sonnet-4-6` | `gpt-4o` → `gemini-2.5-flash` (todos com visão) | 0.0 |
+| `CLINICAL_REASONING` | `claude-sonnet-5` | `gpt-4o` → `gemini-2.5-flash` | 0.0 |
+| `EXAM_REVIEW` | `claude-sonnet-5` | `gpt-4o` → `gemini-2.5-flash` (todos com visão) | 0.0 |
 | `PRODUCTIVITY` | `gpt-5.4-nano` | `gemini-2.5-flash` | 0.7 |
 | `DATA_OCEAN` | `sabia-4-thinking` (Maritaca) | **nenhum, de propósito** | 0.0 |
 | `PHARMA_CHECK` / `PHARMA_BULA` / `PHARMA_RECEITA` / `PHARMA_GENERICO` | PharmaDB (sem LLM) | — | — |
@@ -1179,9 +1177,6 @@ erDiagram
 | SENTRY_DSN / SENTRY_RELEASE | "" | não (vazio desliga o Sentry) |
 | SENTRY_TRACES_SAMPLE_RATE | 0.05 | não (amostra de transações: dá a taxa de 4xx/5xx por rota; baixar se o tráfego crescer no plano free) |
 | PHOENIX_API_KEY / PHOENIX_PROJECT_NAME / PHOENIX_ENDPOINT | "" / medico-360 / app.phoenix.arize.com/s/ruben-nogueira | não |
-| MAX_MODELS_PER_QUERY | 4 | não |
-| MAX_PROMPT_CHARS | 4000 | não |
-| DEFAULT_TIMEOUT_SECONDS | 30 | não |
 | CALCULATOR_TEXT_FIELD_MAX_CHARS | 2000 | não |
 | CALCULATOR_CATALOG_CACHE_TTL_SECONDS | 300 | não |
 | CALCULATOR_EXTRACTION_MAX_CONCURRENCY | 8 | não |
@@ -1337,7 +1332,7 @@ Detalhes do CI que valem saber antes de mexer:
 | `medir_cache_semantico.py` | Mede o cache antes de mexer no índice vetorial |
 | `seed_calculators.py` + `seed_*` | Catálogo e calculadoras (Cockcroft-Gault, CURB-65, CHA₂DS₂-VASc/HAS-BLED, Risco CV SBC 2025) |
 | `seed_usuario_e2e.py` | Usuário fixo de UUID conhecido que o Playwright usa para assinar token |
-| `add_gemini_2_5_flash.py`, `deactivate_gemini_3_flash.py`, `update_claude_sonnet_model_id.py` | Manutenção de `model_pricing` — a disponibilidade de modelo é controlada pelo backend, nunca por exclusão hardcoded no frontend |
+| `add_gemini_2_5_flash.py`, `deactivate_gemini_3_flash.py` | Manutenção pontual de `model_pricing` (a fonte de verdade passou a ser `seed_models.py` + `scripts/dados/model_pricing.json`) — a disponibilidade de modelo é controlada pelo backend, nunca por exclusão hardcoded no frontend |
 | `generate_dev_token.py` | JWT de desenvolvimento (não versionado no git) |
 
 ---

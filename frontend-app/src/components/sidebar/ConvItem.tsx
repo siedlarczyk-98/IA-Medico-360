@@ -15,6 +15,11 @@ interface ConvItemProps {
   onDragStart?: (convId: string) => void;
 }
 
+/** O dispositivo principal não tem hover (celular, tablet). */
+function semHover(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(hover: none)').matches;
+}
+
 function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -23,7 +28,10 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
   const btnRef = useRef<HTMLButtonElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
   const isActive = conv.id === activeId;
-  const showBtn = hovered || menuOpen;
+  // Em tela de toque não existe hover: o botão de opções nunca aparecia, e mover
+  // uma conversa para uma pasta era IMPOSSÍVEL no celular.
+  const toque = semHover();
+  const showBtn = hovered || menuOpen || toque;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -107,7 +115,9 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
               border: 'none',
               cursor: 'pointer',
               color: 'var(--pen2)',
-              padding: '2px 4px',
+              // Alvo de toque: 12 px de ícone + 20 de respiro = 32 px. Com 2 px
+              // o dedo acertava a conversa, não o menu.
+              padding: toque ? '10px' : '2px 4px',
               borderRadius: 4,
               display: 'flex',
               alignItems: 'center',

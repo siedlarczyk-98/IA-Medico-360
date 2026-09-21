@@ -79,13 +79,22 @@ async def extract_file(
             ),
         )
 
-    content = await file.read()
-
     is_image = ALLOWED_CONTENT_TYPES[content_type] == "image"
     size_limit = MAX_IMAGE_BYTES if is_image else MAX_FILE_BYTES
-    if len(content) > size_limit:
-        limit_mb = size_limit // (1024 * 1024)
-        raise HTTPException(status_code=413, detail=f"Arquivo maior que {limit_mb} MB.")
+
+    # Em BLOCOS, parando no limite. `await file.read()` trazia o arquivo inteiro
+    # para a memória e só então media: um envio de 500 MB custava 500 MB de RAM
+    # para descobrir que passava de 10. (O corpo gigante em si é barrado antes,
+    # pelo `Content-Length`, em `LimiteDeCorpoMiddleware`.)
+    blocos: list[bytes] = []
+    lidos = 0
+    while bloco := await file.read(64 * 1024):
+        lidos += len(bloco)
+        if lidos > size_limit:
+            limit_mb = size_limit // (1024 * 1024)
+            raise HTTPException(status_code=413, detail=f"Arquivo maior que {limit_mb} MB.")
+        blocos.append(bloco)
+    content = b"".join(blocos)
 
     file_kind = ALLOWED_CONTENT_TYPES[content_type]
 

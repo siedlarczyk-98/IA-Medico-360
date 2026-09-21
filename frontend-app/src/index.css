@@ -28,3 +28,14 @@ html, body, #root {
 
 button { font-family: inherit; cursor: pointer; }
 textarea { font-family: inherit; }
+
+/* Altura da aplicação. `100vh` no iOS inclui a área da barra do navegador: o
+   layout ficava mais alto que a tela visível e o campo de digitação ia parar
+   embaixo da barra. `100dvh` é a altura REALMENTE visível, e acompanha a barra
+   abrindo e fechando. As duas linhas são de propósito: navegador que não conhece
+   `dvh` ignora a segunda e fica com a primeira — num estilo inline não haveria
+   esse fallback, e o valor desconhecido deixaria o contêiner sem altura. */
+.app-raiz {
+  height: 100vh;
+  height: 100dvh;
+}

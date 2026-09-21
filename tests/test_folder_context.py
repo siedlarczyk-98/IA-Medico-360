@@ -41,6 +41,7 @@ from app.services.folder_context_service import (
     recuperar_trechos,
 )
 from app.services.orquestrador_shared import load_context_messages
+from tests.conftest import fabrica_sobre
 
 # asyncio_mode=auto no pytest.ini — os testes async não precisam de marca de
 # módulo, e uma marca aqui pegaria também os síncronos de formatação.
@@ -417,11 +418,10 @@ async def test_conversa_nova_indexa_a_pasta_na_primeira_pergunta(
     """
     from sqlalchemy import func
     from sqlalchemy import select as sa_select
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         folder_context_service, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
     pasta = await folder_factory(user, "Pasta")
@@ -460,11 +460,10 @@ async def test_contexto_da_pasta_nao_espera_o_embedding(
     """
     import asyncio
 
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         folder_context_service, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
     async def _embed_travado(_client, textos):
@@ -500,10 +499,9 @@ async def test_indexacao_em_background_usa_sessao_propria(
     A sessão da requisição não pode ser reaproveitada: `AsyncSession` não é
     segura para uso concorrente e a requisição faz commit no meio.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     sessoes_abertas = []
-    fabrica = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    fabrica = fabrica_sobre(db_conn)
 
     def _fabrica_espia():
         sessao = fabrica()
@@ -535,11 +533,10 @@ async def test_duas_perguntas_seguidas_nao_indexam_a_pasta_duas_vezes(
     concorrentes do MESMO conjunto pendente — trabalho e custo em dobro."""
     import asyncio
 
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         folder_context_service, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
     lotes = []

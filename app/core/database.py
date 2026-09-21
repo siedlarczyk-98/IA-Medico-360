@@ -19,6 +19,23 @@ engine = create_async_engine(
     pool_size=30,
     max_overflow=10,
     pool_pre_ping=True,
+    # Pool esgotado tem de falhar RÁPIDO. O padrão é esperar 30 s por uma conexão:
+    # com o banco saturado, toda requisição autenticada ficava meio minuto
+    # pendurada antes de devolver 500, e a fila de espera mantinha o pool
+    # saturado mesmo depois de a causa passar. 5 s devolve o erro enquanto o
+    # usuário ainda está olhando, e deixa o pool se recuperar.
+    pool_timeout=5,
+    connect_args={
+        "server_settings": {
+            # Rede de segurança, não ajuste fino: nenhuma transação deveria ficar
+            # parada — o stream solta a conexão antes de chamar o modelo (ver
+            # `orquestrador_stream_service`). Se um caminho novo voltar a prender
+            # conexão ociosa, o Postgres a derruba em 3 min em vez de deixá-la
+            # segurando bloqueio indefinidamente. Folgado de propósito: o `/query`
+            # ainda espera o modelo dentro da transação.
+            "idle_in_transaction_session_timeout": "180000",
+        },
+    },
 )
 
 async_session_factory = async_sessionmaker(

@@ -557,7 +557,6 @@ MAX_CHARS_EVOLUCAO_NO_PROMPT = 8000
 
 FOLDER_KIND_CLINICAL = "clinical"
 FOLDER_KIND_GENERAL = "general"
-FOLDER_KINDS: frozenset[str] = frozenset({FOLDER_KIND_CLINICAL, FOLDER_KIND_GENERAL})
 
 # Cabeçalho do bloco por tipo de pasta.
 #

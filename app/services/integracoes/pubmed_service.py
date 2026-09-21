@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -29,6 +30,45 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+
+class _Cadencia:
+    """Espaça as chamadas ao eutils para não estourar a cota da NCBI.
+
+    A NCBI aceita 3 requisições por segundo sem chave e 10 com chave, POR IP — e
+    responde ao excesso com 429 e, se insistir, bloqueio do endereço. Cada
+    resposta clínica dispara várias consultas (uma por diretriz citada, mais a
+    busca de diretrizes novas), então bastavam uma ou duas perguntas por segundo
+    para a validação de referências cair PARA TODOS os médicos ao mesmo tempo.
+
+    Reserva o próximo horário livre de forma síncrona (sem `await` entre ler e
+    gravar, então não precisa de trava num event loop só) e dorme até ele. Sob
+    rajada a fila cresce e quem estoura é o `timeout_s` de `validate_with_pubmed`,
+    que já degrada para "sem validação" — muito melhor que o bloqueio do IP.
+
+    O teto é POR PROCESSO. Ao subir workers, dividir a taxa pelo número deles.
+    """
+
+    def __init__(self, por_segundo: float):
+        self._intervalo = 1.0 / por_segundo
+        self._proximo = 0.0
+
+    async def esperar(self) -> None:
+        agora = time.monotonic()
+        horario = max(agora, self._proximo)
+        self._proximo = horario + self._intervalo
+        if horario > agora:
+            await asyncio.sleep(horario - agora)
+
+
+# Margem abaixo do teto oficial (10/s e 3/s): o relógio deles não é o nosso.
+_cadencia_com_chave = _Cadencia(por_segundo=8)
+_cadencia_sem_chave = _Cadencia(por_segundo=2.5)
+
+
+async def vez_no_pubmed() -> None:
+    cadencia = _cadencia_com_chave if settings.pubmed_api_key else _cadencia_sem_chave
+    await cadencia.esperar()
 
 CLINICAL_MODES = {"QUICK_SEARCH", "CLINICAL_REASONING"}
 
@@ -189,6 +229,7 @@ async def _verify_citation(
 
     try:
         for term in searches:
+            await vez_no_pubmed()
             res = await client.get(
                 f"{PUBMED_BASE}/esearch.fcgi",
                 params={**base_params, "term": term},
@@ -257,6 +298,7 @@ async def _fetch_recent_guidelines(
         params["api_key"] = settings.pubmed_api_key
 
     try:
+        await vez_no_pubmed()
         res = await client.get(f"{PUBMED_BASE}/esearch.fcgi", params=params)
         res.raise_for_status()
         pmids = res.json().get("esearchresult", {}).get("idlist", [])
@@ -288,6 +330,7 @@ async def _fetch_article_titles(
     if settings.pubmed_api_key:
         params["api_key"] = settings.pubmed_api_key
 
+    await vez_no_pubmed()
     res = await client.get(f"{PUBMED_BASE}/efetch.fcgi", params=params)
     res.raise_for_status()
 

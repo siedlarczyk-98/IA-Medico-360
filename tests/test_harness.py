@@ -75,14 +75,136 @@ async def test_isolamento_parte2_nao_enxerga(db):
     )
 
 
+# ── Rollback da app não destrói o cenário do teste ──────────────────────
+# Sem `join_transaction_mode="create_savepoint"`, o `rollback()` de QUALQUER
+# sessão presa a `db_conn` revertia a transação externa do harness, e os dados
+# preparados pelo teste sumiam junto. Os caminhos de recuperação de erro da app
+# (stream, `/query`, digest, cache semântico) eram intestáveis por isso.
+
+async def test_rollback_na_sessao_do_teste_preserva_o_cenario(db, user_factory):
+    """O caso de `get_db`: a app chama `db.rollback()` na mesma sessão do teste."""
+    await user_factory(email="cenario@example.com")
+
+    db.add(User(email="descartado@example.com", role="beta_user", status=True))
+    await db.flush()
+    await db.rollback()
+
+    emails = set((await db.execute(select(User.email))).scalars())
+    # Literal, e não `usuario.email`: o rollback expira os objetos da sessão.
+    assert "cenario@example.com" in emails, "o rollback da app apagou o que o teste preparou"
+    assert "descartado@example.com" not in emails
+
+
+async def test_rollback_em_outra_sessao_preserva_o_cenario(db, user_factory, fabrica_de_sessao):
+    """O caso de `async_session_factory`: o serviço abre sessão própria e reverte."""
+    await user_factory(email="cenario2@example.com")
+
+    async with fabrica_de_sessao() as outra:
+        outra.add(User(email="descartado2@example.com", role="beta_user", status=True))
+        await outra.flush()
+        await outra.rollback()
+
+    emails = set((await db.execute(select(User.email))).scalars())
+    assert "cenario2@example.com" in emails
+    assert "descartado2@example.com" not in emails
+
+
+async def test_commit_da_app_nao_escapa_do_isolamento_parte1(db, user_factory):
+    """`commit()` só libera o savepoint — o par abaixo prova que nada sobrevive."""
+    await user_factory(email="comitado@example.com")
+    await db.commit()
+
+
+async def test_commit_da_app_nao_escapa_do_isolamento_parte2(db):
+    achado = await db.execute(select(User).where(User.email == "comitado@example.com"))
+    assert achado.scalar_one_or_none() is None, "um commit atravessou a transação do harness"
+
+
+# ── Conexões reais (fixture opcional) ───────────────────────────────────
+
+async def test_conexoes_reais_parte1_duas_sessoes_se_enxergam(fabrica_com_conexoes_reais):
+    """Commit real em uma conexão é visível na outra — o que `db_conn` não permite."""
+    async with fabrica_com_conexoes_reais() as a, fabrica_com_conexoes_reais() as b:
+        a.add(User(email="real@example.com", role="beta_user", status=True))
+        await a.commit()
+
+        achado = await b.execute(select(User).where(User.email == "real@example.com"))
+        assert achado.scalar_one_or_none() is not None
+
+
+async def test_conexoes_reais_parte2_truncate_limpou(db):
+    achado = await db.execute(select(User).where(User.email == "real@example.com"))
+    assert achado.scalar_one_or_none() is None, (
+        "O TRUNCATE de `fabrica_com_conexoes_reais` não limpou — dado comitado de "
+        "verdade vazou para o resto da suíte."
+    )
+
+
+async def test_conexoes_reais_esgotam_o_pool_em_vez_de_pendurar(fabrica_com_conexoes_reais):
+    """Terceira sessão com as duas conexões presas: erro em ~5s, não suíte travada."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    async with fabrica_com_conexoes_reais() as a, fabrica_com_conexoes_reais() as b:
+        await a.execute(text("SELECT 1"))
+        await b.execute(text("SELECT 1"))
+        async with fabrica_com_conexoes_reais() as c:
+            with pytest.raises(PoolTimeout):
+                await c.execute(text("SELECT 1"))
+
+
 # ── Guarda de rede ───────────────────────────────────────────────────────
 
-async def test_chamada_externa_e_bloqueada():
+async def test_chamada_externa_e_bloqueada(bloqueia_rede_externa):
+    """
+    A guarda levanta `VazamentoDeRede`, que NÃO é subclasse de `Exception`.
+
+    Isso é o que impede um `except Exception` do código sob teste de transformar
+    a violação em "provedor falhou" e deixar o teste passar pelo caminho de
+    contingência — eram 23 testes assim antes da correção.
+    """
     import httpx
 
-    with pytest.raises(AssertionError, match="chamada HTTP externa"):
+    from tests.conftest import VazamentoDeRede
+
+    assert not issubclass(VazamentoDeRede, Exception), (
+        "VazamentoDeRede precisa herdar de BaseException, senão `except Exception` "
+        "a engole e a guarda volta a ser contornável."
+    )
+
+    with pytest.raises(VazamentoDeRede, match="chamada HTTP externa"):
         async with httpx.AsyncClient() as c:
             await c.get("https://api.anthropic.com/v1/messages")
+
+    # Este teste tentou sair para a rede de PROPÓSITO e capturou a exceção. Sem
+    # limpar o registro, a checagem de encerramento da fixture reprovaria aqui.
+    bloqueia_rede_externa.clear()
+
+
+async def test_guarda_registra_a_tentativa_mesmo_engolida(bloqueia_rede_externa):
+    """
+    Segunda camada: engolir a exceção não apaga o rastro.
+
+    Um `except BaseException` — ou um `asyncio.gather` que empacota a exceção —
+    ainda deixaria a chamada passar despercebida se a guarda só levantasse. Por
+    isso toda tentativa é registrada, e o registro é conferido no encerramento.
+    Aqui provamos o registro; a reprovação em si é o teardown da fixture, que a
+    suíte inteira exercita.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as c:
+            await c.get("https://pharmadb.example.com/v1/bula")
+    except BaseException:  # noqa: BLE001 — engolir é exatamente o caso sob teste
+        pass
+
+    assert bloqueia_rede_externa == ["GET https://pharmadb.example.com/v1/bula"], (
+        "a guarda precisa REGISTRAR a tentativa, não apenas levantar — senão um "
+        "`except BaseException` volta a esconder o vazamento."
+    )
+
+    bloqueia_rede_externa.clear()  # tentativa deliberada; não deve reprovar o teardown
 
 
 @pytest.mark.rede_real

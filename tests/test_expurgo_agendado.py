@@ -17,6 +17,7 @@ import pytest
 from app.models.models import FileExtraction
 from app.services import expurgo_agendado
 from app.services.data_subject_service import RETENCAO_IMAGEM_DIAS, medir_passivo
+from tests.conftest import fabrica_sobre
 
 
 async def _arquivo(db, dono, *, dias_atras: int, com_imagem: bool = True):
@@ -72,12 +73,11 @@ async def test_atraso_vem_do_registro_mais_antigo(db, user):
 # ── Uma rodada ───────────────────────────────────────────────────────────────
 
 async def test_rodada_apaga_o_vencido(db, db_conn, user, monkeypatch):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     vencido = await _arquivo(db, user, dias_atras=RETENCAO_IMAGEM_DIAS + 5)
     monkeypatch.setattr(
         expurgo_agendado, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
     await expurgo_agendado._uma_rodada()
@@ -88,12 +88,11 @@ async def test_rodada_apaga_o_vencido(db, db_conn, user, monkeypatch):
 
 async def test_rodada_alarma_quando_estava_atrasada(db, db_conn, user, monkeypatch):
     """O atraso é medido ANTES de limpar — senão a evidência some com o dado."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     await _arquivo(db, user, dias_atras=RETENCAO_IMAGEM_DIAS + 30)
     monkeypatch.setattr(
         expurgo_agendado, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
     alarmes = []
     monkeypatch.setattr(expurgo_agendado, "_alertar", alarmes.append)
@@ -106,12 +105,11 @@ async def test_rodada_alarma_quando_estava_atrasada(db, db_conn, user, monkeypat
 
 async def test_rodada_em_dia_nao_alarma(db, db_conn, user, monkeypatch):
     """Alarmar a cada rodada normal treinaria todo mundo a ignorar o alarme."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     await _arquivo(db, user, dias_atras=RETENCAO_IMAGEM_DIAS + 1)
     monkeypatch.setattr(
         expurgo_agendado, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
     alarmes = []
     monkeypatch.setattr(expurgo_agendado, "_alertar", alarmes.append)

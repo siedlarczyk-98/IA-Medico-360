@@ -14,11 +14,11 @@ mesmo string do prompt.
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.models import Interaction, InteractionResponse
 from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
+from tests.conftest import fabrica_sobre
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,6 +53,31 @@ def sem_dependencias(monkeypatch):
     monkeypatch.setattr("app.services.orquestrador_shared.triage", _triagem)
     monkeypatch.setattr("app.services.cache_service.get_json", _nada)
     monkeypatch.setattr("app.services.cache_service.set_json", _nada)
+
+    # O pós-processamento roda DEPOIS do último token e faz três chamadas
+    # externas (`orquestrador_shared.py:529`). Estes testes só olham a chave de
+    # cache, então nada aqui muda o que eles afirmam — mas sem desligar, a
+    # detecção de especialidade sai para a OpenAI e a guarda de rede reprova.
+    async def _sem_especialidade(*a, **k):
+        return {"specialty": None, "topic": None}
+
+    async def _sem_medicamentos(*a, **k):
+        return []
+
+    async def _sem_pubmed(*a, **k):
+        from app.services.integracoes.pubmed_service import ValidationResult
+
+        return ValidationResult(confidence_score=0.0, fallback=True)
+
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.detect_specialty_and_topic", _sem_especialidade
+    )
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.extract_from_interaction", _sem_medicamentos
+    )
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.validate_with_pubmed", _sem_pubmed
+    )
 
 
 async def _gravar_troca(db, conv, dono, pergunta, resposta):
@@ -113,7 +138,7 @@ async def test_lookup_do_cache_usa_a_pergunta_atual_sem_historico(
         lambda _t: ProviderFake(),
     )
 
-    factory = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    factory = fabrica_sobre(db_conn)
     servico = OrquestradorStreamService(factory, user.id)
     _ = [f async for f in servico.stream(prompt="qual a dose?", conversation_id=conv.id)]
 
@@ -152,7 +177,7 @@ async def test_mesma_pergunta_em_conversas_diferentes_gera_a_mesma_chave(
         lambda _t: ProviderFake(),
     )
 
-    factory = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    factory = fabrica_sobre(db_conn)
     servico = OrquestradorStreamService(factory, user.id)
 
     for conv in (conv_a, conv_b):
@@ -190,7 +215,7 @@ async def test_modelo_recebe_o_historico_mesmo_com_a_chave_de_cache_limpa(
         lambda _t: ProviderEspiao(),
     )
 
-    factory = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    factory = fabrica_sobre(db_conn)
     servico = OrquestradorStreamService(factory, user.id)
     _ = [f async for f in servico.stream(prompt="e agora?", conversation_id=conv.id)]
 

@@ -1,4 +1,5 @@
 import { getToken } from '../lib/auth';
+import { erroDeResposta } from './erros';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -35,6 +36,11 @@ export interface Message {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * Só no cliente: esta "mensagem" é um aviso de falha que vale a pena tentar de
+   * novo (queda de rede, erro do servidor). Não vem do histórico nem é gravada.
+   */
+  podeTentarDeNovo?: boolean;
   mode?: string;
   confidence?: number;
   citations?: CitacaoBruta[];
@@ -117,8 +123,7 @@ export async function queryOrquestrador(params: StreamParams): Promise<{ respons
     }),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`API error ${res.status}: ${detail}`);
+    throw erroDeResposta(res.status, await res.text().catch(() => ''));
   }
   const data = await res.json();
   return {
@@ -151,7 +156,7 @@ export async function* streamQuery(
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     console.error(`API ${res.status}:`, detail);
-    throw new Error(`API error ${res.status}: ${detail}`);
+    throw erroDeResposta(res.status, detail);
   }
   if (!res.body) throw new Error('No response body');
 

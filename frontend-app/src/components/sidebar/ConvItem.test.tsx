@@ -206,3 +206,42 @@ describe('Mover por menu', () => {
     expect(screen.queryByText('Mover para pasta')).toBeNull();
   });
 });
+
+describe('Em tela de toque', () => {
+  // No celular não existe hover: o botão de opções nunca aparecia, e mover uma
+  // conversa para uma pasta era impossível.
+  function simularDispositivo(semHover: boolean) {
+    vi.stubGlobal('matchMedia', (consulta: string) => ({
+      matches: consulta === '(hover: none)' ? semHover : false,
+      media: consulta, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('o menu de opções aparece SEM hover, e move a conversa', async () => {
+    simularDispositivo(true);
+    const user = userEvent.setup();
+    const { onMove } = renderItem();
+
+    await user.click(menu()); // nenhum mouseEnter antes
+    await user.click(await screen.findByText(/mover para/i));
+    await user.click(await screen.findByText(PASTA_A.name));
+
+    expect(onMove).toHaveBeenCalledWith(CONVERSA.id, PASTA_A.id);
+  });
+
+  it('o alvo de toque tem tamanho de dedo', () => {
+    simularDispositivo(true);
+    renderItem();
+
+    expect(menu()).toHaveStyle({ padding: '10px' });
+  });
+
+  it('com mouse o botão continua escondido até o hover', () => {
+    simularDispositivo(false);
+    renderItem();
+
+    expect(screen.queryByRole('button', { name: /opções de/i })).not.toBeInTheDocument();
+  });
+});

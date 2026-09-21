@@ -28,7 +28,13 @@ from app.services.usage_service import (
 async def _usage_de(db, user) -> UserWeeklyUsage:
     from sqlalchemy import select
 
-    r = await db.execute(select(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user.id))
+    # `populate_existing`: `record_cost` grava por SQL direto (upsert atômico), então
+    # o objeto que a sessão já conhece está velho e precisa ser relido do banco.
+    r = await db.execute(
+        select(UserWeeklyUsage)
+        .where(UserWeeklyUsage.user_id == user.id)
+        .execution_options(populate_existing=True)
+    )
     return r.scalar_one()
 
 
@@ -96,8 +102,17 @@ async def test_janela_expirada_zera_o_contador(db, user):
 
     await check_limit(db, user)  # não levanta: a janela virou
 
+    # CONTRATO NOVO (2026-09-21): a checagem só LÊ. Ela gravava o reset com
+    # `flush` e sem commit, na sessão da requisição — que no stream fica aberta
+    # até o fim —, e o `record_cost` da outra sessão travava esperando essa linha.
+    # Quem zera a semana vencida é o próximo `record_cost`, na mesma instrução
+    # que soma: o total passa a ser SÓ o custo novo, não o antigo mais o novo.
+    info = await get_usage_info(db, user)
+    assert info["usage_percentage"] == 0
+
+    await record_cost(db, user.id, Decimal("0.25"))
     usage = await _usage_de(db, user)
-    assert usage.total_cost_usd == Decimal("0")
+    assert usage.total_cost_usd == Decimal("0.25")
 
 
 async def test_janela_de_seis_dias_ainda_bloqueia(db, user):
@@ -119,9 +134,11 @@ async def test_reset_reinicia_a_contagem_do_momento_atual(db, user):
     await db.flush()
 
     await check_limit(db, user)
+    await record_cost(db, user.id, Decimal("0.10"))  # é o uso que abre a janela nova
 
     usage = await _usage_de(db, user)
     assert (datetime.now(UTC) - usage.week_start).total_seconds() < 60
+    assert usage.total_cost_usd == Decimal("0.10")
 
 
 # ── Informação exposta ao usuário ────────────────────────────────────────
@@ -194,3 +211,24 @@ def test_o_limite_nao_e_alto_demais_para_um_piloto():
         "teto alto demais para a fase de piloto — 18 usuários no limite "
         f"gastariam US$ {BETA_WEEKLY_LIMIT * 18} por semana"
     )
+
+
+# ── A checagem não escreve (era a causa do travamento do stream) ─────────
+
+async def test_check_limit_nao_cria_linha_para_usuario_novo(db, user):
+    from sqlalchemy import func, select
+
+    await check_limit(db, user)
+    await get_usage_info(db, user)
+
+    linhas = await db.scalar(
+        select(func.count()).select_from(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user.id)
+    )
+    assert linhas == 0, "a checagem gravou — é o bloqueio que travava o stream antes do text_done"
+
+
+async def test_semana_dentro_do_prazo_continua_somando(db, user):
+    await record_cost(db, user.id, Decimal("1.00"))
+    await record_cost(db, user.id, Decimal("0.50"))
+
+    assert (await _usage_de(db, user)).total_cost_usd == Decimal("1.50")

@@ -38,6 +38,11 @@ class DispositivoOut(BaseModel):
     contestacoes: int
     dias_desde_ultima_verificacao: int | None
 
+    # Alguém disse que o aparelho não está mais lá, e ninguém o encontrou depois.
+    # Ainda não é o bastante para tirá-lo do mapa (exige duas origens); a tela
+    # mostra o aviso e deixa quem está socorrendo decidir.
+    remocao_relatada: bool = False
+
 
 class LocalOut(BaseModel):
     id: uuid.UUID
@@ -72,14 +77,6 @@ class BuscaResponse(BaseModel):
         "Em parada cardiorrespiratória, ligue 192 (SAMU) e inicie as compressões. "
         "Os registros são colaborativos e podem estar desatualizados."
     )
-
-
-class Coordenada(BaseModel):
-    """Validação de lat/lon. Não é sobre geografia — é sobre não deixar entrar
-    lixo por uma rota aberta."""
-
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
 
 
 # ── Escrita ──────────────────────────────────────────────────────────────
@@ -146,4 +143,5 @@ class VerificacaoResponse(BaseModel):
     confianca: str
     confirmacoes: int
     contestacoes: int
+    remocao_relatada: bool = False
     mensagem: str

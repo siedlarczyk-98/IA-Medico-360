@@ -305,21 +305,21 @@ async def test_a_mensagem_do_erro_diz_qual_farmaco_falhou():
         await servico.checar_interacoes(["varfarina", "aas"])
 
 
-async def test_erro_ao_resolver_pa_conta_como_nao_encontrado():
+async def test_erro_ao_resolver_pa_aborta_a_checagem():
     """
-    Este caminho está correto e o teste o trava: exceção em `buscar_pa` cai em
-    `nao_encontrados`, não em "checado com sucesso". É o contraste com o caso
-    acima — aqui a falha é visível na resposta.
+    INVERTIDO em 2026-09-21. Este teste travava o comportamento oposto: exceção
+    em `buscar_pa` caía em `nao_encontrados`, com o argumento de que "a falha é
+    visível na resposta". Era visível como uma afirmação FALSA: o médico lia
+    "Encontrei apenas 1 fármaco(s) na base. Não encontrados na base: aas" com o
+    PharmaDB em timeout. "Não consegui consultar" não é "não existe".
     """
     servico = servico_falso(
         {"varfarina": VARFARINA, "aas": RuntimeError("timeout")},
         {1: []},
     )
 
-    resultado = await servico.checar_interacoes(["varfarina", "aas"])
-
-    assert "aas" in resultado["nao_encontrados"]
-    assert resultado["status"] == "insuficiente"
+    with pytest.raises(InteracoesIndisponiveisError, match="aas"):
+        await servico.checar_interacoes(["varfarina", "aas"])
 
 
 # ── Formatação ───────────────────────────────────────────────────────────────

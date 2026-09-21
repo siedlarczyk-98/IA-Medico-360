@@ -27,11 +27,11 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.models import Interaction, InteractionMedication
 from app.services import orquestrador_service, orquestrador_shared
 from app.services.integracoes.ai_providers import ProviderResponse
+from tests.conftest import fabrica_sobre
 
 pytestmark = pytest.mark.asyncio
 
@@ -48,7 +48,7 @@ def _sessao_do_teste(monkeypatch, db_conn):
     """
     monkeypatch.setattr(
         orquestrador_service, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
 
 
@@ -80,6 +80,26 @@ def _falsifica_pos_processamento(monkeypatch, *, especialidade="Cardiologia"):
     monkeypatch.setattr(orquestrador_shared, "detect_specialty_and_topic", especialidade_falsa)
     monkeypatch.setattr(orquestrador_shared, "extract_from_interaction", medicamentos_falsos)
     monkeypatch.setattr(orquestrador_shared, "validate_with_pubmed", pubmed_falso)
+
+
+def _falsifica_clarificacao(monkeypatch):
+    """
+    Desliga a checagem de clareza, que é a QUARTA saída para a rede do `/query`.
+
+    `check_clarification` vai ao gpt-5.4-nano por dentro do disjuntor das
+    auxiliares (`orquestrador_shared.py:391`). Como ela tem `except Exception`
+    que assume "pergunta suficiente", a violação da guarda de rede virava o
+    resultado certo pelo motivo errado: o teste passava sem nunca ter exercitado
+    a decisão real.
+
+    `sufficient=True` é o mesmo que o `except` assumia — o comportamento do
+    teste não muda, só para de depender de uma chamada que falha.
+    """
+    async def _suficiente(*_a, **_kw):
+        return {"sufficient": True, "questions": []}
+
+    monkeypatch.setattr(orquestrador_shared, "check_clarification", _suficiente)
+    monkeypatch.setattr(orquestrador_service, "check_clarification", _suficiente)
 
 
 def _falsifica_provider(monkeypatch, texto="Anticoagulação plena indicada."):
@@ -156,6 +176,7 @@ async def test_resposta_sai_com_os_campos_de_metadado_vazios(
     )
     _sessao_do_teste(monkeypatch, db_conn)
     _falsifica_provider(monkeypatch)
+    _falsifica_clarificacao(monkeypatch)
     _falsifica_pos_processamento(monkeypatch)
 
     servico = orquestrador_service.OrquestradorService(db=db, user_id=user.id)
@@ -190,6 +211,7 @@ async def test_especialidade_e_gravada_pelo_background(
     )
     _sessao_do_teste(monkeypatch, db_conn)
     _falsifica_provider(monkeypatch)
+    _falsifica_clarificacao(monkeypatch)
     _falsifica_pos_processamento(monkeypatch, especialidade="Cardiologia")
 
     servico = orquestrador_service.OrquestradorService(db=db, user_id=user.id)
@@ -219,6 +241,7 @@ async def test_medicamentos_sao_extraidos_pelo_background(
     )
     _sessao_do_teste(monkeypatch, db_conn)
     _falsifica_provider(monkeypatch)
+    _falsifica_clarificacao(monkeypatch)
     _falsifica_pos_processamento(monkeypatch)
 
     servico = orquestrador_service.OrquestradorService(db=db, user_id=user.id)
@@ -255,6 +278,7 @@ async def test_falha_no_background_nao_derruba_a_resposta(
     )
     _sessao_do_teste(monkeypatch, db_conn)
     _falsifica_provider(monkeypatch)
+    _falsifica_clarificacao(monkeypatch)
 
     async def pubmed_explode(**_kwargs):
         raise RuntimeError("E-utilities fora do ar")

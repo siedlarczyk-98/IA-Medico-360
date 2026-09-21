@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { extractFile, ACCEPTED_FILE_TYPES, type ExtractResult } from '../api/uploads';
 import { chipNeutral, iconButtonBase } from '../lib/styles';
@@ -56,9 +56,15 @@ interface Props {
   onAttachmentChange?: (attachments: Attachment[]) => void;
   webSearchEnabled?: boolean;
   onWebSearchToggle?: () => void;
+  /**
+   * Quando presente, o botão de enviar vira "Parar" e cancela a resposta em
+   * andamento. O campo continua editável (use junto com `sendBlocked`, não com
+   * `disabled`): o médico rascunha a próxima pergunta enquanto lê a resposta.
+   */
+  onStop?: () => void;
 }
 
-export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'QUICK_SEARCH', onModeChange, onAttachmentChange, webSearchEnabled, onWebSearchToggle }: Props) {
+export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'QUICK_SEARCH', onModeChange, onAttachmentChange, webSearchEnabled, onWebSearchToggle, onStop }: Props) {
   const isMobile = useIsMobile();
   const [value, setValue] = useState('');
   const [effort, setEffort] = useState<Effort>('detalhado');
@@ -120,28 +126,39 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
     setUploadState('loading');
     setUploadError('');
 
-    try {
-      // Em série, não em paralelo: cada imagem dispara uma chamada de visão no
-      // backend, e mandar cinco de uma vez castiga o rate limit de /uploads.
-      const novos: Attachment[] = [];
-      for (const file of files) {
+    // Em série, não em paralelo: cada imagem dispara uma chamada de visão no
+    // backend, e mandar cinco de uma vez castiga o rate limit de /uploads.
+    //
+    // Cada arquivo é gravado QUANDO CHEGA, e o erro de um não interrompe os
+    // outros. Antes os resultados só entravam no estado depois do laço inteiro:
+    // um erro no terceiro arquivo descartava os dois que já tinham sido
+    // processados (e pagos), e o médico via só "erro", sem saber o que sobrou.
+    const falhas: string[] = [];
+    for (const file of files) {
+      try {
         const result: ExtractResult = await extractFile(file);
-        novos.push({
+        const novo: Attachment = {
           fileId: result.file_id,
           name: result.file_name,
           fileType: result.file_type,
           warning: result.warning,
+        };
+        setAttachments(prev => {
+          const proximos = [...prev, novo];
+          onAttachmentChange?.(proximos);
+          return proximos;
         });
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : 'Erro ao processar arquivo.';
+        falhas.push(files.length > 1 ? `"${file.name}": ${motivo}` : motivo);
       }
-      setAttachments(prev => {
-        const proximos = [...prev, ...novos];
-        onAttachmentChange?.(proximos);
-        return proximos;
-      });
-      setUploadState('idle');
-    } catch (err) {
+    }
+
+    if (falhas.length > 0) {
       setUploadState('error');
-      setUploadError(err instanceof Error ? err.message : 'Erro ao processar arquivo.');
+      setUploadError(falhas.join(' '));
+    } else {
+      setUploadState('idle');
     }
   }
 
@@ -171,8 +188,14 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
     setUploadError('');
   }
 
+  // Extração em andamento bloqueia o envio — pelo botão E pelo Enter, que passa
+  // por aqui sem olhar o `disabled` do botão. Sem isto a mensagem saía sem o
+  // exame, a resposta clínica vinha sem ele e nada avisava o médico; o arquivo,
+  // ao terminar, grudava na pergunta SEGUINTE.
+  const extraindo = uploadState === 'loading';
+
   function submit() {
-    if (!filled || disabled || sendBlocked) return;
+    if (!filled || disabled || sendBlocked || extraindo) return;
     onSend(value.trim(), effort, attachments.length > 0 ? attachments : undefined);
     setValue('');
     setAttachments([]);
@@ -342,7 +365,9 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
           disabled={disabled}
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
-            background: 'transparent', fontSize: 13.5, color: 'var(--ink)',
+            // 16 px no celular: abaixo disso o iOS dá ZOOM na página ao focar o
+            // campo, e o médico precisa desfazer o zoom a cada pergunta.
+            background: 'transparent', fontSize: isMobile ? 16 : 13.5, color: 'var(--ink)',
             lineHeight: 1.5, minHeight: 36, maxHeight: TEXTAREA_MAX_HEIGHT,
             overflowY: 'auto',
           }}
@@ -427,25 +452,43 @@ export function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'Q
 
           <div style={{ flex: 1 }} />
           {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
-          <button
-            onClick={submit}
-            disabled={!filled || disabled || sendBlocked}
-            style={{
-              height: 32, padding: '0 14px', borderRadius: 10, border: 'none',
-              background: filled && !sendBlocked ? 'var(--green)' : 'var(--fill)',
-              color: filled && !sendBlocked ? 'var(--ink)' : 'var(--pen3)',
-              fontWeight: 700, fontSize: 12,
-              display: 'flex', alignItems: 'center', gap: 6,
-              transition: 'background 0.15s, color 0.15s',
-            }}
-          >
-            Enviar
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8 H13 M9 4 L13 8 L9 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          {onStop ? (
+            // Uma resposta leva de 13 a 57 s. Sem "Parar", quem mandou a pergunta
+            // errada esperava tudo isso — pagando o modelo — para poder corrigir.
+            <button
+              onClick={onStop}
+              style={{
+                height: 32, padding: '0 14px', borderRadius: 10,
+                border: '1px solid var(--line)', background: '#fff', color: 'var(--ink)',
+                fontWeight: 700, fontSize: 12,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 2, background: 'currentColor' }} />
+              Parar
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={!filled || disabled || sendBlocked || extraindo}
+              title={extraindo ? 'Aguarde o processamento do anexo' : undefined}
+              style={{
+                height: 32, padding: '0 14px', borderRadius: 10, border: 'none',
+                background: filled && !sendBlocked && !extraindo ? 'var(--green)' : 'var(--fill)',
+                color: filled && !sendBlocked && !extraindo ? 'var(--ink)' : 'var(--pen3)',
+                fontWeight: 700, fontSize: 12,
+                display: 'flex', alignItems: 'center', gap: 6,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+            >
+              Enviar
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8 H13 M9 4 L13 8 L9 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
-}
+});

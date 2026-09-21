@@ -204,8 +204,8 @@ São **dez** modos. Fonte: `app/services/orquestrador_modes.py`.
 | Modo (Produto) | Código Interno | Critério | Modelo | Temp. |
 |---|---|---|---|---|
 | **Bizu** | `QUICK_SEARCH` | Dúvida direta: posologia, CID, conduta rápida | `sonar-pro` (Perplexity) | 0.0 |
-| **Sherlock** | `CLINICAL_REASONING` | Caso clínico, diagnóstico diferencial | `claude-sonnet-4-6` | 0.0 |
-| **Exame** | `EXAM_REVIEW` | Leitura de exame anexado | `claude-sonnet-4-6` (visão) | 0.0 |
+| **Sherlock** | `CLINICAL_REASONING` | Caso clínico, diagnóstico diferencial | `claude-sonnet-5` | 0.0 |
+| **Exame** | `EXAM_REVIEW` | Leitura de exame anexado | `claude-sonnet-5` (visão) | 0.0 |
 | **Farmácia — interação** | `PHARMA_CHECK` | Interação entre **2+** fármacos | PharmaDB local | — |
 | **Farmácia — bula** | `PHARMA_BULA` | Bula de **um** medicamento | PharmaDB local | — |
 | **Farmácia — receita** | `PHARMA_RECEITA` | Receituário, Portaria 344 | PharmaDB local | — |
@@ -271,7 +271,7 @@ Campo `effort` na requisição: **rápido = 700 tokens**, **detalhado = 4096**
 
 #### 3.4.2 Modo Sherlock (Raciocínio Clínico) ✅ Implementado
 
-**Modelo:** `claude-sonnet-4-6` (Anthropic)
+**Modelo:** `claude-sonnet-5` (Anthropic)
 
 **Propósito:** Discussão de casos clínicos, diagnósticos diferenciais, análise de quadros complexos.
 
@@ -576,7 +576,7 @@ Nenhuma informação PII pode sair do backend. O Middleware DLP intercepta toda 
 |-----------------|----------|---------|----------------|
 | `gpt-5.4-nano` (Triagem) | Classificar como QUICK_SEARCH | 10s | Log de erro |
 | Perplexity Sonar Pro (Bizu) | Gemini 2.5 Flash | 10s | Log de erro |
-| `claude-sonnet-4-6` (Sherlock) | GPT-4o → Gemini 2.5 Flash | 30s | Log de erro |
+| `claude-sonnet-5` (Sherlock) | GPT-4o → Gemini 2.5 Flash | 30s | Log de erro |
 | PharmaDB (Farmácia) | Mensagem de indisponibilidade | 10s | Flag na resposta |
 | PubMed (Validação) | `fallback: true`, sem validação | 15s | Alerta ao médico |
 | Cache Semântico | Bypass silencioso, chama agente | — | Log warning |
@@ -644,7 +644,7 @@ A plataforma DEVE ser projetada com abordagem **Mobile First** (viewport base: 3
 | Pipeline completo | ✅ Produção | 12 etapas |
 | Triagem inteligente | ✅ Produção | `gpt-5.4-nano`, confiança, fallback |
 | Bizu (QUICK_SEARCH) | ✅ Produção | `sonar-pro` + fallback Gemini |
-| Sherlock (CLINICAL_REASONING) | ✅ Produção | `claude-sonnet-4-6`, temperature=0 |
+| Sherlock (CLINICAL_REASONING) | ✅ Produção | `claude-sonnet-5`, temperature=0 |
 | Exame (EXAM_REVIEW) | ✅ Produção | Visão; promoção automática por anexo (RN-ORC-004) |
 | Farmácia — 4 modos | ✅ Produção | PharmaDB local com semáforo |
 | Data Ocean (DATA_OCEAN) | ✅ Produção | Maritaca; só por seleção explícita (RN-ORC-003) |

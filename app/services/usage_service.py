@@ -2,10 +2,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import case, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import AuditLog, User, UserWeeklyUsage
+from app.models.models import AuditLog, User, UserWeeklyUsage, new_uuid
 
 # Teto de gasto semanal por usuário beta, em USD.
 #
@@ -59,40 +60,42 @@ def add_interaction_audit(
     return audit
 
 
-async def _get_or_create_usage(db: AsyncSession, user_id) -> UserWeeklyUsage:
-    # Cache within the same db session to avoid double-SELECT per request
-    cache_key = f"_usage_{user_id}"
-    if cache_key in db.info:
-        return db.info[cache_key]
-    result = await db.execute(select(UserWeeklyUsage).where(UserWeeklyUsage.user_id == user_id))
-    usage = result.scalar_one_or_none()
-    if usage is None:
-        usage = UserWeeklyUsage(
-            user_id=user_id,
-            week_start=datetime.now(UTC),
-            total_cost_usd=Decimal("0"),
+SEMANA = timedelta(days=7)
+
+
+async def _gasto_vigente(db: AsyncSession, user_id) -> tuple[Decimal, datetime | None]:
+    """Gasto da semana corrente e o início dela. SÓ LÊ.
+
+    Semana vencida conta como zero aqui mesmo, sem gravar nada. É o ponto da
+    correção: `check_limit` criava a linha (usuário novo) ou zerava a semana
+    (virada) com `flush` e SEM commit, na sessão da requisição — que no
+    `/orquestrador/stream` só fecha quando o stream termina. O `record_cost` do
+    serviço de stream, em OUTRA sessão, esperava o bloqueio dessa linha, que só
+    era solto no fim do mesmo stream: o texto aparecia inteiro e a resposta
+    travava antes do `text_done`, segurando duas conexões.
+
+    Quem zera a semana agora é `record_cost`, numa instrução só.
+    """
+    linha = (
+        await db.execute(
+            select(UserWeeklyUsage.total_cost_usd, UserWeeklyUsage.week_start).where(
+                UserWeeklyUsage.user_id == user_id
+            )
         )
-        db.add(usage)
-        await db.flush()
-    db.info[cache_key] = usage
-    return usage
-
-
-async def _reset_if_expired(db: AsyncSession, usage: UserWeeklyUsage) -> None:
-    now = datetime.now(UTC)
-    week_end = usage.week_start + timedelta(days=7)
-    if now >= week_end:
-        usage.week_start = now
-        usage.total_cost_usd = Decimal("0")
-        await db.flush()
+    ).one_or_none()
+    if linha is None:
+        return Decimal("0"), None
+    total, inicio = linha
+    if datetime.now(UTC) >= inicio + SEMANA:
+        return Decimal("0"), None
+    return total, inicio
 
 
 async def check_limit(db: AsyncSession, user: User) -> None:
     if user.role != BETA_ROLE:
         return
-    usage = await _get_or_create_usage(db, user.id)
-    await _reset_if_expired(db, usage)
-    if usage.total_cost_usd >= BETA_WEEKLY_LIMIT:
+    gasto, _ = await _gasto_vigente(db, user.id)
+    if gasto >= BETA_WEEKLY_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Limite semanal de uso atingido. Seu limite será reiniciado em 7 dias a partir da sua primeira interação.",
@@ -100,24 +103,47 @@ async def check_limit(db: AsyncSession, user: User) -> None:
 
 
 async def record_cost(db: AsyncSession, user_id, cost_usd: Decimal) -> None:
+    """Soma o custo ao medidor semanal, de forma ATÔMICA.
+
+    Era ler-somar-gravar em Python: duas respostas terminando juntas liam o
+    mesmo total e uma das somas se perdia — custo subcontado, furando o teto
+    beta. Agora é um `INSERT ... ON CONFLICT DO UPDATE` com a soma feita pelo
+    banco, que também cria a linha (primeiro uso) e zera a semana vencida na
+    mesma instrução. Não há intervalo entre ler e gravar para outra transação
+    entrar.
+    """
     if cost_usd <= Decimal("0"):
         return
-    usage = await _get_or_create_usage(db, user_id)
-    await _reset_if_expired(db, usage)
-    usage.total_cost_usd += cost_usd
-    await db.flush()
+
+    agora = datetime.now(UTC)
+    vencida = UserWeeklyUsage.week_start <= agora - SEMANA
+    instrucao = pg_insert(UserWeeklyUsage).values(
+        id=new_uuid(), user_id=user_id, week_start=agora, total_cost_usd=cost_usd
+    )
+    instrucao = instrucao.on_conflict_do_update(
+        index_elements=[UserWeeklyUsage.user_id],
+        set_={
+            "total_cost_usd": case(
+                (vencida, cost_usd), else_=UserWeeklyUsage.total_cost_usd + cost_usd
+            ),
+            "week_start": case((vencida, agora), else_=UserWeeklyUsage.week_start),
+            "updated_at": agora,
+        },
+    )
+    await db.execute(instrucao)
 
 
 async def get_usage_info(db: AsyncSession, user: User) -> dict:
     if user.role != BETA_ROLE:
         return {"has_limit": False, "usage_percentage": None, "week_reset_at": None}
 
-    usage = await _get_or_create_usage(db, user.id)
-    await _reset_if_expired(db, usage)
+    gasto, inicio = await _gasto_vigente(db, user.id)
 
-    ratio = usage.total_cost_usd / BETA_WEEKLY_LIMIT
+    ratio = gasto / BETA_WEEKLY_LIMIT
     percentage = min(int(ratio * 100), 100)
-    week_reset_at = usage.week_start + timedelta(days=7)
+    # Sem semana em curso (usuário novo, ou semana vencida) a próxima começa na
+    # próxima interação: o reinício é daqui a sete dias.
+    week_reset_at = (inicio or datetime.now(UTC)) + SEMANA
 
     return {
         "has_limit": True,

@@ -27,6 +27,9 @@ Então `normalizar()` aceita os dois formatos para sempre. O front faz o mesmo
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+ESQUEMAS_PERMITIDOS = frozenset({"http", "https"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,8 +54,15 @@ def criar_citacao(url: str | None, titulo: str | None = None) -> Citacao | None:
     """
     if not url or not url.strip():
         return None
+    url = url.strip()
+    # Só `http` e `https`. A URL vem do provedor (Perplexity, busca na web) e vira
+    # `<a href>` no chat: um `javascript:` ou `data:` ali roda no navegador do
+    # médico com um clique. Esta função é o ponto único por onde toda citação
+    # passa — na extração, na gravação e na releitura do histórico.
+    if urlsplit(url).scheme.lower() not in ESQUEMAS_PERMITIDOS:
+        return None
     limpo = titulo.strip() if titulo else None
-    return Citacao(url=url.strip(), titulo=limpo or None)
+    return Citacao(url=url, titulo=limpo or None)
 
 
 def para_json(

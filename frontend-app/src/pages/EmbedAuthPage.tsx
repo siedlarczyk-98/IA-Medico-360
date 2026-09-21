@@ -11,11 +11,12 @@
  * sucesso mesmo quebrado, e é justamente o que precisamos conseguir enxergar.
  */
 
+import { useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { useIdentidadeWaid } from '@shared/embed/identidade';
 
-import { setToken } from '../lib/auth';
+import { descartarSessaoDesteNavegador, setToken } from '../lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
@@ -35,6 +36,13 @@ export function EmbedAuthPage() {
 
   // `<Navigate>` em vez de navegar dentro do efeito: o hook já cuidou do
   // redirecionamento no sucesso; isto só cobre um render extra.
+  // Identidade não confirmada DENTRO do iframe: a sessão que já estava no
+  // navegador não pode ser herdada. Ver `descartarSessaoDesteNavegador`.
+  const tipoDoErro = fase === 'erro' ? erro?.tipo : undefined;
+  useEffect(() => {
+    if (tipoDoErro && tipoDoErro !== 'sem_iframe') descartarSessaoDesteNavegador();
+  }, [tipoDoErro]);
+
   if (fase === 'pronto') return <Navigate to="/" replace />;
 
   return (

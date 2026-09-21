@@ -66,6 +66,29 @@ type Opcoes = {
   aoBater?: (tipo: TipoBatida) => void
   /** Chamado quando um ciclo de 2 minutos fecha. */
   aoFecharCiclo?: (ciclo: number) => void
+  /**
+   * O sistema tirou o audio do app (ligacao, tela bloqueada, outra aba tomando o
+   * foco de audio) — ou devolveu. `true` = o metronomo esta "rodando" em silencio.
+   */
+  aoMudarAudio?: (interrompido: boolean) => void
+}
+
+/**
+ * Janela de agendamento com a aba OCULTA. O navegador estrangula timers de aba
+ * em segundo plano para 1 disparo por segundo; com os 100 ms normais o som
+ * falharia em nove de cada dez batidas. 1,5 s cobre o estrangulamento com folga.
+ */
+const LOOKAHEAD_OCULTO_SEGUNDOS = 1.5
+
+/**
+ * Quanto uma batida pode estar no passado e ainda ser tocada. `start()` num
+ * instante passado toca AGORA, entao um atraso pequeno so desloca o clique alguns
+ * milissegundos; um atraso grande viraria rajada (ver `agendar`).
+ */
+const TOLERANCIA_DE_ATRASO_SEGUNDOS = 0.025
+
+function abaOculta(): boolean {
+  return typeof document !== 'undefined' && document.hidden
 }
 
 /**
@@ -123,6 +146,8 @@ export class Metronomo {
   private inicioDoCiclo = 0
   /** Posicao dentro do padrao 30:2 — 0..29 comprime, 30..31 ventila. */
   private posicaoNoPadrao = 0
+  /** Batidas agendadas cujo som ainda nao saiu (ver `registrarNaHora`). */
+  private avisosPendentes = new Set<ReturnType<typeof setTimeout>>()
 
   constructor(opcoes: Opcoes) {
     this.opcoes = opcoes
@@ -142,6 +167,11 @@ export class Metronomo {
 
     if (this.ctx === null) {
       this.ctx = new AudioContext()
+      // Uma ligacao para o 192 — que e exatamente o que se faz numa parada —
+      // suspende o audio do navegador. O relogio do contexto para, nenhuma batida
+      // nova e agendada, e a tela seguia mostrando "Parar" com o contador parado
+      // e SEM SOM, sem dizer nada. Quem esta comprimindo precisa saber na hora.
+      this.ctx.onstatechange = () => this.avisarEstadoDoAudio()
     }
     // Navegadores criam o contexto suspenso ate um gesto do usuario. `iniciar`
     // e sempre chamado de um clique, entao o resume aqui e o que destrava.
@@ -149,6 +179,7 @@ export class Metronomo {
       await this.ctx.resume()
     }
 
+    this.ultimoAvisoDeAudio = false
     const agora = this.ctx.currentTime
     // Meio quadro de folga: agendar exatamente em `currentTime` as vezes perde a
     // primeira batida, porque o instante ja passou quando o no e conectado.
@@ -162,6 +193,64 @@ export class Metronomo {
       clearInterval(this.timer)
       this.timer = null
     }
+    this.avisosPendentes.forEach(clearTimeout)
+    this.avisosPendentes.clear()
+  }
+
+  /** `true` quando o metronomo esta ligado mas o sistema cortou o audio. */
+  get audioInterrompido(): boolean {
+    return this.timer !== null && this.ctx !== null && this.ctx.state !== 'running'
+  }
+
+  /**
+   * Tenta devolver o som. No iOS so funciona a partir de um gesto do usuario —
+   * por isso a tela oferece um botao, alem da tentativa automatica ao voltar
+   * para a aba. O compasso NAO precisa ser reancorado: com o contexto suspenso o
+   * relogio dele congela, entao `proximaBatida` continua valendo ao retomar.
+   */
+  async retomarAudio(): Promise<boolean> {
+    if (this.ctx === null) return false
+    try {
+      await this.ctx.resume()
+    } catch {
+      // sem gesto do usuario: a tela continua avisando
+    }
+    this.avisarEstadoDoAudio()
+    return this.ctx.state === 'running'
+  }
+
+  /** Ultimo estado avisado: o evento do contexto e o `retomarAudio` se sobrepoem. */
+  private ultimoAvisoDeAudio = false
+
+  private avisarEstadoDoAudio(): void {
+    if (this.timer === null) return
+    const interrompido = this.audioInterrompido
+    if (interrompido === this.ultimoAvisoDeAudio) return
+    this.ultimoAvisoDeAudio = interrompido
+    this.opcoes.aoMudarAudio?.(interrompido)
+  }
+
+  /**
+   * Conta a batida e avisa a UI NO INSTANTE do som, nao no do agendamento. A
+   * batida e enfileirada ate `lookahead` antes de tocar; fazer isto na hora de
+   * enfileirar adiantava o pulso visual em ate 100 ms — e quem comprime olhando a
+   * tela seguia um compasso diferente de quem comprime ouvindo.
+   *
+   * Contador e pulso saem do MESMO disparo de proposito: sao a mesma afirmacao
+   * ("esta batida aconteceu") e nao podem discordar. Separados, um `parar()` no
+   * meio da janela deixava a batida contada e nunca piscada.
+   */
+  private registrarNaHora(tipo: TipoBatida, quando: number, agora: number): void {
+    const esperaMs = Math.max(0, (quando - agora) * 1000)
+    const id = setTimeout(() => {
+      this.avisosPendentes.delete(id)
+      if (tipo === 'compressao') {
+        this.estado.compressoes += 1
+      }
+      this.estado.emVentilacao = tipo === 'ventilacao'
+      this.opcoes.aoBater?.(tipo)
+    }, esperaMs)
+    this.avisosPendentes.add(id)
   }
 
   /** Para e zera contadores. */
@@ -187,27 +276,34 @@ export class Metronomo {
   /**
    * Enfileira todas as batidas que caem na janela de lookahead.
    *
-   * O `while` (em vez de um `if`) e o que torna o metronomo robusto: se o
-   * navegador estrangulou o timer e nos acordamos 400 ms atrasados, este laco
-   * enfileira de uma vez todas as batidas perdidas, mantendo o compasso. O
-   * relogio de referencia e sempre `proximaBatida`, nunca `currentTime` — e por
-   * isso que o erro nao acumula.
+   * O `while` (em vez de um `if`) e o que torna o metronomo robusto: se o timer
+   * acordar atrasado, o laco percorre de uma vez todas as batidas devidas,
+   * mantendo o compasso. O relogio de referencia e sempre `proximaBatida`, nunca
+   * `currentTime` — e por isso que o erro nao acumula.
+   *
+   * BATIDA NO PASSADO NAO TOCA. `start()` num instante ja passado toca AGORA:
+   * depois de a aba ficar suspensa por 3 s, as cinco batidas "recuperadas" saiam
+   * todas juntas, numa rajada, e ainda inflavam o contador de compressoes com
+   * compressoes que ninguem ouviu. Elas agora sao PULADAS — avancam a grade e a
+   * posicao no 30:2, para o compasso voltar exatamente onde estaria, mas nao
+   * tocam nem contam.
    */
   private agendar(): void {
     const ctx = this.ctx
     if (ctx === null) return
 
     const intervalo = 60 / this.opcoes.bpm
+    const agora = ctx.currentTime
+    const lookahead = abaOculta() ? LOOKAHEAD_OCULTO_SEGUNDOS : LOOKAHEAD_SEGUNDOS
 
-    while (this.proximaBatida < ctx.currentTime + LOOKAHEAD_SEGUNDOS) {
+    while (this.proximaBatida < agora + lookahead) {
       const tipo = this.tipoDaBatidaAtual()
-      tocarClique(ctx, this.proximaBatida, tipo)
-      this.opcoes.aoBater?.(tipo)
+      const perdida = this.proximaBatida < agora - TOLERANCIA_DE_ATRASO_SEGUNDOS
 
-      if (tipo === 'compressao') {
-        this.estado.compressoes += 1
+      if (!perdida) {
+        tocarClique(ctx, this.proximaBatida, tipo)
+        this.registrarNaHora(tipo, this.proximaBatida, agora)
       }
-      this.estado.emVentilacao = tipo === 'ventilacao'
 
       this.avancarPadrao()
       this.proximaBatida += intervalo

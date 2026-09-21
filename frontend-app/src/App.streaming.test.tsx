@@ -17,6 +17,7 @@ import userEvent from '@testing-library/user-event';
 import App from './App';
 import { renderComProvedores, streamComEsperaAntesDoDone, streamEmLote, tokensEDone, tokensTextDoneEDone } from './test/utils';
 import { streamQuery } from './api/orquestrador';
+import { ErroDeApi } from './api/erros';
 
 vi.mock('./lib/auth', () => ({
   isAuthenticated: () => true,
@@ -167,10 +168,13 @@ describe('streaming do orquestrador', () => {
       );
     });
 
-    // ...e o campo já aceita a próxima pergunta, com o `done` ainda pendente.
+    // ...e o ENVIO já está liberado, com o `done` ainda pendente. (O campo em si
+    // nunca é desabilitado; o que o `text_done` libera é o botão, que deixa de
+    // ser "Parar" e volta a ser "Enviar".)
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/digite sua pergunta/i)).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /enviar/i })).toBeInTheDocument();
     });
+    expect(screen.queryByRole('button', { name: /parar/i })).not.toBeInTheDocument();
 
     liberar();
   });
@@ -243,5 +247,114 @@ describe('streaming do orquestrador', () => {
     const respostas = screen.getAllByTestId('assistant-message');
     expect(respostas[0]).toHaveTextContent('primeira resposta');
     expect(respostas[1]).toHaveTextContent('segunda resposta');
+  });
+
+  it('pergunta enviada ENTRE o text_done e o done não apaga a resposta anterior', async () => {
+    // O teste acima só cobre o primeiro stream já encerrado. O defeito real
+    // morava no intervalo: o `text_done` libera o campo, mas a marcação de
+    // "mensagem em streaming" só era limpa no `finally`, depois do `done`. Uma
+    // pergunta nessa janela — enquanto as referências são verificadas, que é
+    // quando o médico já leu e quer seguir — tratava a resposta CONCLUÍDA como
+    // parcial de um stream abortado e a removia da tela.
+    const primeiro = streamComEsperaAntesDoDone(tokensTextDoneEDone(['primeira resposta']));
+    streamQueryMock.mockImplementation(() => primeiro.gerador());
+
+    renderComProvedores(<App />);
+    await enviarPergunta('primeira pergunta');
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-message')).toHaveTextContent('primeira resposta');
+    });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/digite sua pergunta/i)).not.toBeDisabled();
+    });
+
+    // O `done` da primeira AINDA não chegou.
+    streamQueryMock.mockImplementation(() => streamEmLote(tokensTextDoneEDone(['segunda resposta'])));
+    await enviarPergunta('segunda pergunta');
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('assistant-message')).toHaveLength(2);
+    });
+    const respostas = screen.getAllByTestId('assistant-message');
+    expect(respostas[0]).toHaveTextContent('primeira resposta');
+    expect(respostas[1]).toHaveTextContent('segunda resposta');
+
+    primeiro.liberar();
+  });
+
+  it('cota semanal esgotada aparece como cota, não como queda do servidor', async () => {
+    const limite = 'Limite semanal de uso atingido. Seu limite será reiniciado em 7 dias a partir da sua primeira interação.';
+    streamQueryMock.mockImplementation(() => {
+      throw new ErroDeApi(429, limite);
+    });
+
+    renderComProvedores(<App />);
+    await enviarPergunta();
+
+    expect(await screen.findByText(new RegExp('Limite semanal de uso atingido'))).toBeInTheDocument();
+    expect(screen.queryByText(/erro ao conectar/i)).not.toBeInTheDocument();
+  });
+
+  it('queda de rede continua dizendo que não conectou', async () => {
+    streamQueryMock.mockImplementation(() => {
+      throw new TypeError('Failed to fetch');
+    });
+
+    renderComProvedores(<App />);
+    await enviarPergunta();
+
+    expect(await screen.findByText(/erro ao conectar com o servidor/i)).toBeInTheDocument();
+  });
+
+  // ── Durante a resposta: campo livre, e "Parar" no lugar de "Enviar" ─────────
+  // O campo ficava bloqueado de 13 a 57 s: o médico não rascunhava a próxima
+  // pergunta, não cancelava uma errada, e perdia o foco do teclado.
+
+  it('o médico digita a próxima pergunta enquanto a resposta chega', async () => {
+    const { gerador, liberar } = streamComEsperaAntesDoDone(tokensEDone(['resposta em andamento']));
+    streamQueryMock.mockImplementation(() => gerador());
+
+    renderComProvedores(<App />);
+    const user = await enviarPergunta('primeira pergunta');
+    await screen.findByText('resposta em andamento');
+
+    const campo = screen.getByPlaceholderText(/digite sua pergunta/i);
+    expect(campo).not.toBeDisabled();
+    await user.type(campo, 'rascunho da próxima');
+    expect(campo).toHaveValue('rascunho da próxima');
+
+    liberar();
+  });
+
+  it('Enter durante a resposta não dispara outra pergunta', async () => {
+    const { gerador, liberar } = streamComEsperaAntesDoDone(tokensEDone(['resposta em andamento']));
+    streamQueryMock.mockImplementation(() => gerador());
+
+    renderComProvedores(<App />);
+    const user = await enviarPergunta('primeira pergunta');
+    await screen.findByText('resposta em andamento');
+
+    await user.type(screen.getByPlaceholderText(/digite sua pergunta/i), 'segunda{Enter}');
+
+    expect(streamQueryMock).toHaveBeenCalledTimes(1);
+    liberar();
+  });
+
+  it('"Parar" cancela a resposta e mantém na tela o que já chegou', async () => {
+    const { gerador, liberar } = streamComEsperaAntesDoDone(tokensEDone(['texto parcial']));
+    streamQueryMock.mockImplementation(() => gerador());
+
+    renderComProvedores(<App />);
+    const user = await enviarPergunta('pergunta errada');
+    await screen.findByText('texto parcial');
+
+    await user.click(screen.getByRole('button', { name: /parar/i }));
+
+    const sinal = streamQueryMock.mock.calls[0][1] as AbortSignal;
+    expect(sinal.aborted).toBe(true);
+    expect(screen.getByText('texto parcial')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /enviar/i })).toBeInTheDocument();
+
+    liberar();
   });
 });

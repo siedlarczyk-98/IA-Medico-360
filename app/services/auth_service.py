@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -40,13 +41,47 @@ def intercom_user_hash(user: "User") -> str | None:
     ).hexdigest()
 
 
-def create_access_token(user: "User") -> str:
+class IdentidadeDivergente(Exception):
+    """O e-mail da identidade pertence a uma conta vinculada a OUTRO `waid_uuid`.
+
+    Não há resposta segura além de recusar: entregar a conta existente dá a um
+    desconhecido o histórico clínico de outra pessoa, e criar uma conta nova
+    esbarra no e-mail único. Quem trata é o endpoint do embed — 403, auditoria e
+    alarme, porque o caso legítimo (o LMS re-provisionou o aluno com uuid novo)
+    só se resolve com o suporte corrigindo o vínculo.
+    """
+
+    def __init__(self, *, user_id, email: str):
+        super().__init__(f"identidade divergente para {email}")
+        self.user_id = user_id
+        self.email = email
+
+
+def create_access_token(user: "User", *, auth_time: int | None = None) -> str:
+    """Emite o JWT de sessão.
+
+    `auth_time` é o instante (epoch) em que o usuário PROVOU quem é. Login de
+    verdade não passa nada e o relógio começa agora. Quem está só RENOVANDO um
+    token — perfil, onboarding — tem de repassar o `auth_time` do token em uso
+    (`deps.auth_time_da_sessao`): é isso que impede a renovação de esticar a
+    sessão além de `session_max_age_hours`.
+
+    `tv` é a versão do token no momento da emissão; o logout a incrementa no
+    usuário e todos os tokens anteriores morrem.
+    """
     settings = get_settings()
-    expire = _utcnow() + timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    agora = _utcnow()
+    inicio = int(agora.timestamp()) if auth_time is None else auth_time
+    fim_da_sessao = datetime.fromtimestamp(inicio, tz=agora.tzinfo) + timedelta(
+        hours=settings.session_max_age_hours
+    )
+    expire = min(agora + timedelta(minutes=settings.jwt_access_token_expire_minutes), fim_da_sessao)
     payload = {
         "sub": str(user.id),
         "role": user.role,
         "exp": expire,
+        "auth_time": inicio,
+        "tv": user.token_version or 0,
     }
     return pyjwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
@@ -195,12 +230,19 @@ async def get_or_create_por_identidade_waid(
             await db.commit()
             logger.info("waid_uuid preenchido para user=%s no primeiro login por token", user.id)
         elif user.waid_uuid != identidade.uuid:
+            # RECUSADA DE VERDADE (2026-09-21). O log já dizia "identidade nova
+            # recusada" — e a linha seguinte devolvia a conta assim mesmo: quem
+            # chegava com uuid B e o e-mail de uma conta do uuid A ENTRAVA na
+            # conta de A. Combinado com a troca de e-mail sem verificação (que
+            # também saiu), um médico plantava a própria conta para um colega, e
+            # as conversas clínicas do colega se acumulavam onde ele as lia.
             logger.warning(
-                "Conta de e-mail %s já vinculada a outro waid_uuid; vinculação MANTIDA "
-                "(user=%s). Identidade nova recusada — ver migration 008_waid_uuid.",
+                "Conta de e-mail %s já vinculada a outro waid_uuid; identidade nova "
+                "RECUSADA, nenhuma sessão emitida (user=%s). Ver migration 008_waid_uuid.",
                 identidade.email,
                 user.id,
             )
+            raise IdentidadeDivergente(user_id=user.id, email=identidade.email)
         return user, False
 
     user = User(
@@ -359,13 +401,51 @@ async def request_otp(db: AsyncSession, email: str) -> None:
     code = str(secrets.randbelow(900000) + 100000)
     otp = OtpCode(
         email=email,
-        code=code,
+        code=_resumo_do_codigo(email, code),
         expires_at=_utcnow() + timedelta(minutes=settings.otp_expire_minutes),
     )
     db.add(otp)
     await db.commit()
 
-    await email_service.send_otp(email, code)
+    # EM SEGUNDO PLANO, e não é por velocidade. O envio leva de centenas de
+    # milissegundos a segundos; e-mail sem conta voltava na hora (o `return` lá em
+    # cima). Bastava medir o tempo da resposta para saber quem tem conta — a
+    # enumeração que o "silencioso" pretendia impedir. Agora os dois caminhos
+    # respondem no mesmo tempo.
+    _enviar_em_segundo_plano(email, code)
+
+
+# Referência forte: sem ela o coletor de lixo pode recolher a tarefa no meio.
+_envios_em_voo: set[asyncio.Task] = set()
+
+
+def _enviar_em_segundo_plano(email: str, code: str) -> None:
+    async def _enviar() -> None:
+        try:
+            await email_service.send_otp(email, code)
+        except Exception:
+            # A resposta já foi dada; o que resta é deixar rastro. Sem isto o
+            # médico esperaria um código que nunca saiu, e o log não diria nada.
+            logger.exception("Falha ao enviar o código de acesso")
+
+    tarefa = asyncio.create_task(_enviar(), name="enviar-otp")
+    _envios_em_voo.add(tarefa)
+    tarefa.add_done_callback(_envios_em_voo.discard)
+
+
+def _resumo_do_codigo(email: str, code: str) -> str:
+    """HMAC-SHA256 do código, com o segredo do servidor como chave.
+
+    O código ficava em texto puro: quem lesse a tabela (dump, réplica, log de
+    consulta) entrava na conta de qualquer médico com código pendente. Um hash
+    simples não resolveria — são só um milhão de códigos possíveis, e a tabela
+    inteira se quebra em milissegundos. Com HMAC, sem o segredo do servidor o valor
+    gravado não serve para nada. O e-mail entra na mensagem para o mesmo código de
+    duas contas não produzir o mesmo resumo.
+    """
+    chave = get_settings().jwt_secret_key.encode()
+    mensagem = f"{email.strip().lower()}:{code}".encode()
+    return hmac.new(chave, mensagem, hashlib.sha256).hexdigest()
 
 
 _OTP_MAX_ATTEMPTS = 5
@@ -382,7 +462,8 @@ async def verify_otp(db: AsyncSession, email: str, code: str) -> tuple[User, str
         await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
 
-    if otp.code != code:
+    # `compare_digest`: comparação em tempo constante.
+    if not hmac.compare_digest(otp.code, _resumo_do_codigo(email, code)):
         otp.failed_attempts += 1
         if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
             otp.used = True

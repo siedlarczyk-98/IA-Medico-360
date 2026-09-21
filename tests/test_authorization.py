@@ -39,6 +39,10 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/otp/verify"): PUBLICA,
     ("POST", "/api/v1/auth/invite/accept"): PUBLICA,
     ("POST", "/api/v1/auth/embed/token"): PUBLICA,
+    # Pública de propósito: sair com a sessão já expirada tem de funcionar, porque
+    # o cookie HttpOnly ainda precisa ser apagado. Sem token válido ela só apaga
+    # o cookie; com token, também revoga a sessão (`token_version`).
+    ("POST", "/api/v1/auth/logout"): PUBLICA,
     # Conta
     ("GET", "/api/v1/auth/me"): AUTENTICADA,
     ("PATCH", "/api/v1/auth/me"): AUTENTICADA,
@@ -52,10 +56,8 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # Núcleo clínico
     ("POST", "/api/v1/orquestrador/query"): AUTENTICADA,
     ("POST", "/api/v1/orquestrador/stream"): AUTENTICADA,
-    ("POST", "/api/v1/agregador/query"): AUTENTICADA,
     ("POST", "/api/v1/agregador/stream"): AUTENTICADA,
     ("GET", "/api/v1/agregador/models"): AUTENTICADA,
-    ("GET", "/api/v1/agregador/history"): AUTENTICADA,
     # Conversas e pastas
     ("GET", "/api/v1/conversations"): AUTENTICADA,
     ("GET", "/api/v1/conversations/{conversation_id}"): AUTENTICADA,

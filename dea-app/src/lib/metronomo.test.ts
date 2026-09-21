@@ -20,14 +20,29 @@ import {
  */
 class ContextoFalso {
   currentTime = 0
-  state: 'running' | 'suspended' = 'running'
+  state: 'running' | 'suspended' | 'interrupted' = 'running'
+  onstatechange: (() => void) | null = null
   /** Instantes em que cada clique foi agendado, na ordem. */
   agendados: number[] = []
+  /**
+   * Quanto cada clique estava ATRASADO ao ser agendado (0 = no futuro). E o que
+   * um AudioContext de verdade faz de diferente do falso antigo: `start()` num
+   * instante ja passado nao viaja no tempo, toca AGORA. O falso aceitava o passado
+   * calado, e por isso um teste chegou a exigir a rajada como comportamento certo.
+   */
+  atrasos: number[] = []
   destination = {}
+
+  /** O sistema tira (ou devolve) o audio: ligacao, tela bloqueada. */
+  mudarEstado(novo: 'running' | 'suspended' | 'interrupted') {
+    this.state = novo
+    this.onstatechange?.()
+  }
 
   createOscillator() {
     const registrar = (quando: number) => {
       this.agendados.push(quando)
+      this.atrasos.push(Math.max(0, this.currentTime - quando))
     }
     return {
       frequency: { value: 0 },
@@ -49,8 +64,12 @@ class ContextoFalso {
     }
   }
 
+  /** `false` simula o iOS recusando o `resume()` sem gesto do usuario. */
+  aceitaResume = true
+
   async resume() {
-    this.state = 'running'
+    if (!this.aceitaResume) throw new Error('NotAllowedError')
+    this.mudarEstado('running')
   }
 
   async close() {}
@@ -108,10 +127,12 @@ describe('Metronomo', () => {
     }
   })
 
-  it('NAO acumula deriva quando o agendador acorda atrasado', async () => {
-    // Esta e a razao de existir do lookahead: o navegador estrangula timers em
-    // aba oculta. Simulamos um congelamento e verificamos que o compasso segue
-    // ancorado no relogio de audio, sem perder nem repetir batidas.
+  it('depois de um congelamento, retoma NA GRADE e sem rajada', async () => {
+    // INVERTIDO em 2026-09-21. Este teste exigia que as ~5 batidas perdidas num
+    // congelamento de 3 s fossem todas agendadas ("sem perder batidas"). Num
+    // AudioContext real, agendar no passado e tocar AGORA: as cinco saiam juntas,
+    // numa rajada, no meio de uma massagem cardiaca. O falso aceitava o passado
+    // sem reclamar, entao o teste passava confirmando o defeito.
     const m = new Metronomo({ bpm: 100, modo302: false })
     await m.iniciar()
 
@@ -121,14 +142,113 @@ describe('Metronomo', () => {
     // Aba congela: o relogio de audio anda 3s, o timer so dispara uma vez.
     contexto.currentTime += 3
     await vi.advanceTimersByTimeAsync(25)
+    await avancar(2)
 
-    // 100 bpm = 0,6s por batida; 3s congelados = ~5 batidas a recuperar.
-    expect(contexto.agendados.length - antes).toBeGreaterThanOrEqual(4)
-
-    // O compasso permanece exato: nenhum intervalo destoa.
-    for (const intervalo of intervalosDesde(0)) {
-      expect(intervalo).toBeCloseTo(0.6, 6)
+    // Nenhum clique foi agendado com atraso que o ouvido perceba...
+    expect(Math.max(...contexto.atrasos)).toBeLessThanOrEqual(0.025)
+    // ...e o compasso voltou exatamente onde estaria: toda batida cai num
+    // multiplo de 0,6 s da primeira. Pular batidas nao desloca a grade.
+    const primeira = contexto.agendados[0]!
+    for (const quando of contexto.agendados.slice(antes)) {
+      const posicao = (quando - primeira) / 0.6
+      expect(Math.abs(posicao - Math.round(posicao))).toBeLessThan(1e-6)
     }
+    // O buraco existe: ~5 batidas de 0,6 s nao foram tocadas.
+    const maiorIntervalo = Math.max(...intervalosDesde(0))
+    expect(maiorIntervalo).toBeGreaterThan(2.9)
+  })
+
+  it('batida pulada nao conta como compressao', async () => {
+    const m = new Metronomo({ bpm: 100, modo302: false })
+    await m.iniciar()
+    await avancar(5)
+    const contadas = m.instantaneo().compressoes
+
+    contexto.currentTime += 3 // ~5 batidas que ninguem ouviu
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(m.instantaneo().compressoes - contadas).toBeLessThanOrEqual(1)
+  })
+
+  it('no 30:2, pular batidas nao desalinha a posicao das ventilacoes', async () => {
+    const tipos: TipoBatida[] = []
+    const m = new Metronomo({ bpm: 120, modo302: true, aoBater: (tipo) => tipos.push(tipo) })
+    await m.iniciar()
+    await avancar(2)
+
+    contexto.currentTime += 4 // 8 batidas puladas, dentro das 30 compressoes
+    await vi.advanceTimersByTimeAsync(25)
+    await avancar(14)
+    m.parar()
+
+    // A primeira ventilacao continua sendo a batida 31 DA GRADE (indice 30), que
+    // a 120 bpm cai 15 s depois da primeira.
+    const primeira = contexto.agendados[0]!
+    const indiceDaVentilacao = tipos.indexOf('ventilacao')
+    expect(indiceDaVentilacao).toBeGreaterThan(-1)
+    const quando = contexto.agendados[indiceDaVentilacao]!
+    expect((quando - primeira) / 0.5).toBeCloseTo(30, 6)
+  })
+
+  // ── O pulso visual acompanha o SOM ─────────────────────────────────────────
+
+  it('avisa a UI no instante do som, nao no do agendamento', async () => {
+    const instantes: number[] = []
+    const m = new Metronomo({
+      bpm: 120,
+      modo302: false,
+      aoBater: () => instantes.push(contexto.currentTime),
+    })
+    await m.iniciar()
+    await avancar(3)
+    m.parar()
+
+    // Cada aviso sai junto do clique correspondente (25 ms e o passo do relogio
+    // falso). Antes saia ate 100 ms ANTES: a tela adiantava o compasso.
+    instantes.forEach((instante, i) => {
+      expect(instante).toBeGreaterThanOrEqual(contexto.agendados[i]! - 1e-9)
+      expect(instante - contexto.agendados[i]!).toBeLessThanOrEqual(0.026)
+    })
+  })
+
+  // ── Audio interrompido: uma ligacao para o 192 faz exatamente isto ─────────
+
+  it('avisa quando o sistema corta o audio, e quando devolve', async () => {
+    const avisos: boolean[] = []
+    const m = new Metronomo({ bpm: 110, modo302: false, aoMudarAudio: (i) => avisos.push(i) })
+    await m.iniciar()
+    await avancar(1)
+
+    contexto.mudarEstado('interrupted')
+    expect(m.audioInterrompido).toBe(true)
+
+    expect(await m.retomarAudio()).toBe(true)
+    expect(m.audioInterrompido).toBe(false)
+    expect(avisos).toEqual([true, false])
+  })
+
+  it('sem gesto do usuario o resume e recusado, e o aviso continua', async () => {
+    const avisos: boolean[] = []
+    const m = new Metronomo({ bpm: 110, modo302: false, aoMudarAudio: (i) => avisos.push(i) })
+    await m.iniciar()
+    contexto.mudarEstado('suspended')
+    contexto.aceitaResume = false
+
+    expect(await m.retomarAudio()).toBe(false)
+    expect(m.audioInterrompido).toBe(true)
+    expect(avisos.at(-1)).toBe(true)
+  })
+
+  it('metronomo parado nao avisa de audio interrompido', async () => {
+    const avisos: boolean[] = []
+    const m = new Metronomo({ bpm: 110, modo302: false, aoMudarAudio: (i) => avisos.push(i) })
+    await m.iniciar()
+    m.parar()
+
+    contexto.mudarEstado('suspended')
+
+    expect(avisos).toEqual([])
+    expect(m.audioInterrompido).toBe(false)
   })
 
   it('deriva acumulada fica abaixo de 1ms em 2 minutos', async () => {

@@ -145,7 +145,7 @@ async def test_stream_marca_igual_ao_complete(monkeypatch):
             return Ctx()
 
     monkeypatch.setattr(
-        "app.services.integracoes.ai_providers.get_client", lambda: ClienteStream()
+        "app.services.integracoes.ai_providers.get_stream_client", lambda: ClienteStream()
     )
 
     agen = AnthropicProvider().stream(

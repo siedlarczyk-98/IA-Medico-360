@@ -12,6 +12,7 @@ import {
 import { FormularioCadastro } from '../components/FormularioCadastro'
 import { MapaDea } from '../components/MapaDea'
 import { type Coordenada, useLocalizacao } from '../hooks/useLocalizacao'
+import { avisoDeLocalizacao } from '../lib/localizacao'
 
 const RAIO_KM = 5
 
@@ -34,8 +35,14 @@ export function MapaPage() {
    * setá-lo aqui seria uma atualização síncrona disparada pelo efeito. Quem
    * recarrega por ação do usuário chama `recarregar`, abaixo.
    */
+  const localizando = estado.situacao === 'buscando'
+
   const carregar = useCallback(
     async (sinal?: AbortSignal) => {
+      // Enquanto a localização não se resolve, NÃO se busca: a lista sairia em
+      // volta do centro de São Paulo e seria trocada segundos depois — ou pior,
+      // ficaria na tela como se fosse a vizinhança do socorrista.
+      if (localizando) return
       try {
         const resposta = await buscarLocais({
           latitude: posicao.lat,
@@ -63,7 +70,7 @@ export function MapaPage() {
         setCarregando(false)
       }
     },
-    [posicao.lat, posicao.lng],
+    [posicao.lat, posicao.lng, localizando],
   )
 
   useEffect(() => {
@@ -92,6 +99,7 @@ export function MapaPage() {
   }
 
   const selecionado = locais.find((l) => l.id === selecionadoId) ?? null
+  const avisoLocalizacao = avisoDeLocalizacao(estado)
 
   return (
     <div className="mapa-page">
@@ -100,16 +108,24 @@ export function MapaPage() {
       </div>
 
       <p className="aviso-emergencia" role="note">
-        Em parada cardiorrespiratória: <strong>ligue 192 (SAMU)</strong> e comece as
+        Em parada cardiorrespiratória:{' '}
+        <strong>
+          ligue <a href="tel:192">192</a> (SAMU)
+        </strong>{' '}
+        e comece as
         compressões. Os registros são colaborativos e podem estar desatualizados.
       </p>
 
-      {estado.situacao === 'negada' && (
-        <p className="aviso-localizacao">
-          Sem acesso à sua localização — mostrando o centro de São Paulo.{' '}
-          <button type="button" className="link" onClick={solicitar}>
-            Tentar de novo
-          </button>
+      {/* Todo estado sem posição real tem aviso — não só a permissão negada.
+          Timeout de GPS caía aqui calado, com a lista de outra cidade na tela. */}
+      {avisoLocalizacao && (
+        <p className="aviso-localizacao" role="alert">
+          {avisoLocalizacao.texto}{' '}
+          {avisoLocalizacao.podeTentarDeNovo && (
+            <button type="button" className="link" onClick={solicitar}>
+              Tentar de novo
+            </button>
+          )}
         </p>
       )}
 
@@ -154,7 +170,10 @@ export function MapaPage() {
             </p>
           )}
 
-          {carregando && <p className="estado">Procurando DEAs por perto...</p>}
+          {localizando && <p className="estado">Obtendo sua localização...</p>}
+          {!localizando && carregando && (
+            <p className="estado">Procurando DEAs por perto...</p>
+          )}
 
           {erro && (
             <p className="erro" role="alert">
@@ -165,7 +184,7 @@ export function MapaPage() {
             </p>
           )}
 
-          {!carregando && !erro && locais.length === 0 && (
+          {!localizando && !carregando && !erro && locais.length === 0 && (
             <div className="em-breve">
               <p>
                 Nenhum DEA cadastrado num raio de {RAIO_KM} km.
@@ -186,9 +205,13 @@ export function MapaPage() {
               >
                 <div className="cartao__topo">
                   <h2>{local.nome}</h2>
-                  <span className="cartao__distancia">
-                    {formatarDistancia(local.distancia_km)}
-                  </span>
+                  {/* Sem posição real a distância é até a Praça da Sé — um
+                      número que parece informação e não é. */}
+                  {temPosicaoReal && (
+                    <span className="cartao__distancia">
+                      {formatarDistancia(local.distancia_km)}
+                    </span>
+                  )}
                 </div>
 
                 {local.endereco && <p className="cartao__endereco">{local.endereco}</p>}
@@ -207,6 +230,11 @@ export function MapaPage() {
                       <span className={`etiqueta etiqueta--${dispositivo.confianca}`}>
                         {descreverConfianca(dispositivo)}
                       </span>
+                      {dispositivo.remocao_relatada && (
+                        <span className="etiqueta etiqueta--contestado">
+                          Remoção relatada — pode não estar mais aqui
+                        </span>
+                      )}
                       <span className="etiqueta">{ROTULO_ACESSO[dispositivo.acesso]}</span>
                       {local.acesso_24h && <span className="etiqueta">24 horas</span>}
                     </div>

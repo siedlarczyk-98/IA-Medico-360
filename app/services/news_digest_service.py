@@ -123,28 +123,36 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
     data_ref = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     desde = agora - timedelta(days=settings.news_digest_janela_dias)
 
-    candidatos = (await db.execute(
+    linhas = (await db.execute(
         select(User, UserPreference)
         .join(UserPreference, UserPreference.user_id == User.id)
         .where(User.status.is_(True))
+        # Ordem estável: duas réplicas percorrendo a mesma lista na mesma ordem
+        # disputam UM usuário por vez, em vez de se cruzarem no meio.
+        .order_by(User.id)
     )).all()
+
+    # Valores simples, e não os objetos do ORM. Cada usuário agora tem a própria
+    # transação (ver abaixo), e `commit`/`rollback` EXPIRAM os objetos da sessão: o
+    # `user.email` do usuário seguinte dispararia uma carga preguiçosa fora de
+    # contexto e derrubaria a rodada inteira.
+    candidatos = [
+        (user.id, user.email, user.name) for user, prefs in linhas if quer_digest(prefs)
+    ]
 
     enviados, sem_conteudo, ja_enviados, falhas = 0, 0, 0, 0
 
-    for user, prefs in candidatos:
-        if not quer_digest(prefs):
-            continue
-
+    for user_id, email, nome in candidatos:
         ja = await db.scalar(
             select(DigestSend.id).where(
-                DigestSend.user_id == user.id, DigestSend.data_ref == data_ref
+                DigestSend.user_id == user_id, DigestSend.data_ref == data_ref
             )
         )
         if ja:
             ja_enviados += 1
             continue
 
-        artigos = await _artigos_do_usuario(db, user.id, desde)
+        artigos = await _artigos_do_usuario(db, user_id, desde)
         if not artigos:
             # O caso mais comum e o mais importante: silêncio é a resposta certa.
             sem_conteudo += 1
@@ -154,25 +162,32 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
         # se gravássemos depois, uma queda entre envio e commit mandaria o mesmo
         # e-mail de novo na próxima rodada. Entre perder um e duplicar um, num
         # produto cuja premissa é não incomodar, perder é o erro barato.
+        #
+        # "Grava" aqui é COMMIT, por usuário. Era `flush`, com a rodada inteira numa
+        # transação só — e aí a gravação não valia para ninguém: a outra réplica
+        # não a enxergava, e quando ela ganhava a corrida de UM usuário, o
+        # `rollback` abaixo desfazia o registro de TODOS os já enviados nesta
+        # rodada. Os e-mails já tinham saído; na rodada seguinte saíam de novo.
         db.add(DigestSend(
-            user_id=user.id,
+            user_id=user_id,
             data_ref=data_ref,
             article_ids=[a.id for a, _ in artigos],
         ))
         try:
-            await db.flush()
+            await db.commit()
         except IntegrityError:
-            # Outra réplica ganhou a corrida. Não é erro: é a idempotência
-            # funcionando exatamente como projetada.
+            # Outra réplica ganhou a corrida DESTE usuário. Não é erro: é a
+            # idempotência funcionando. O rollback desfaz só a tentativa dele —
+            # os anteriores já estão commitados.
             await db.rollback()
             ja_enviados += 1
             continue
 
         try:
-            await email_service.send_news_digest(user.email, user.name, artigos)
+            await email_service.send_news_digest(email, nome, artigos)
             enviados += 1
         except Exception:  # noqa: BLE001
-            logger.exception("Falha ao enviar digest para user_id=%s", user.id)
+            logger.exception("Falha ao enviar digest para user_id=%s", user_id)
             falhas += 1
 
     resumo = {

@@ -26,10 +26,7 @@ from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import ModelPricing, User
 from app.schemas.agregador import (
     AgregadorRequest,
-    AgregadorResponse,
     AIModelDisplay,
-    HistorySearchParams,
-    InteractionHistoryItem,
 )
 from app.services.agregador_service import AgregadorService
 from app.services.file_extractor_service import resolve_file_context
@@ -91,32 +88,6 @@ def _get_cost_tier(input_per_million) -> str:
 
 # ── Consulta (Non-Streaming) ────────────────────────────────
 
-@router.post("/query", response_model=AgregadorResponse)
-@limiter.limit("30/minute")
-async def agregador_query(
-    request: Request,
-    body: AgregadorRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Envia consulta ao Agregador de IA.
-    Chama os modelos selecionados em paralelo e retorna todas as respostas.
-    """
-    await check_limit(db, user)
-
-    # Caminho non-streaming não suporta visão — imagens entram como texto (descrição).
-    body.prompt, _ = await resolve_file_context(
-        body.prompt, body.file_id, user.id, db, support_vision=False
-    )
-
-    service = AgregadorService(
-        db=db,
-        user_id=user.id,
-        company_id=user.company_id,
-    )
-    system_prompt = build_agregador_prompt(user.specialty, user.med_status)
-    return await service.query(body, system_prompt=system_prompt)
 
 
 # ── Consulta com Streaming (SSE) ────────────────────────────
@@ -292,37 +263,3 @@ async def agregador_stream(
 
 
 # ── Histórico ────────────────────────────────────────────────
-
-@router.get("/history", response_model=list[InteractionHistoryItem])
-async def get_history(
-    params: HistorySearchParams = Depends(),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """RN-AGR-004: histórico pesquisável por data, modelo e palavras-chave."""
-    service = AgregadorService(db=db, user_id=user.id)
-    interactions = await service.get_history(
-        query=params.query,
-        model_filter=params.model_filter,
-        date_from=params.date_from,
-        date_to=params.date_to,
-        page=params.page,
-        page_size=params.page_size,
-    )
-
-    items = []
-    for i in interactions:
-        models_used = [r.model_used for r in (i.responses or [])]
-        items.append(
-            InteractionHistoryItem(
-                interaction_id=i.id,
-                prompt_text=i.prompt_text,
-                feature=i.feature,
-                mode=i.mode,
-                models_used=models_used,
-                response_time_ms=i.response_time_ms,
-                cache_hit=i.cache_hit,
-                created_at=i.created_at,
-            )
-        )
-    return items

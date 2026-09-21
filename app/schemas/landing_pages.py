@@ -1,4 +1,18 @@
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
+
+# Listas de múltipla escolha dos formulários públicos. Não tinham teto nenhum: uma
+# única requisição anônima com 300 mil itens virava 300 mil linhas nas tabelas de
+# seleção. Os formulários reais têm de 5 a 12 opções.
+#
+# O teto é de QUANTIDADE e TAMANHO, e não uma lista fechada de opções, de
+# propósito: as opções são frases que vivem nas páginas de captação, e espelhá-las
+# aqui faria uma mudança de redação na página virar 422 — lead perdido em silêncio,
+# que é pior que o abuso que isto veio fechar.
+MAX_OPCOES = 30
+Opcao = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+Opcoes = Annotated[list[Opcao], Field(min_length=1, max_length=MAX_OPCOES)]
 
 
 class _LeadBase(BaseModel):
@@ -21,19 +35,19 @@ class AccountingSubmissionRequest(_LeadBase):
     accountant_status: str = Field(min_length=1, max_length=100)
     revenue_range: str = Field(min_length=1, max_length=100)
     willingness_to_pay: str = Field(min_length=1, max_length=100)
-    pain_points: list[str] = Field(min_length=1)
+    pain_points: Opcoes
 
 
 class PartnerSubmissionRequest(_LeadBase):
     career_stage: str = Field(min_length=1, max_length=100)
-    categories: list[str] = Field(min_length=1)
+    categories: Opcoes
     desired_brands: str | None = Field(default=None, max_length=300)
 
 
 class CalculatorSubmissionRequest(BaseModel):
     """Vem de dentro do produto (medico ja autenticado) — nome/email sao os da conta."""
 
-    calculators: list[str] = Field(min_length=1)
+    calculators: Opcoes
     notify_on_availability: bool = False
 
 

@@ -2,6 +2,7 @@
 Médico 360 — Aplicação principal FastAPI.
 """
 
+import json
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -26,9 +27,11 @@ logger = logging.getLogger(__name__)
 from app.api.v1.router import api_v1_router
 from app.calculators.formulas import load_all_formulas
 from app.core import http_client
-from app.core.config import get_settings
+from app.core.body_limit import LimiteDeCorpoMiddleware
+from app.core.config import get_settings, origens_confiaveis
 from app.core.error_tracking import setup_sentry
 from app.core.logging_config import RequestIdMiddleware, setup_logging
+from app.core.security_headers import CabecalhosDeSegurancaMiddleware
 from app.core.telemetry import setup_phoenix
 from app.middleware import ner
 from app.services import expurgo_agendado, news_agendado, vigilancia_agendada
@@ -97,22 +100,43 @@ app = FastAPI(
 
 # ── Rate Limiting ────────────────────────────────────────────
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _limite_de_requisicoes_excedido(request: Request, exc: RateLimitExceeded):
+    """429 do slowapi com uma frase que o usuário entende.
+
+    O handler padrão responde `{"error": "Rate limit exceeded: 60 per 1 minute"}`
+    — em inglês, numa chave que nenhum cliente nosso lê. Todos os apps mostram o
+    `detail`, que é onde o FastAPI põe as mensagens; sem ele o médico via "Erro
+    ao conectar com o servidor" ao bater num limite.
+
+    Reaproveita o handler original para não perder os cabeçalhos `Retry-After` e
+    `X-RateLimit-*` que ele injeta, e mantém `error` para quem já o lia.
+    """
+    resposta = _rate_limit_exceeded_handler(request, exc)
+    resposta.body = json.dumps(
+        {
+            "detail": "Muitas requisições em pouco tempo. Aguarde um instante e tente de novo.",
+            "error": f"Rate limit exceeded: {exc.detail}",
+        },
+        ensure_ascii=False,
+    ).encode()
+    resposta.headers["content-length"] = str(len(resposta.body))
+    return resposta
+
+
+app.add_exception_handler(RateLimitExceeded, _limite_de_requisicoes_excedido)
 
 # ── CORS ─────────────────────────────────────────────────────
-# `dea_url` entra no CORS mas NÃO em `origens_confiaveis()`: o dea-app é público,
-# não manda cookie nem Authorization, então não há requisição autenticada dele
-# para o anti-CSRF proteger. Ver o docstring de `origens_confiaveis`.
-_app_origins = [settings.frontend_url, settings.calculadoras_url, settings.dea_url]
-_cors_origins = _app_origins + settings.embed_allowed_origins + settings.landing_pages_origins
-if not settings.is_production:
-    # localhost e 127.0.0.1 são tratados como origens distintas pelo browser
-    for _o in _app_origins + settings.landing_pages_origins:
-        _cors_origins += [
-            _o.replace("localhost", "127.0.0.1"),
-            _o.replace("127.0.0.1", "localhost"),
-        ]
-_cors_origins = list(dict.fromkeys(_cors_origins))  # dedup
+# UMA lista só, a mesma da guarda anti-CSRF. Eram duas, montadas em lugares
+# diferentes, e divergiram: o `dea_url` estava no CORS e fora da guarda, então o
+# preflight passava e o POST levava 403. Ver o docstring de `origens_confiaveis`.
+_cors_origins = origens_confiaveis(settings)
+
+# Registrado PRIMEIRO = roda por dentro de todos os outros. É de propósito: o 413
+# dele precisa atravessar o CORS na volta, senão o navegador esconde o corpo da
+# resposta e o app não consegue mostrar a mensagem.
+app.add_middleware(LimiteDeCorpoMiddleware)
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -126,7 +150,17 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
+    # Sem `max_age` o Starlette manda 600s, e o browser refaz o preflight OPTIONS
+    # a cada 10 minutos para CADA rota — uma ida e volta a mais antes de toda
+    # chamada com `Authorization`. 24h é o teto que o Firefox respeita; o Chrome
+    # limita a 2h por conta própria.
+    max_age=86400,
 )
+
+# Registrado DEPOIS do CORS = roda por fora dele. Precisa ser assim: é este que
+# retira o `Access-Control-Allow-Credentials` que o CORS acabou de pôr, para as
+# origens que não autenticam. Ver `security_headers`.
+app.add_middleware(CabecalhosDeSegurancaMiddleware, settings=settings)
 
 
 # ── Exception handler global ─────────────────────────────────

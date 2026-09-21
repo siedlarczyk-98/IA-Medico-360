@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dea.repositories import locais_repository
 from app.dea.schemas.dea_schemas import CadastroRequest, VerificacaoRequest
 from app.models.dea import (
     Dispositivo,
@@ -23,6 +24,10 @@ from app.models.models import utcnow
 # Casas decimais do arredondamento usado para detectar duplicata. Quatro casas
 # são ~11 m — a granularidade de "mesmo prédio".
 CASAS_DEDUPE = 4
+
+# Relatos de remoção, de origens distintas, para o aparelho sair do mapa. Mesma
+# régua do "não encontrado". Ver "A regra de remoção" em `registrar_verificacao`.
+RELATOS_PARA_REMOVER = 2
 
 
 def arredondar(valor: float) -> float:
@@ -112,8 +117,19 @@ async def registrar_verificacao(
 
     Duas contestações consecutivas mandam o dispositivo para `nao_encontrado`:
     ele **continua no mapa**, marcado, porque "duas pessoas procuraram e não
-    acharam" é informação útil para a terceira. Só sai da listagem quando
-    alguém o marca como removido de fato.
+    acharam" é informação útil para a terceira.
+
+    ## A regra de remoção
+
+    Sair do mapa exige `RELATOS_PARA_REMOVER` relatos de ORIGENS DIFERENTES
+    (decisão de 2026-09-21). Até lá o aparelho continua listado, com o rótulo
+    "remoção relatada" — quem está socorrendo decide, e quem está no local
+    consegue desmentir: um "encontrei" zera os relatos.
+
+    Antes, UM relato anônimo bastava, inclusive contra aparelho `ativo` e de alta
+    confiança. O aparelho saía da listagem, então ninguém mais conseguia
+    reverificá-lo, e só voltava por SQL. Qualquer pessoa esvaziava o mapa de uma
+    cidade com um laço de requisições — numa ferramenta de parada cardíaca.
     """
     verificacao = Verificacao(
         id=uuid.uuid4(),
@@ -148,7 +164,10 @@ async def registrar_verificacao(
 
     else:  # REMOVIDO — alguém afirma que o aparelho não está mais lá.
         dispositivo.verificacoes_negativas += 1
-        dispositivo.status = StatusDispositivoEnum.REMOVIDO.value
+        await db.flush()  # o relato recém-criado precisa entrar na contagem
+        origens = await locais_repository.origens_que_relataram_remocao(db, [dispositivo.id])
+        if len(origens.get(dispositivo.id, ())) >= RELATOS_PARA_REMOVER:
+            dispositivo.status = StatusDispositivoEnum.REMOVIDO.value
 
     await db.flush()
     return dispositivo

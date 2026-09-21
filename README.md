@@ -353,9 +353,24 @@ Endpoint principal. Requer JWT no header `Authorization: Bearer <token>`.
 }
 ```
 
-### `POST /api/v1/agregador/query`
+### `POST /api/v1/orquestrador/stream` — a rota principal
 
-Assistente geral sem pipeline de validação. Responde qualquer pergunta do médico.
+É por aqui que o chat conversa com o backend: a mesma triagem e os mesmos agentes do
+`/query` acima, em Server-Sent Events. O contrato dos eventos (`start`, `token`,
+`text_done`, `done`, `cache_hit`, `clarification`, `error`) vive em
+`shared/contrato-sse.ts` e é conferido por teste nas duas pontas. Os modos de
+farmácia também saem por aqui. A cada 15 s de silêncio o servidor manda um
+comentário `: ping`, para proxies não cortarem respostas longas.
+
+> `POST /api/v1/orquestrador/query` está **obsoleta** (2026-09-21) e em observação:
+> cada chamada gera o log `orquestrador_query_obsoleto`. Sem ocorrências por uma ou
+> duas semanas, sai.
+
+### `POST /api/v1/agregador/stream`
+
+Assistente geral sem pipeline de validação: consulta vários modelos em paralelo e
+devolve as respostas em SSE. (As rotas `/agregador/query` e `/agregador/history` não
+tinham chamador e foram removidas em 2026-09-21.)
 
 ### `GET /api/v1/health`
 

@@ -6,18 +6,14 @@ Chamadas concorrentes a múltiplos providers com auditoria completa.
 
 import asyncio
 import logging
-import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.citacoes_fonte import normalizar as normalizar_citacoes
-from app.core.citacoes_fonte import para_json
-from app.core.prompts import DISCLAIMER_RESPOSTA
 from app.middleware.dlp import sanitize_prompt_async
 from app.models.models import (
     Conversation,
@@ -26,30 +22,20 @@ from app.models.models import (
     InteractionResponse,
 )
 from app.schemas.agregador import (
-    AgregadorRequest,
-    AgregadorResponse,
-    ModelResponse,
     PubMedArticleOut,
     PubmedValidationResult,
     VerifiedCitationOut,
 )
-from app.services.integracoes.ai_providers import ProviderResponse, get_provider_by_type
 from app.services.integracoes.pubmed_service import validate_with_pubmed
 from app.services.medication_extractor import extract_from_interaction
+from app.services.orquestrador_shared import make_title
 from app.services.pricing import Pricing, calculate_cost, get_model_pricing
 from app.services.specialty_detector import detect_specialty_and_topic
 from app.services.usage_service import add_interaction_audit, record_cost
 
 logger = logging.getLogger(__name__)
 
-
-def _make_title(prompt: str) -> str:
-    """Gera título de conversa a partir do prompt, removendo prefixos de arquivo injetados."""
-    if prompt.startswith('[Imagem:'):
-        prompt = prompt.split('\n\n', 1)[-1] if '\n\n' in prompt else prompt
-    elif '---\n\n' in prompt:
-        prompt = prompt.split('---\n\n', 1)[1]
-    return prompt[:100] + ('...' if len(prompt) > 100 else '')
+ERRO_DE_MODELO_PARA_O_CLIENTE = "Falha ao consultar este modelo. Tente novamente."
 
 
 class AgregadorService:
@@ -62,238 +48,6 @@ class AgregadorService:
 
     # ── Consulta principal (non-streaming) ───────────────────
 
-    async def query(self, request: AgregadorRequest, system_prompt: str | None = None) -> AgregadorResponse:
-        """
-        Executa consulta no Agregador:
-        1. Sanitiza prompt via DLP
-        2. Cria/recupera conversa
-        3. Registra interação
-        4. Busca modelos no banco
-        5. Chama providers em paralelo
-        6. Salva respostas + custo  → commit (dados essenciais garantidos)
-        7. Detecta especialidade + tema  (best-effort)
-        8. Extrai medicamentos  (best-effort)
-        9. Audit log
-        """
-        start_time = time.monotonic()
-
-        # 1. DLP
-        dlp_result = await sanitize_prompt_async(request.prompt)
-        sanitized_prompt = dlp_result.sanitized_text
-
-        # 2. Conversation (usa prompt sanitizado no título)
-        conversation_id = await self._ensure_conversation(
-            request.conversation_id, sanitized_prompt
-        )
-
-        # 3. Interaction
-        interaction = Interaction(
-            conversation_id=conversation_id,
-            user_id=self.user_id,
-            company_id=self.company_id,
-            feature="AGREGADOR",
-            mode=None,
-            prompt_text=sanitized_prompt,
-            prompt_sanitized=dlp_result.was_sanitized,
-            cache_hit=False,
-            started_at=datetime.now(UTC),
-        )
-        self.db.add(interaction)
-        await self.db.flush()
-
-        # 4. Modelos
-        models_info = await self._get_models_info(request.models)
-
-        # 5. Providers em paralelo
-        model_responses = await self._call_providers(
-            prompt=sanitized_prompt,
-            models_info=models_info,
-            system_prompt=system_prompt,
-        )
-
-        # 6. Respostas + custo
-        total_cost = Decimal("0")
-        response_models: list[ModelResponse] = []
-        # Guarda objetos ir e citations antes do commit para evitar lazy-load após expiração
-        ir_by_model: dict[str, InteractionResponse] = {}
-        citations_by_model: dict[str, list] = {}
-
-        for model_id, result in model_responses.items():
-            if isinstance(result, ProviderResponse):
-                # Serializado aqui, na borda do banco: `extra_metadata` é JSONB
-                # e não aceita o dataclass.
-                citations = para_json(result.citations) or []
-                cost = await calculate_cost(self.db, model_id, result.tokens_in, result.tokens_out)
-
-                # DLP na resposta do modelo, NA ORIGEM — pelo mesmo motivo do
-                # `/query`: `result.text` é lido duas vezes abaixo (no
-                # `InteractionResponse` e no `ModelResponse` devolvido ao médico).
-                # Sanitizar num só faria as duas visões divergirem para sempre.
-                # `use_ner=False`: ver `sanitize_prompt_async`.
-                texto_limpo = (
-                    await sanitize_prompt_async(result.text, use_ner=False)
-                ).sanitized_text if result.text else result.text
-
-                ir = InteractionResponse(
-                    interaction_id=interaction.id,
-                    model_used=model_id,
-                    response_text=texto_limpo,
-                    tokens_in=result.tokens_in,
-                    tokens_out=result.tokens_out,
-                    cost_usd=cost,
-                    extra_metadata={"citations": citations} if citations else None,
-                    is_fallback=False,
-                )
-                self.db.add(ir)
-                ir_by_model[model_id] = ir
-                citations_by_model[model_id] = citations
-                total_cost += cost
-                response_models.append(
-                    ModelResponse(
-                        model_id=model_id,
-                        provider=result.provider,
-                        response_text=result.text,
-                        response_time_ms=0,
-                        tokens_in=result.tokens_in,
-                        tokens_out=result.tokens_out,
-                        cost_usd=float(cost),
-                    )
-                )
-            else:
-                error_msg = str(result)
-                ir = InteractionResponse(
-                    interaction_id=interaction.id,
-                    model_used=model_id,
-                    response_text="",
-                    error_message=error_msg,
-                    is_fallback=False,
-                )
-                self.db.add(ir)
-                response_models.append(
-                    ModelResponse(
-                        model_id=model_id,
-                        provider="",
-                        response_text="",
-                        response_time_ms=0,
-                        error=error_msg,
-                    )
-                )
-
-        await record_cost(self.db, self.user_id, total_cost)
-
-        elapsed_ms = int((time.monotonic() - start_time) * 1000)
-        interaction.response_time_ms = elapsed_ms
-        interaction.token_cost_usd = total_cost
-        interaction.completed_at = datetime.now(UTC)
-        await self.db.flush()
-
-        # Commit cedo — dados essenciais garantidos mesmo que enriquecimento falhe
-        await self.db.commit()
-
-        # 7-9. Enriquecimento best-effort (falha aqui não perde a interação)
-        classification = {"specialty": None, "topic": None}
-        medications: list[dict] = []
-        pubmed_by_model: dict[str, PubmedValidationResult] = {}
-        try:
-            classification = await detect_specialty_and_topic(sanitized_prompt)
-            interaction.specialty_detected = classification["specialty"]
-            interaction.topic_detected = classification["topic"]
-
-            # Validação PubMed — só para respostas clínicas com texto
-            is_clinical = classification["specialty"] not in (None, "Cotidiano/Não clínico")
-            if is_clinical:
-                clinical_tasks = {
-                    rm.model_id: validate_with_pubmed(
-                        agent_response=rm.response_text,
-                        mode="CLINICAL_REASONING",
-                        topic=classification.get("topic", ""),
-                    )
-                    for rm in response_models
-                    if rm.response_text and not rm.error
-                }
-                if clinical_tasks:
-                    pub_results = await asyncio.gather(*clinical_tasks.values(), return_exceptions=True)
-                    for mid, val in zip(clinical_tasks.keys(), pub_results):
-                        if isinstance(val, Exception):
-                            logger.warning(f"PubMed validation falhou para {mid}: {val}")
-                            continue
-                        # Só processa se não for fallback e tiver citações verificadas ou guidelines
-                        verified = [c for c in val.cited_guidelines_verified if c.verified]
-                        if val.fallback or (not verified and not val.newer_guidelines_found):
-                            continue
-                        pubmed_schema = PubmedValidationResult(
-                            cited_guidelines_verified=[
-                                VerifiedCitationOut(title=c.title, pmid=c.pmid, verified=c.verified)
-                                for c in verified
-                            ],
-                            newer_guidelines_found=[
-                                PubMedArticleOut(
-                                    pmid=a.pmid,
-                                    article_title=a.article_title,
-                                    abstract_snippet=a.abstract_snippet,
-                                )
-                                for a in val.newer_guidelines_found
-                            ],
-                            fallback=val.fallback,
-                        )
-                        pubmed_by_model[mid] = pubmed_schema
-                        # Atualiza extra_metadata no banco (cita citations já em memória)
-                        existing_citations = citations_by_model.get(mid, [])
-                        meta: dict = {}
-                        if existing_citations:
-                            meta["citations"] = existing_citations
-                        meta["pubmed"] = pubmed_schema.model_dump()
-                        ir_by_model[mid].extra_metadata = meta
-
-            response_texts = [r.response_text for r in response_models if r.response_text]
-            medications = await extract_from_interaction(sanitized_prompt, response_texts)
-            for med in medications:
-                self.db.add(InteractionMedication(
-                    interaction_id=interaction.id,
-                    medication_raw=med["medication_raw"],
-                    medication_normalized=med["medication_normalized"],
-                    source=med["source"],
-                ))
-
-            add_interaction_audit(
-                self.db,
-                user_id=self.user_id,
-                interaction_id=interaction.id,
-                action="agregador_query",
-                metadata={
-                    "models": request.models,
-                    "prompt_length": len(request.prompt),
-                    "response_count": len(response_models),
-                    "total_cost_usd": str(total_cost),
-                    "dlp_sanitized": dlp_result.was_sanitized,
-                    "dlp_replacements": dlp_result.replacement_count,
-                    "dlp_by_type": dlp_result.counts_by_type,
-                    "specialty_detected": classification["specialty"],
-                    "topic_detected": classification["topic"],
-                    "medications": [m["medication_normalized"] for m in medications],
-                    "pubmed_validated": list(pubmed_by_model.keys()),
-                },
-            )
-            await self.db.flush()
-        except Exception as e:
-            logger.warning(f"Enriquecimento pós-query falhou (interação já salva): {e}")
-
-        # Incorpora pubmed_validation nos ModelResponse
-        final_responses = [
-            rm.model_copy(update={"pubmed_validation": pubmed_by_model.get(rm.model_id)})
-            for rm in response_models
-        ]
-
-        return AgregadorResponse(
-            interaction_id=interaction.id,
-            conversation_id=conversation_id,
-            responses=final_responses,
-            disclaimer=DISCLAIMER_RESPOSTA,
-            total_response_time_ms=elapsed_ms,
-            created_at=interaction.created_at,
-            specialty_detected=classification["specialty"],
-            topic_detected=classification["topic"],
-        )
 
     # ── Salvar interação após streaming ─────────────────────
 
@@ -341,10 +95,20 @@ class AgregadorService:
                 )
                 cost += Decimal(str(data.get("search_cost_usd", 0.0)))
                 total_cost += cost
+                # DLP NA RESPOSTA DO MODELO, antes de gravar. Só o `query()` — a rota
+                # que ninguém chamava — fazia isto; este caminho, o que está em uso,
+                # gravava o texto cru. Um modelo que repete na resposta o nome e o
+                # CPF que o médico digitou deixava o dado do paciente no histórico,
+                # apesar de o PROMPT ter sido mascarado. Mesma regra do stream do
+                # orquestrador: na tela saiu o original, no banco fica a versão
+                # mascarada. `use_ner=False`: ver `sanitize_prompt_async`.
+                texto = data.get("text", "")
+                if texto:
+                    texto = (await sanitize_prompt_async(texto, use_ner=False)).sanitized_text
                 ir = InteractionResponse(
                     interaction_id=interaction.id,
                     model_used=model_id,
-                    response_text=data.get("text", ""),
+                    response_text=texto,
                     tokens_in=data.get("tokens_in"),
                     tokens_out=data.get("tokens_out"),
                     cost_usd=cost,
@@ -458,27 +222,6 @@ class AgregadorService:
 
     # ── Chamadas paralelas aos providers ─────────────────────
 
-    async def _call_providers(
-        self,
-        prompt: str,
-        models_info: dict[str, Pricing],
-        system_prompt: str | None = None,
-    ) -> dict[str, ProviderResponse | Exception]:
-        """
-        RN-AGR-001: Se um modelo falhar, não impacta os demais.
-        Busca o provider pelo tipo e passa o model_id dinâmico.
-        """
-        tasks = {}
-        for model_id, model_info in models_info.items():
-            provider = get_provider_by_type(model_info.provider_type)
-            tasks[model_id] = provider.complete(model_id, prompt, system_prompt=system_prompt)
-
-        results = await asyncio.gather(
-            *tasks.values(),
-            return_exceptions=True,
-        )
-
-        return dict(zip(tasks.keys(), results))
 
     # ── Conversation management ──────────────────────────────
 
@@ -497,7 +240,7 @@ class AgregadorService:
             if conv:
                 return conv.id
 
-        title = _make_title(sanitized_prompt)
+        title = make_title(sanitized_prompt)
         conv = Conversation(
             user_id=self.user_id,
             title=title,
@@ -510,74 +253,5 @@ class AgregadorService:
 
     # ── Contexto de conversa para streaming ─────────────────
 
-    async def get_conversation_context(self, conversation_id: UUID, limit: int = 5) -> str:
-        """
-        Retorna as últimas N interações da conversa formatadas como contexto.
-        Inclui prompt do médico e primeira resposta de cada interação.
-        """
-        stmt = (
-            select(Interaction)
-            .options(selectinload(Interaction.responses))
-            .where(
-                Interaction.conversation_id == conversation_id,
-                Interaction.feature == "AGREGADOR",
-            )
-            .order_by(Interaction.created_at.desc())
-            .limit(limit)
-        )
-        result = await self.db.execute(stmt)
-        interactions = list(reversed(result.scalars().all()))
-
-        if not interactions:
-            return ""
-
-        parts = ["[Conversa anterior]"]
-        for inter in interactions:
-            parts.append(f"Médico: {inter.prompt_text}")
-            for resp in inter.responses[:1]:  # primeira resposta disponível
-                if resp.response_text:
-                    parts.append(f"Assistente ({resp.model_used}): {resp.response_text[:800]}")
-        parts.append("[Pergunta atual]")
-        return "\n".join(parts) + "\n"
 
     # ── Histórico (RN-AGR-004) ───────────────────────────────
-
-    async def get_history(
-        self,
-        query: str | None = None,
-        model_filter: str | None = None,
-        date_from: datetime | None = None,
-        date_to: datetime | None = None,
-        page: int = 1,
-        page_size: int = 20,
-    ) -> list[Interaction]:
-        """
-        RN-AGR-004: histórico pesquisável por data, modelo e palavras-chave.
-        Retenção mínima: 12 meses.
-        """
-        stmt = (
-            select(Interaction)
-            .options(selectinload(Interaction.responses))
-            .where(
-                Interaction.user_id == self.user_id,
-                Interaction.feature == "AGREGADOR",
-            )
-            .order_by(Interaction.created_at.desc())
-        )
-
-        if query:
-            stmt = stmt.where(Interaction.prompt_text.ilike(f"%{query}%"))
-        if date_from:
-            stmt = stmt.where(Interaction.created_at >= date_from)
-        if date_to:
-            stmt = stmt.where(Interaction.created_at <= date_to)
-        if model_filter:
-            stmt = stmt.where(
-                Interaction.responses.any(
-                    InteractionResponse.model_used == model_filter
-                )
-            )
-        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())

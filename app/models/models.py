@@ -39,22 +39,12 @@ def new_uuid() -> uuid.UUID:
 # ── Enums ────────────────────────────────────────────────────
 
 
-class FeatureEnum(str, enum.Enum):
-    AGREGADOR = "AGREGADOR"
-    ORQUESTRADOR = "ORQUESTRADOR"
-
-
 class ModeEnum(str, enum.Enum):
     BIZU = "BIZU"
     SHERLOCK = "SHERLOCK"
     FARMACIA = "FARMACIA"
     INTERACOES = "INTERACOES"
     PRODUTIVIDADE = "PRODUTIVIDADE"
-
-
-class InputTypeEnum(str, enum.Enum):
-    TEXT = "TEXT"
-    AUDIO = "AUDIO"
 
 
 # ── Company - ok ──────────────────────────────────────────────────
@@ -88,6 +78,12 @@ class User(Base):
     # o e-mail pode mudar lá e, sem isto, o próximo login criaria conta nova.
     # Nulo para quem entrou por OTP/convite, e para quem ainda não relogou.
     waid_uuid: Mapped[str | None] = mapped_column(String(64))
+    # Sobe a cada logout. Todo token carrega a versão com que foi emitido (`tv`)
+    # e `get_current_user` recusa versão antiga — é o que torna o "Sair" real.
+    # Sem isto o JWT, que é autocontido, seguia válido por até uma hora depois
+    # do logout: em estação compartilhada de hospital, o próximo usuário lia o
+    # histórico do anterior. Ver migration 014.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     name: Mapped[str | None] = mapped_column(String(255))
     crm: Mapped[str | None] = mapped_column(String(20))
     crm_state: Mapped[str | None] = mapped_column(String(2))
@@ -372,7 +368,11 @@ class ConsentLog(Base):
     __tablename__ = "consent_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # Anulável desde a migration 013: na exclusão de conta o registro é
+    # ANONIMIZADO (user_id, IP e user-agent saem), não apagado — a prova de que
+    # houve consentimento sobrevive sem identificar ninguém. Todo registro nasce
+    # com dono; `NULL` só aparece depois de uma exclusão.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     consent_type: Mapped[str] = mapped_column(String(100), nullable=False)
     accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     ip_address: Mapped[str | None] = mapped_column(INET)
@@ -420,7 +420,9 @@ class OtpCode(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    code: Mapped[str] = mapped_column(String(6), nullable=False)
+    # NÃO é o código: é o HMAC-SHA256 dele (64 hex), com o segredo do servidor como
+    # chave. Ver `auth_service._resumo_do_codigo` e a migration 015.
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)

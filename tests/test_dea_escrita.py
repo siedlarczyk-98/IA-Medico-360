@@ -62,6 +62,22 @@ def _redis_disponivel(monkeypatch):
     monkeypatch.setattr(antivandalismo, "limite_por_origem_excedido", dentro_do_limite)
 
 
+@pytest.fixture
+def origem(monkeypatch):
+    """Troca a origem (o `ip_hash`) das próximas requisições.
+
+    O cliente ASGI sai sempre do mesmo IP. `origem("b")` faz as chamadas
+    seguintes parecerem vir de outra máquina — 64 caracteres, como um sha256
+    real, porque a coluna é VARCHAR(64).
+    """
+    def _trocar(letra: str) -> None:
+        monkeypatch.setattr(
+            "app.dea.routers.dea_router.hash_do_request", lambda *_a, **_kw: letra * 64
+        )
+
+    return _trocar
+
+
 async def _contar(db, modelo) -> int:
     return (await db.execute(select(func.count()).select_from(modelo))).scalar()
 
@@ -297,23 +313,94 @@ class TestVerificacao:
         assert busca.json()["total"] == 1
         assert busca.json()["locais"][0]["dispositivos"][0]["status"] == "nao_encontrado"
 
-    async def test_marcar_como_removido_tira_do_mapa(self, client):
-        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+    # ── Remoção: duas origens, e o aparelho visível até lá ────────────────
+    # INVERTIDO em 2026-09-21. `test_marcar_como_removido_tira_do_mapa` travava o
+    # voto único: UM relato anônimo escondia qualquer aparelho, inclusive ativo,
+    # para sempre — fora da listagem ninguém reverifica, e só voltava por SQL.
 
-        await client.post(
-            f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes",
-            json={"resultado": "removido"},
-        )
+    async def test_um_relato_de_remocao_nao_tira_do_mapa(self, client, origem):
+        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+
+        origem("b")
+        resposta = await client.post(url, json={"resultado": "removido"})
         busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
 
+        assert resposta.json()["status"] != "removido"
+        assert resposta.json()["remocao_relatada"] is True
+        assert busca.json()["total"] == 1
+        # Visível, mas com o aviso: quem está socorrendo decide.
+        assert busca.json()["locais"][0]["dispositivos"][0]["remocao_relatada"] is True
+
+    async def test_um_relato_nao_esconde_nem_aparelho_ativo_e_confirmado(self, client, db, origem):
+        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+        origem("b")
+        await client.post(url, json={"resultado": "encontrado"})  # promove a ativo
+
+        origem("c")
+        await client.post(url, json={"resultado": "removido"})
+        busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
+
+        assert busca.json()["total"] == 1
+        assert busca.json()["locais"][0]["dispositivos"][0]["status"] == "ativo"
+
+    async def test_a_mesma_origem_insistindo_continua_valendo_um_relato(self, client, origem):
+        """O ataque da varredura: um laço de requisições esvaziando o mapa."""
+        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+
+        origem("b")
+        for _ in range(5):
+            await client.post(url, json={"resultado": "removido"})
+        busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
+
+        assert busca.json()["total"] == 1
+
+    async def test_duas_origens_diferentes_tiram_do_mapa(self, client, origem):
+        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+
+        origem("b")
+        await client.post(url, json={"resultado": "removido"})
+        origem("c")
+        segunda = await client.post(url, json={"resultado": "removido"})
+        busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
+
+        assert segunda.json()["status"] == "removido"
         assert busca.json()["total"] == 0
 
-    async def test_nada_e_deletado_do_banco(self, client, db):
+    async def test_quem_encontra_o_aparelho_desmente_o_relato(self, client, origem):
+        """Um "encontrei" zera os relatos: o próximo "removido" volta a ser o primeiro."""
         criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
-        await client.post(
-            f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes",
-            json={"resultado": "removido"},
-        )
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+
+        origem("b")
+        await client.post(url, json={"resultado": "removido"})
+        origem("c")
+        achou = await client.post(url, json={"resultado": "encontrado"})
+        origem("d")
+        depois = await client.post(url, json={"resultado": "removido"})
+        busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
+
+        assert achou.json()["remocao_relatada"] is False
+        assert depois.json()["status"] != "removido"
+        assert busca.json()["total"] == 1
+
+    async def test_aparelho_sem_relato_nao_leva_o_rotulo(self, client):
+        await client.post("/api/v1/dea/locais", json=_cadastro())
+
+        busca = await client.get("/api/v1/dea/locais", params={**PAULISTA, "raio_km": 1})
+
+        assert busca.json()["locais"][0]["dispositivos"][0]["remocao_relatada"] is False
+
+    async def test_nada_e_deletado_do_banco(self, client, db, origem):
+        criado = (await client.post("/api/v1/dea/locais", json=_cadastro())).json()
+        url = f"/api/v1/dea/dispositivos/{criado['dispositivo_id']}/verificacoes"
+        origem("b")
+        await client.post(url, json={"resultado": "removido"})
+        origem("c")
+        await client.post(url, json={"resultado": "removido"})
 
         # Some da listagem, permanece na tabela: o histórico de "existiu um DEA
         # aqui" é informação, não lixo.

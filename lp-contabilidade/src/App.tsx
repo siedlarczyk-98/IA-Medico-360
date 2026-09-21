@@ -62,8 +62,8 @@ export function App() {
         <img
           src={heroImage}
           alt="Médico revisando documentos financeiros do consultório"
-          width={1600}
-          height={1104}
+          width={1264}
+          height={848}
           className="absolute inset-0 size-full object-cover object-right opacity-70"
         />
         <div

@@ -30,6 +30,7 @@ from app.services.vigilancia_service import (
     medir_custo,
     medir_ultimo_expurgo,
 )
+from tests.conftest import fabrica_sobre
 
 EMBEDDING_FALSO = [0.0] * 1536
 
@@ -310,11 +311,10 @@ async def test_rodada_de_expurgo_deixa_rastro_auditavel(db, db_conn, user, monke
     vigilância passa a alarmar todo dia dizendo que o expurgo morreu — um falso
     positivo diário, que é o jeito mais rápido de fazer o time desligar tudo.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         expurgo_agendado, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
     assert (await medir_ultimo_expurgo(db))["nunca_registrado"] is True
 
@@ -328,11 +328,10 @@ async def test_rodada_de_expurgo_deixa_rastro_auditavel(db, db_conn, user, monke
 # ── Laço agendado ────────────────────────────────────────────────────────────
 
 async def test_rodada_alarma_o_que_avaliar_devolveu(db_conn, monkeypatch):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         vigilancia_agendada, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
     monkeypatch.setattr(
         vigilancia_agendada, "avaliar",
@@ -348,11 +347,10 @@ async def test_rodada_alarma_o_que_avaliar_devolveu(db_conn, monkeypatch):
 
 
 async def test_rodada_saudavel_nao_alarma(db_conn, monkeypatch):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         vigilancia_agendada, "async_session_factory",
-        async_sessionmaker(bind=db_conn, expire_on_commit=False),
+        fabrica_sobre(db_conn),
     )
     monkeypatch.setattr(vigilancia_agendada, "avaliar", lambda _m: [])
     enviados = []

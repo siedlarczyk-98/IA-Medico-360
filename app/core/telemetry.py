@@ -40,7 +40,13 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
         os.environ.setdefault("PHOENIX_API_KEY", api_key.strip())
         os.environ.setdefault("PHOENIX_COLLECTOR_ENDPOINT", endpoint.strip())
 
-        tracer_provider = register(project_name=project_name)
+        # `batch=True` é obrigatório aqui. O padrão da biblioteca é o
+        # SimpleSpanProcessor, que exporta DENTRO do `on_end` do span com um
+        # cliente HTTP bloqueante — no único event loop da API. Cada resposta
+        # congelava todas as outras por um round trip até o Phoenix, e um
+        # Phoenix lento congelava a API inteira. O processador em lote exporta
+        # numa thread própria.
+        tracer_provider = register(project_name=project_name, batch=True)
         _tracer = tracer_provider.get_tracer("medico360.ai_providers")
         logger.info("Phoenix ativado → projeto='%s' endpoint='%s' tracer=%s", project_name, endpoint, _tracer)
     except ImportError:

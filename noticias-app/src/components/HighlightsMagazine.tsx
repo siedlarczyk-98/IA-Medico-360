@@ -20,6 +20,18 @@ import DOMPurify from "dompurify";
 import { useFavorites } from "../hooks/useFavorites";
 import { buscarArtigo, buscarFeed, naoInteressa, type Highlight, type MotivoVazio } from "../api/news";
 
+/**
+ * Mesma lista de permissão do servidor (`app/services/html_seguro.py`), e nenhum
+ * atributo. A configuração padrão do DOMPurify deixa passar `<a>`, `<img>`,
+ * `style` e dezenas de tags que um post não usa: um link no corpo, dentro do
+ * iframe, tira o médico da plataforma. O servidor já sanitiza ao gravar; isto
+ * cobre os posts gravados ANTES disso e continua valendo como segunda barreira.
+ */
+const SANITIZACAO_DO_POST = {
+  ALLOWED_TAGS: ['p', 'strong', 'em', 'ul', 'ol', 'li', 'br', 'h3'],
+  ALLOWED_ATTR: [] as string[],
+};
+
 const COLORS = {
   azulProfundo: "#0e252d",
   azulPetroleo: "#014751",
@@ -545,7 +557,7 @@ function DetailModal({ item, onClose }: { item: HighlightItem; onClose: () => vo
           // O corpo e gerado pelo nosso redator, mas passa pelo DOMPurify assim
           // mesmo: conteudo que vira HTML na tela nunca deve depender de a fonte
           // ser confiavel hoje.
-          <div style={styles.modalBody} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(corpo) }} />
+          <div style={styles.modalBody} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(corpo, SANITIZACAO_DO_POST) }} />
         )}
         {item.sourceUrl && (
           <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" style={styles.modalSourceLink}>

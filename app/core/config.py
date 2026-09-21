@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     )
 
     # --- App ---
-    app_name: str = "Médico 360"
     # SEM padrão de propósito. Todo o endurecimento de produção está atrás de
     # `is_production` — docs fechada, cookie Secure, validação fail-closed do
     # embed SSO. Com um padrão, esquecer de definir a variável fazia a aplicação
@@ -36,6 +35,13 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60  # 1h (padrão seguro; ajustável via env)
+    # Idade MÁXIMA da sessão, contada do login de verdade (código por e-mail,
+    # token da Waid, convite) — não da última renovação. Um token válido gera
+    # outro em `PATCH /auth/me` e no onboarding, e sem este teto a cadeia não
+    # acabava nunca: quem pusesse a mão num token mantinha a sessão viva para
+    # sempre. 24h por decisão de 2026-09-21; dentro do embed o médico nem nota,
+    # porque a Waid o identifica de novo.
+    session_max_age_hours: int = 24
 
     # --- AI Providers ---
     anthropic_api_key: str = ""
@@ -185,11 +191,6 @@ class Settings(BaseSettings):
     phoenix_api_key: str = ""
     phoenix_project_name: str = "medico-360"
     phoenix_endpoint: str = "https://app.phoenix.arize.com/s/ruben-nogueira"
-
-    # --- Agregador ---
-    max_models_per_query: int = 4
-    max_prompt_chars: int = 4000
-    default_timeout_seconds: int = 30
 
     # --- Calculadoras ---
     # Teto de caracteres para inputs do tipo `text` quando a calculadora nao
@@ -346,17 +347,27 @@ def origens_confiaveis(settings: "Settings") -> list[str]:
     "o upload parou de funcionar" depois de alguém acrescentar um front novo só
     no CORS.
 
-    **Exceção deliberada: `dea_url` NÃO entra aqui.** O `dea-app` é público —
-    não tem cookie de sessão nem header `Authorization`, então não há requisição
-    autenticada dele para proteger contra CSRF. Ele precisa do CORS (em
-    `main.py`) para o browser deixar o JavaScript ler a resposta; incluí-lo
-    nesta lista só ampliaria a superfície de origens confiáveis sem nenhum ganho.
-    Se um dia o módulo ganhar rota autenticada, esta linha é a que muda.
+    **`dea_url` e `noticias_url` ENTRAM aqui** (corrigido em 2026-09-21). O
+    `dea_url` ficava de fora de propósito, com o argumento de que o app público
+    não faz requisição autenticada e portanto não há CSRF a proteger. O argumento
+    estava certo e a conclusão, errada: a guarda recusa QUALQUER `Origin` fora
+    desta lista, autenticada ou não, e o browser manda `Origin` em todo POST
+    entre origens. Resultado em produção: cadastrar ou verificar um DEA pelo
+    navegador devolvia 403, enquanto um script sem o header passava — a proteção
+    barrava pessoas e admitia robôs. O `noticias_url` nunca tinha entrado, e só
+    funcionava porque alguém pôs a URL em `EMBED_ALLOWED_ORIGINS` no painel.
+
+    Incluir não amplia superfície: o CORS já aceitava o `dea_url` com
+    credenciais. `tests/test_origens_dos_apps.py` exige que toda URL de frontend
+    das configurações esteja classificada, para o próximo app não repetir isto.
     """
-    origens = [settings.frontend_url, settings.calculadoras_url]
-    origens += settings.embed_allowed_origins + settings.landing_pages_origins
+    apps = [
+        settings.frontend_url, settings.calculadoras_url,
+        settings.noticias_url, settings.dea_url,
+    ]
+    origens = apps + settings.embed_allowed_origins + settings.landing_pages_origins
     if not settings.is_production:
-        for o in [settings.frontend_url, settings.calculadoras_url, *settings.landing_pages_origins]:
+        for o in [*apps, *settings.landing_pages_origins]:
             origens += [o.replace("localhost", "127.0.0.1"), o.replace("127.0.0.1", "localhost")]
     return list(dict.fromkeys(o for o in origens if o))
 

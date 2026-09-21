@@ -69,6 +69,9 @@ export function useLead(): { lead: Lead; pronto: boolean } {
     // que abrem a seção sem iframe.
     if (fase === 'erro') {
       leadAtual = { emailMissing: true }
+      // `fase` vem de um hook externo e 'erro' é terminal: um render a mais, uma
+      // vez. Sem teste nestas páginas, não se mexe no fluxo por causa de lint.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver acima
       setLead(leadAtual)
       setPronto(true)
     }

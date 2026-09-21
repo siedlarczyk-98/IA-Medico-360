@@ -1,0 +1,12 @@
+# Sem `concurrency = greenlet` a medição sai errada PARA BAIXO: o SQLAlchemy
+# assíncrono roda o driver dentro de greenlets, e o rastreador padrão perde as
+# linhas executadas depois do primeiro acesso ao banco. `conversations.py`
+# aparecia com 35% e tem 94% (varredura de 2026-09-18).
+[run]
+source = app
+branch = True
+concurrency = greenlet,thread
+
+[report]
+show_missing = False
+skip_empty = True

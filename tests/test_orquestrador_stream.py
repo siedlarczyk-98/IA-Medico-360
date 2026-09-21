@@ -16,11 +16,11 @@ import asyncio
 import json
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.services.integracoes import ai_providers
 from app.services.integracoes.ai_providers import StreamToken
 from app.services.orquestrador_stream_service import OrquestradorStreamService
+from tests.conftest import fabrica_sobre
 
 
 def parse_sse(bruto: list[str]) -> list[tuple[str, dict]]:
@@ -65,13 +65,27 @@ def servico(db, db_conn, user, monkeypatch):
     Injetamos uma factory presa à mesma conexão do teste para que o rollback
     do harness continue valendo.
     """
-    factory = async_sessionmaker(bind=db_conn, expire_on_commit=False)
+    factory = fabrica_sobre(db_conn)
     return OrquestradorStreamService(factory, user.id)
 
 
 @pytest.fixture(autouse=True)
 def sem_dependencias_externas(monkeypatch):
-    """Desliga cache semântico, triagem remota e enriquecimento."""
+    """
+    Desliga cache semântico, triagem remota e enriquecimento.
+
+    ONDE PATCHAR IMPORTA. `_sem_cache` e `_triagem` existiam aqui desde sempre e
+    nunca eram aplicados — os `monkeypatch.setattr` correspondentes faltavam. O
+    efeito não foi um teste vermelho, e sim nove testes que saíam para a OpenAI,
+    apanhavam da guarda de rede, e passavam pelo `except Exception` do serviço:
+    validavam o caminho de contingência enquanto o nome prometia o principal.
+
+    A triagem é patchada em `orquestrador_shared`, não no módulo do stream,
+    porque quem a chama é `decidir_rota` — e o stream importa `decidir_rota`
+    pronta. Patchar `decidir_rota` inteira também funcionaria, mas jogaria fora
+    as regras de roteamento (promoção por anexo, sub-modo de pharma, piso de
+    confiança) que boa parte destes testes existe para exercitar.
+    """
     async def _sem_cache(*a, **k):
         return None
 
@@ -93,6 +107,42 @@ def sem_dependencias_externas(monkeypatch):
     monkeypatch.setattr(
         "app.services.orquestrador_stream_service.check_clarification",
         _sem_clarificacao,
+    )
+    # A triagem real vai ao gpt-5.4-nano por HTTP. Ver o docstring acima sobre
+    # por que o alvo é `orquestrador_shared.triage`.
+    monkeypatch.setattr("app.services.orquestrador_shared.triage", _triagem)
+    # O cache semântico está desligado por configuração, mas o teste não pode
+    # depender disso: religá-lo faria estes testes saírem para a OpenAI de novo,
+    # agora por embedding.
+    monkeypatch.setattr(
+        "app.services.orquestrador_stream_service.get_cached_response", _sem_cache
+    )
+
+    # O PÓS-PROCESSAMENTO é a terceira saída para a rede, e a que passou
+    # despercebida por mais tempo: `pos_processar_interacao` dispara três
+    # chamadas em `asyncio.gather` DEPOIS do último token
+    # (`orquestrador_shared.py:529`). Como ela roda no fim, o teste já tinha
+    # colhido todos os eventos SSE que queria — e o estrago aparecia só como
+    # três POSTs para a OpenAI que ninguém via.
+    async def _sem_especialidade(*a, **k):
+        return {"specialty": None, "topic": None}
+
+    async def _sem_medicamentos(*a, **k):
+        return []
+
+    async def _sem_pubmed(*a, **k):
+        from app.services.integracoes.pubmed_service import ValidationResult
+
+        return ValidationResult(confidence_score=0.0, fallback=True)
+
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.detect_specialty_and_topic", _sem_especialidade
+    )
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.extract_from_interaction", _sem_medicamentos
+    )
+    monkeypatch.setattr(
+        "app.services.orquestrador_shared.validate_with_pubmed", _sem_pubmed
     )
     # Sem isso cada teste paga o timeout de conexão do Redis, que não existe no CI.
     monkeypatch.setattr("app.services.cache_service.get_json", _sem_redis_get)
