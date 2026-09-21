@@ -123,9 +123,16 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
       só na API).
 - [ ] Ensaio de carga antes de qualquer campanha de crescimento. A fase 4 removeu os
       tetos conhecidos, mas NADA foi medido sob carga — nem o teto novo.
-- [ ] Subir workers (a máquina tem 8 vCPU e a API usa uma). Pré-requisitos: Redis em
-      produção confirmado (rate limit), cadência do PubMed dividida pelo número de
-      workers, e o digest de notícias com transação por usuário (fase 6).
+- [x] **Subir workers — FEITO em 2026-09-21.** `--workers ${WEB_CONCURRENCY:-2}` no
+      Dockerfile; os agendadores passaram a subir só no processo líder
+      (`app/core/lider.py`). Sobe para 2 workers no próximo deploy, sem env nova.
+- [ ] **Depois de um dia com 2 workers**, decidir se vai para 4: rodar
+      `python -m scripts.medir_conexoes_presas --minutos 30` num horário de movimento e
+      conferir `pg_stat_activity`. Com 4 são ~164 conexões de um teto de 500.
+- [ ] **Cadência do PubMed é POR PROCESSO** (8/s com chave): com N workers o total vira
+      N×8/s contra a NCBI, que aceita 10/s por IP. Com 2 workers já passa do teto se os
+      dois coletarem ao mesmo tempo. Dividir `_Cadencia` por `WEB_CONCURRENCY`, ou mover
+      a cadência para o Redis.
 - [ ] Perguntar à Waid: outro iframe no mesmo LMS consegue pedir um token e reusá-lo?
 
 ## 5. Dívidas técnicas registradas, não resolvidas

@@ -13,6 +13,12 @@ pico dos médicos; são 18 usuários, mas o deploy reinicia a API.
 
 ---
 
+> **EXECUTADO EM 2026-09-21.** Migrations aplicadas (backup antes), commit `6fd05ab`
+> na `main`, deploy dos 8 serviços concluído. Tudo o que dava para verificar sem
+> navegador passou — ver a etapa 5. O que falta está marcado abaixo.
+>
+> `max_connections` de produção: **500** (o pool da app é 30+10; o gargalo era o pool).
+
 ## Etapa 1 — Antes de tocar em produção
 
 ### 1.1 Revisar e commitar, num BRANCH
@@ -154,6 +160,22 @@ volta (`downgrade -1` / `upgrade head`) num banco descartável.
         conserto é corrigir `users.waid_uuid` por SQL;
       - `QueuePool limit` ou `TimeoutError` de pool — não deveria mais aparecer.
 - [ ] Sentry: nenhum pico novo.
+
+### 5.2b Medir o item 18 — num horário de movimento
+
+O teto de ~20 respostas simultâneas nunca foi medido: era aritmética sobre a
+configuração. `scripts/medir_conexoes_presas.py` é a medição que faltava.
+
+```bash
+python -m scripts.medir_conexoes_presas --minutos 30 --csv medicao.csv
+```
+
+Rode **com médicos usando o produto** — em banco parado o resultado é sempre zero e o
+próprio script avisa isso. Código de saída: `0` limpo, `1` sem movimento (refaça),
+`2` conexão presa por mais de 2 s (o defeito voltou, ou veio de outro caminho).
+
+Validado nos dois sentidos: com uma transação parada plantada de propósito ele acusa;
+em banco limpo, não.
 
 ### 5.3 Na primeira semana
 
