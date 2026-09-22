@@ -79,6 +79,12 @@ interface HighlightItem {
    * confiar no filtro. O digest ignora estes itens.
    */
   preenchimento: boolean;
+  /**
+   * Relevancia para os temas do usuario (0 a 1). NAO e exibido — serve para
+   * escolher o destaque de capa. A lista vem em ordem cronologica do backend,
+   * entao a posicao nao diz mais nada sobre relevancia.
+   */
+  score: number;
 }
 
 function journalBySlug(slug: string | undefined): JournalMeta | null {
@@ -96,6 +102,7 @@ function paraItem(h: Highlight): HighlightItem {
     temas: h.temas.map((t) => ({ slug: t.slug, nome: t.nome_pt })),
     palavras: h.palavras,
     preenchimento: h.preenchimento,
+    score: h.score ?? 0,
   };
 }
 
@@ -147,6 +154,15 @@ export interface HighlightsMagazineProps {
   /** Abre a tela de temas. O feed sem saida para editar a selecao vira caixa-preta. */
   aoEditarTemas: () => void;
   perPage?: number;
+  /**
+   * Artigo a abrir ja na chegada, vindo de `/artigo/:id` — e o link que o
+   * digest por e-mail manda. Sem isto o medico clicava num destaque especifico
+   * e caia no feed generico, tendo de procurar de novo o que ele acabara de
+   * escolher ler.
+   */
+  artigoInicial?: number | null;
+  /** Avisa que o modal fechou, para a URL voltar a ser a do feed. */
+  aoFecharArtigo?: () => void;
 }
 
 const MENSAGEM_VAZIO: Record<MotivoVazio, { titulo: string; texto: string }> = {
@@ -162,7 +178,12 @@ const MENSAGEM_VAZIO: Record<MotivoVazio, { titulo: string; texto: string }> = {
   },
 };
 
-export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: HighlightsMagazineProps) {
+export default function HighlightsMagazine({
+  aoEditarTemas,
+  perPage = 30,
+  artigoInicial = null,
+  aoFecharArtigo,
+}: HighlightsMagazineProps) {
   const [verTudo, setVerTudo] = useState(false);
   const { items, motivoVazio, loading, error } = useHighlights(verTudo, perPage);
   const { favoriteIds, toggleFavorite, canFavorite } = useFavorites();
@@ -171,6 +192,20 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
   const [activeDayFilter, setActiveDayFilter] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<HighlightItem | null>(null);
   const [ocultados, setOcultados] = useState<Set<number>>(new Set());
+
+  // QUEM DECIDE O MODAL ABERTO É A URL, quando ela traz um artigo.
+  //
+  // Derivado no render, e não copiado para o estado por um efeito: com `/artigo/153`
+  // na barra, a verdade sobre "qual destaque está aberto" é a URL. Copiar para
+  // `selectedItem` criaria duas fontes que podem divergir — e o efeito ainda
+  // dispararia um render em cascata a cada carga do feed.
+  //
+  // Enquanto o feed carrega não há item para achar, e `?? null` mantém o modal
+  // fechado até ele chegar.
+  const artigoDaUrl = artigoInicial == null
+    ? null
+    : items.find((i) => i.articleId === artigoInicial) ?? null;
+  const itemAberto = artigoDaUrl ?? selectedItem;
 
   const todayWeekday = new Date().getDay();
   const todayJournalSlug = JOURNALS.find((j) => j.weekday === todayWeekday)?.slug ?? null;
@@ -182,11 +217,28 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
 
   // O hero so pode ser um item que casou de verdade: dar destaque de capa a um
   // item de preenchimento seria vende-lo como relevante quando ele nao e.
+  //
+  // ESCOLHE PELO MAIOR SCORE, e nao pelo primeiro da lista.
+  //
+  // Antes era `candidatos[0]`, o que funcionava SO PORQUE o backend ordenava
+  // por relevancia. A lista virou cronologica (era o pedido: as datas pulavam
+  // de 18 para 03 e voltavam para 08), e `[0]` teria virado "o mais recente"
+  // em silencio — a capa deixaria de ser curadoria sem ninguem notar.
+  //
+  // A preferencia pelo journal do dia continua valendo e vem ANTES do score:
+  // e a logica editorial da revista (segunda e Lancet, terca e JAMA...), e
+  // entre os do dia o melhor colocado ganha.
   const heroItem = useMemo(() => {
     const candidatos = visiveis.filter((i) => !i.preenchimento);
     if (!candidatos.length) return null;
-    if (!todayJournalSlug) return candidatos[0];
-    return candidatos.find((i) => i.journal?.slug === todayJournalSlug) ?? candidatos[0];
+
+    const maisRelevante = (lista: HighlightItem[]) =>
+      lista.reduce((melhor, i) => (i.score > melhor.score ? i : melhor));
+
+    const doDia = todayJournalSlug
+      ? candidatos.filter((i) => i.journal?.slug === todayJournalSlug)
+      : [];
+    return maisRelevante(doDia.length ? doDia : candidatos);
   }, [visiveis, todayJournalSlug]);
 
   const filteredItems = useMemo(() => {
@@ -279,7 +331,18 @@ export default function HighlightsMagazine({ aoEditarTemas, perPage = 30 }: High
           ))}
       </div>
 
-      {selectedItem && <DetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />}
+      {itemAberto && (
+        <DetailModal
+          item={itemAberto}
+          onClose={() => {
+            setSelectedItem(null);
+            // Fechar o modal tem de tirar o `/artigo/:id` da URL também, senão
+            // ele reabriria no próximo render (a URL é quem manda) e um F5
+            // traria de volta o que o médico acabou de fechar.
+            aoFecharArtigo?.();
+          }}
+        />
+      )}
     </div>
   );
 }

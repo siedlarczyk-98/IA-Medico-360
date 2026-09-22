@@ -60,6 +60,14 @@ class HighlightOut(BaseModel):
     # A flag que o digest lê para NUNCA interromper alguém por um item que só
     # estava ali para a tela não ficar vazia. Ver `news_feed_service`.
     preenchimento: bool = False
+    # Relevância do item para os temas do usuário (0 a 1).
+    #
+    # Passou a SAIR na resposta quando a lista virou cronológica: antes a
+    # curadoria estava implícita na ordem — o primeiro item era o mais
+    # relevante —, e a tela escolhia o destaque de capa pegando `items[0]`.
+    # Com a ordem por data, aquilo viraria "o mais recente" em silêncio. Agora
+    # a capa escolhe pelo maior score, explicitamente.
+    score: float = 0.0
 
 
 class FeedOut(BaseModel):

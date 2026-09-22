@@ -107,6 +107,12 @@ export function logout(): void {
   const token = getToken();
   clearToken();
   void encerrarSessaoNoServidor(token).finally(() => {
-    window.location.href = '/login';
+    // A RAIZ, e não `/login`: este app não tem essa rota — a tela de código é
+    // uma FASE, decidida pelo `App` quando não há sessão. Mandar para `/login`
+    // caía no catch-all e trazia o médico de volta ao feed, agora deslogado.
+    //
+    // Ir para a raiz também limpa um `/artigo/153` que tenha sobrado na barra,
+    // que depois de sair não leva a lugar nenhum.
+    window.location.href = '/';
   });
 }

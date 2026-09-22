@@ -11,6 +11,7 @@
  * permitiria a qualquer um ler e alterar os temas de outra pessoa.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { buscarMeusTemas } from './api/news';
@@ -30,6 +31,20 @@ type Estado =
   | { fase: 'temas'; primeiraVez: boolean }
   | { fase: 'feed' };
 
+/**
+ * O médico chegou por um link que pede uma tela específica (`/artigo/153` do
+ * digest, `/preferencias` do descadastro)?
+ *
+ * Lê `window.location` e não o roteador de propósito: isto roda no fluxo de
+ * autenticação, que vive FORA das rotas (ver o comentário em `conteudo`).
+ * Usar `useLocation` aqui exigiria mover o handshake para dentro do roteador,
+ * e aí `/artigo/:id` viraria uma rota alcançável sem sessão.
+ */
+function temEntradaDireta(): boolean {
+  const caminho = window.location.pathname;
+  return caminho.startsWith('/artigo/') || caminho === '/preferencias';
+}
+
 export default function App() {
   const [estado, setEstado] = useState<Estado>({ fase: 'carregando' });
 
@@ -40,6 +55,25 @@ export default function App() {
       // marcar nada não pode ser reapresentado a ela toda visita — daí o
       // marcador ser "já escolheu", e não "tem temas".
       const temas = await buscarMeusTemas();
+
+      // QUEM VEIO POR UM LINK DE DESTAQUE VAI PARA O DESTAQUE, mesmo sendo a
+      // primeira visita.
+      //
+      // O link do digest abre FORA do iframe (é um clique no cliente de
+      // e-mail), então o handshake com a Waid é impossível e o médico costuma
+      // passar pelo login por código antes de chegar aqui. Sem esta checagem,
+      // `/artigo/153` sobrevivia na barra de endereços mas era ignorado: ele
+      // digitava o código e caía no feed genérico, tendo de procurar de novo o
+      // destaque que tinha escolhido ler. Era o passo que faltava para o link
+      // do e-mail funcionar de ponta a ponta.
+      //
+      // A escolha de temas não se perde: ela continua acessível pelo próprio
+      // feed, e volta a aparecer sozinha na próxima visita sem link.
+      if (temEntradaDireta()) {
+        setEstado({ fase: 'feed' });
+        return;
+      }
+
       setEstado(temas.ja_escolheu ? { fase: 'feed' } : { fase: 'temas', primeiraVez: true });
     } catch (e) {
       setEstado({ fase: 'erro', mensagem: e instanceof Error ? e.message : 'Erro ao iniciar' });
@@ -92,7 +126,12 @@ export default function App() {
       return;
     }
     buscarMeusTemas()
-      .then(temas => setEstado(temas.ja_escolheu ? { fase: 'feed' } : { fase: 'temas', primeiraVez: true }))
+      // Mesma regra de `carregarConteudo`: link de destaque manda no destino.
+      .then(temas => setEstado(
+        temEntradaDireta() || temas.ja_escolheu
+          ? { fase: 'feed' }
+          : { fase: 'temas', primeiraVez: true },
+      ))
       .catch(() => {
         // O servidor recusou (sessão revogada por um "Sair" em outro lugar).
         clearToken();
@@ -123,6 +162,16 @@ export default function App() {
     );
   }
 
+  // A ROTA SÓ DECIDE O QUE MOSTRAR DEPOIS DA SESSÃO.
+  //
+  // Tudo acima (handshake, login, carregamento) acontece antes e fora do
+  // roteador, de propósito: se `/artigo/153` fosse uma rota que qualquer um
+  // alcança, o link do e-mail entraria direto no conteúdo sem passar pela
+  // autenticação. O que a URL faz é escolher entre feed, artigo e temas — não
+  // dar acesso.
+  //
+  // `primeiraVez` continua vindo do ESTADO, não da URL: é o backend que diz se
+  // a pessoa já escolheu temas alguma vez, e isso não é endereçável.
   const conteudo = estado.fase === 'temas'
     ? (
       <TemasPage
@@ -132,7 +181,7 @@ export default function App() {
         aoCancelar={estado.primeiraVez ? undefined : () => setEstado({ fase: 'feed' })}
       />
     )
-    : <HighlightsMagazine aoEditarTemas={() => setEstado({ fase: 'temas', primeiraVez: false })} />;
+    : <Rotas aoEditarTemas={() => setEstado({ fase: 'temas', primeiraVez: false })} />;
 
   // O gate vem ANTES da escolha de temas, de proposito: a TemasPage pre-marca
   // os temas a partir da especialidade, e sem ela cai num fallback generico.
@@ -148,6 +197,58 @@ export default function App() {
       {conteudo}
     </OnboardingGate>
   );
+}
+
+/**
+ * As rotas do app, todas atrás da sessão (ver o comentário em `conteudo`).
+ *
+ *   /                -> feed
+ *   /artigo/:id      -> feed com aquele destaque aberto
+ *   /preferencias    -> tela de temas (é o link de descadastro do e-mail)
+ *   qualquer outra   -> feed, sem 404
+ *
+ * Não há 404 de propósito: o único jeito de chegar num caminho estranho aqui é
+ * por link antigo de e-mail, e mandar o médico para o feed é melhor do que
+ * mostrar um erro por um endereço que nós mesmos mudamos.
+ */
+function Rotas({ aoEditarTemas }: { aoEditarTemas: () => void }) {
+  const navegar = useNavigate();
+  const feed = (artigo: number | null) => (
+    <HighlightsMagazine
+      aoEditarTemas={aoEditarTemas}
+      artigoInicial={artigo}
+      // `replace` para o "voltar" do navegador sair do app em vez de reabrir o
+      // modal que a pessoa acabou de fechar.
+      aoFecharArtigo={() => navegar('/', { replace: true })}
+    />
+  );
+
+  return (
+    <Routes>
+      <Route path="/artigo/:id" element={<Artigo>{feed}</Artigo>} />
+      <Route path="/preferencias" element={<AbrirTemas aoEditarTemas={aoEditarTemas} />} />
+      <Route path="*" element={feed(null)} />
+    </Routes>
+  );
+}
+
+/** Lê o `:id` da URL. Id não numérico cai no feed, em vez de quebrar. */
+function Artigo({ children }: { children: (artigo: number | null) => React.ReactNode }) {
+  const { id } = useParams();
+  const numero = Number(id);
+  return <>{children(Number.isInteger(numero) && numero > 0 ? numero : null)}</>;
+}
+
+/**
+ * `/preferencias` não renderiza nada próprio: manda o app para a fase de temas,
+ * que é onde a tela vive. Efeito e não chamada direta no corpo, senão seria um
+ * setState durante o render do pai.
+ */
+function AbrirTemas({ aoEditarTemas }: { aoEditarTemas: () => void }) {
+  useEffect(() => {
+    aoEditarTemas();
+  }, [aoEditarTemas]);
+  return <div style={aviso}>Abrindo suas preferências…</div>;
 }
 
 const aviso: React.CSSProperties = {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { DOCUMENTOS } from '@shared/documentos';
 import { registerBeta } from '../api/auth';
 
 export function RegisterPage() {
@@ -150,6 +151,25 @@ export function RegisterPage() {
               >
                 {loading ? 'Enviando…' : 'Solicitar acesso'}
               </button>
+
+              {/* O aceite formal acontece no onboarding, com registro em
+                  `consent_logs`. Este aviso não substitui aquele: existe para
+                  que quem entrega o e-mail aqui tenha o que ler ANTES, e não
+                  duas telas depois. */}
+              <p style={{
+                margin: '4px 0 0', fontSize: 12, lineHeight: 1.5,
+                color: 'var(--pen3)', textAlign: 'center',
+              }}>
+                Ao solicitar acesso, você concorda com os{' '}
+                <a href={DOCUMENTOS.termos.url} target="_blank" rel="noreferrer"
+                   style={{ color: 'var(--petrol)' }}>
+                  {DOCUMENTOS.termos.label}
+                </a>{' '}e a{' '}
+                <a href={DOCUMENTOS.privacidade.url} target="_blank" rel="noreferrer"
+                   style={{ color: 'var(--petrol)' }}>
+                  {DOCUMENTOS.privacidade.label}
+                </a>.
+              </p>
 
               <button
                 type="button"

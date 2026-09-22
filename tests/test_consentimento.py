@@ -144,17 +144,47 @@ async def test_consentimento_exige_autenticacao(client, rota):
     assert (await client.get(rota)).status_code == 401
 
 
-def test_versao_dos_documentos_bate_com_o_frontend():
+def _revisoes_do_frontend() -> dict[str, str]:
+    """As datas de revisao declaradas em `documentos.ts`, por documento.
+
+    Lido do arquivo em vez de duplicado aqui: uma copia da tabela neste teste
+    passaria a bater consigo mesma e pararia de vigiar o frontend, que e a
+    unica coisa que ele existe para fazer.
     """
-    As duas constantes precisam andar juntas. Se o front linkar uma revisao nova
-    e o backend continuar gravando a antiga, o registro passa a afirmar que o
+    arquivo = Path(__file__).resolve().parents[1] / "shared" / "documentos.ts"
+    texto = arquivo.read_text(encoding="utf-8")
+    # Cada bloco `chave: { ... revisao: 'AAAA-MM-DD' ... }`.
+    return {
+        chave: revisao
+        for chave, revisao in re.findall(
+            r"(\w+):\s*\{[^}]*?revisao:\s*'([^']+)'", texto, re.DOTALL
+        )
+    }
+
+
+def test_revisao_de_cada_documento_bate_com_o_frontend():
+    """
+    Os dois lados precisam andar juntos. Se o front linkar uma revisao nova e o
+    backend continuar gravando a antiga, o registro passa a afirmar que o
     usuario aceitou um texto que ele nunca viu - e o registro so vale pelo que
     consegue provar.
+
+    Compara DOCUMENTO A DOCUMENTO, e nao so a versao do conjunto: a versao do
+    conjunto e o maximo das tres, entao mexer numa data que nao seja a mais
+    recente nao a move. Foi exatamente o caso da politica de cookies, que estava
+    10 dias atras das outras duas sem que nada acusasse.
     """
-    arquivo = Path(__file__).resolve().parents[1] / "frontend-app" / "src" / "lib" / "documentos.ts"
-    achado = re.search(r"VERSAO_DOCUMENTOS\s*=\s*'([^']+)'", arquivo.read_text(encoding="utf-8"))
-    assert achado, "VERSAO_DOCUMENTOS nao encontrada em documentos.ts"
-    assert achado.group(1) == consent_service.VERSAO_DOCUMENTOS
+    do_front = _revisoes_do_frontend()
+    assert do_front, "nenhuma `revisao` encontrada em documentos.ts"
+    assert do_front == consent_service.REVISAO_POR_DOCUMENTO
+
+
+def test_versao_do_conjunto_e_a_revisao_mais_recente():
+    """A mais recente, e nao a mais antiga: ela avanca quando QUALQUER documento
+    e revisado, que e o que faz `versao_atual` acusar quem aceitou antes."""
+    assert consent_service.VERSAO_DOCUMENTOS == max(
+        consent_service.REVISAO_POR_DOCUMENTO.values()
+    )
 
 
 async def test_ordem_do_historico_e_estavel_com_timestamps_identicos(db, user):

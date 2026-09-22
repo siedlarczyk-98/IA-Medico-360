@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { buscarEspecialidades, buscarPerfil, enviarOnboarding } from './api';
+import { DOCUMENTOS } from '../documentos';
 import * as s from './estilos';
 import { MED_STATUS_OPCOES } from './tipos';
 import type { DadosOnboarding, Especialidade, Pendencia, Perfil } from './tipos';
@@ -370,11 +371,21 @@ function Formulario({
               checked={aceite}
               onChange={e => setAceite(e.target.checked)}
             />
+            {/* As URLs vêm de `documentos.ts`, que é a mesma fonte cuja data o
+                backend grava no consentimento. Antes eram `/termos` e
+                `/privacidade`, caminhos que NÃO EXISTEM em nenhum dos apps: com
+                o `<Route path="*">` no fim de cada roteador, clicar não dava
+                nem 404 — jogava o médico de volta na home. Ele aceitava sem
+                nunca conseguir ler. */}
             <span>
               Li e aceito os{' '}
-              <a href="/termos" target="_blank" rel="noreferrer" style={s.link}>Termos de Uso</a>
+              <a href={DOCUMENTOS.termos.url} target="_blank" rel="noreferrer" style={s.link}>
+                {DOCUMENTOS.termos.label}
+              </a>
               {' '}e a{' '}
-              <a href="/privacidade" target="_blank" rel="noreferrer" style={s.link}>Política de Privacidade</a>.
+              <a href={DOCUMENTOS.privacidade.url} target="_blank" rel="noreferrer" style={s.link}>
+                {DOCUMENTOS.privacidade.label}
+              </a>.
             </span>
           </label>
         )}

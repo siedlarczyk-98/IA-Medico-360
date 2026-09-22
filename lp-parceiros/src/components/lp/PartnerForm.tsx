@@ -1,6 +1,8 @@
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { DOCUMENTOS } from '@shared/documentos'
+
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { checkAlreadySubmitted, submitPartnerInterest } from '@/lib/api'
@@ -194,9 +196,21 @@ export function PartnerForm() {
           {status === 'sending' && <Loader2 className="mr-2 size-4 animate-spin" />}
           Enviar minhas preferências
         </Button>
+        {/* O formulário coleta dado pessoal e a tela não dizia nada sobre o que
+            acontece com ele (`lgpd_consent_at` fica sempre NULL). O link é o
+            mínimo: dá ao titular o que ler antes de enviar. */}
         <p className="text-center text-xs text-muted-foreground">
           Sem custo e sem compromisso. Usamos suas respostas apenas para priorizar as próximas
           parcerias.
+          {' '}Ao enviar, você concorda com a{' '}
+          <a
+            href={DOCUMENTOS.privacidade.url}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {DOCUMENTOS.privacidade.label}
+          </a>.
         </p>
       </div>
     </form>

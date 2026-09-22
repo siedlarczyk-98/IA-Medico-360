@@ -119,6 +119,7 @@ async def listar_highlights(
                 temas=[TemaCasadoOut(slug=s, nome_pt=n) for s, n in i.temas],
                 palavras=i.palavras,
                 preenchimento=i.preenchimento,
+                score=i.score,
             )
             for i in itens
         ],

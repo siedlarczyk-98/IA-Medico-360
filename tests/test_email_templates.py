@@ -61,6 +61,26 @@ def test_todo_email_declara_light_only(todos_os_html):
         assert 'content="light only"' in html, f"{nome} não declara color-scheme"
 
 
+def test_todo_email_linka_os_documentos_legais(todos_os_html):
+    """Rodapé de e-mail é onde a pessoa procura "quem são vocês e o que fazem
+    com meus dados" quando não está com a plataforma aberta."""
+    for nome, html in todos_os_html.items():
+        assert t.URL_TERMOS in html, f"{nome} sem link dos termos"
+        assert t.URL_PRIVACIDADE in html, f"{nome} sem link da privacidade"
+
+
+def test_urls_dos_documentos_batem_com_o_frontend():
+    """As URLs estão duplicadas em `shared/documentos.ts` (um e-mail não importa
+    TypeScript). Este teste é o que impede as duas cópias de divergirem em
+    silêncio — que é o modo de falha das duplicações que "ninguém vai mexer"."""
+    from pathlib import Path
+
+    arquivo = Path(__file__).resolve().parents[1] / "shared" / "documentos.ts"
+    texto = arquivo.read_text(encoding="utf-8")
+    assert t.URL_TERMOS in texto, "URL dos termos não bate com shared/documentos.ts"
+    assert t.URL_PRIVACIDADE in texto, "URL da privacidade não bate com shared/documentos.ts"
+
+
 def test_todo_email_tem_a_assinatura_e_o_slogan(todos_os_html):
     for nome, html in todos_os_html.items():
         assert "Médico<span" in html, f"{nome} sem a assinatura Médico360"

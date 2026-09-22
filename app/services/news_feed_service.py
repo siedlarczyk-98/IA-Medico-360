@@ -10,11 +10,16 @@ justifica um e-mail.
 A REGRA DO FEED VAZIO
 A tela nunca fica vazia, e nunca mente sobre o que está mostrando:
 
-  1. Itens que casaram com os temas escolhidos, ordenados por score.
+  1. Itens que casaram com os temas escolhidos.
   2. Se casaram menos que `news_feed_minimo_itens`, completa com os melhores dos
      temas `relevante` da especialidade do usuário — marcados `preenchimento=True`.
   3. `motivo_vazio` diz ao frontend QUAL caso é, para a mensagem distinguir
      "não publicaram nada hoje" de "seus temas estão estreitos demais".
+
+A ORDEM DA LISTA É CRONOLÓGICA (mais recente primeiro), não por score. A tela
+mostra o dia e o mês em cada linha: ela promete cronologia na forma, e uma lista
+datada fora de ordem parece defeito. A curadoria continua no `score`, que sai no
+schema e decide o destaque de capa. Ver `_em_ordem_cronologica`.
 
 Feed vazio ambíguo faz o usuário concluir que o produto morreu. Preenchimento
 não marcado faz ele deixar de confiar no filtro. As duas coisas precisam ser
@@ -147,6 +152,39 @@ async def _artigos_por_temas(
     return [(row[0], float(row[1])) for row in (await db.execute(stmt)).all()]
 
 
+def _em_ordem_cronologica(itens: list["ItemFeed"]) -> list["ItemFeed"]:
+    """
+    Do mais recente para o mais antigo — a ordem em que a tela é LIDA.
+
+    POR QUE NÃO NO SQL
+    O feed é montado de três blocos concatenados (temas, palavras-chave,
+    preenchimento), cada um com a sua própria consulta. Ordenar dentro de cada
+    consulta ordenaria os blocos, não a lista final — e era justamente isso que
+    produzia a sequência 18/03/01/01/08/06 que o chefe apontou.
+
+    POR QUE A ORDEM MUDOU
+    Era por score (relevância) com a data só de desempate. Funcionava como
+    curadoria, mas a tela mostra o dia e o mês em cada linha: ela PROMETE
+    cronologia na forma e entregava relevância no conteúdo. Uma lista datada
+    fora de ordem parece defeito, mesmo quando a ordem tem lógica.
+
+    A curadoria não se perdeu: o `score` passou a sair no schema e o destaque
+    de capa continua sendo o item de maior score, agora explicitamente e não
+    por efeito colateral da ordenação.
+
+    `visible_at` é a mesma coluna que a tela exibe — ordenar por outra coisa
+    (como `published_date`) deixaria a lista fora de ordem aos olhos de quem lê.
+    Nulo vai para o fim: sem data não há como posicionar, e o fim é onde
+    atrapalha menos.
+    """
+    muito_antigo = datetime.min.replace(tzinfo=UTC)
+    return sorted(
+        itens,
+        key=lambda i: i.article.visible_at or muito_antigo,
+        reverse=True,
+    )
+
+
 async def _temas_por_artigo(db: AsyncSession, article_ids: list[int], topic_ids: list) -> dict[int, list[tuple[str, str]]]:
     """Quais dos temas DO USUÁRIO casaram com cada artigo — o 'por que estou vendo isto?'."""
     if not article_ids or not topic_ids:
@@ -250,7 +288,7 @@ async def montar_feed(
         ]
 
     if any(not i.preenchimento for i in itens):
-        return itens, None
+        return _em_ordem_cronologica(itens), None
 
     # Nada casou de verdade. Distinguir os dois casos é o que permite ao
     # frontend dizer a coisa certa em vez de mostrar uma tela vazia ambígua.
@@ -261,7 +299,7 @@ async def montar_feed(
     )).scalar_one()
 
     motivo = MOTIVO_SEM_MATCH if houve_publicacao else MOTIVO_SEM_CONTEUDO
-    return itens, motivo
+    return _em_ordem_cronologica(itens), motivo
 
 # ── Apoio à tela de escolha de temas ─────────────────────────────────────────
 

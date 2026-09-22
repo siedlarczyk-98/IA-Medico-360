@@ -1,6 +1,8 @@
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { DOCUMENTOS } from '@shared/documentos'
+
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { checkAlreadySubmitted, submitAccountingInterest } from '@/lib/api'
@@ -228,8 +230,21 @@ export function LeadForm() {
           {status === 'sending' && <Loader2 className="mr-2 size-4 animate-spin" />}
           Quero acesso antecipado
         </Button>
+        {/* O formulário coleta nome, e-mail, telefone e faturamento. Até aqui
+            a tela não dizia uma palavra sobre o que acontece com isso, e a
+            coluna `lgpd_consent_at` da tabela `submissions` ficava sempre NULL.
+            O link é o mínimo: dá ao titular o que ler antes de enviar. */}
         <p className="text-center text-xs text-muted-foreground">
           Sem custo e sem compromisso. Usamos suas respostas apenas para desenhar o produto.
+          {' '}Ao enviar, você concorda com a{' '}
+          <a
+            href={DOCUMENTOS.privacidade.url}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {DOCUMENTOS.privacidade.label}
+          </a>.
         </p>
       </div>
     </form>

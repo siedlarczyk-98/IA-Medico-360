@@ -12,7 +12,6 @@ conexão única o rollback da sessão principal desfaria também a linha gravada
 "outra réplica", e o teste passaria sem provar nada.
 """
 
-from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -64,7 +63,11 @@ async def test_perder_a_corrida_de_um_medico_nao_reenvia_os_outros(
         primeiro, do_meio, ultimo = (u.email for u in ordenados)
         id_do_meio = ordenados[1].id
 
-    hoje = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    # MESMO relógio que a rodada usa, não o real: é `data_ref` que faz a
+    # unicidade de `digest_sends` colidir. Com a data de hoje aqui e o relógio
+    # fixo na rodada, a outra réplica gravaria noutro dia, a corrida não
+    # aconteceria — e o teste passaria a afirmar o contrário do que promete.
+    hoje = NA_HORA_PADRAO.replace(hour=0, minute=0, second=0, microsecond=0)
     original = news_digest_service._artigos_do_usuario
 
     async def _outra_replica_passa_na_frente(db, user_id, desde):

@@ -58,6 +58,17 @@ export interface Highlight {
    * usuário confiar e não confiar no filtro.
    */
   preenchimento: boolean;
+  /**
+   * Relevância para os temas do usuário (0 a 1). Não é exibido: serve para a
+   * tela escolher o destaque de capa.
+   *
+   * Opcional para a janela de deploy: um backend anterior à mudança não manda
+   * este campo, e aí todos os itens ficam com 0 e a capa acaba sendo o
+   * primeiro da lista — o mais recente, já que a lista é cronológica. É uma
+   * degradação aceitável e temporária (a capa fica boa, só não é a mais
+   * relevante), e é melhor do que a tela ficar sem capa nenhuma.
+   */
+  score?: number;
 }
 
 /** `sem_conteudo` = não publicaram nada. `sem_match` = os temas estão estreitos. */

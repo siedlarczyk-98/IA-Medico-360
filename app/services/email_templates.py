@@ -57,6 +57,13 @@ FONTE = ("'Just Sans','Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"
 
 MONO = "'SF Mono',Menlo,Consolas,'Courier New',monospace"
 
+# Os documentos legais, para o rodapé. Duplicados de `shared/documentos.ts` —
+# um e-mail não importa TypeScript, e o alternativo seria servir isto por uma
+# rota só para o backend se ler. `tests/test_email_templates.py` compara as duas
+# listas, então uma trocar sem a outra quebra o teste em vez de divergir calado.
+URL_TERMOS = "https://docs.paciente360.com.br/pt-BR/articles/9425689-termo-de-uso"
+URL_PRIVACIDADE = "https://docs.paciente360.com.br/pt-BR/articles/9425687-politica-de-privacidade"
+
 
 def _moldura(previa: str, miolo: str, rodape_html: str) -> str:
     """`previa` é o trecho que o Gmail mostra na lista ao lado do assunto. Sem
@@ -78,7 +85,12 @@ def _moldura(previa: str, miolo: str, rodape_html: str) -> str:
 {miolo}
     <tr><td style="padding:22px 28px;background:{TINTA};">
       <p style="margin:0 0 10px;font-family:{FONTE};font-size:14px;color:{MENTA};letter-spacing:-0.2px;">com você em cada fase.</p>
-      <p style="margin:0;font-family:{FONTE};font-size:12px;line-height:1.6;color:{CINZA_NO_ESCURO};">{rodape_html}</p>
+      <p style="margin:0 0 8px;font-family:{FONTE};font-size:12px;line-height:1.6;color:{CINZA_NO_ESCURO};">{rodape_html}</p>
+      <p style="margin:0;font-family:{FONTE};font-size:11px;line-height:1.6;color:{CINZA_NO_ESCURO};">
+        <a href="{URL_TERMOS}" style="color:{CINZA_NO_ESCURO};">Termos de Uso</a>
+        &nbsp;·&nbsp;
+        <a href="{URL_PRIVACIDADE}" style="color:{CINZA_NO_ESCURO};">Política de Privacidade</a>
+      </p>
     </td></tr>
   </table>
 </td></tr></table>

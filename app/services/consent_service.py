@@ -32,13 +32,29 @@ TERMOS_E_PRIVACIDADE = "termos_e_privacidade"
 USO_DADOS_ANONIMIZADOS = "uso_dados_anonimizados"
 
 # Consentir com um documento que muda depois não prova nada: o registro guarda a
-# versão vigente no momento do aceite. Ao publicar uma revisão dos documentos,
-# suba esta constante — quem aceitou a anterior aparece como desatualizado, em
-# vez de parecer que consentiu com um texto que nunca viu.
+# versão vigente no momento do aceite. Ao publicar uma revisão, suba a data DO
+# DOCUMENTO revisado aqui embaixo — quem aceitou a anterior aparece como
+# desatualizado, em vez de parecer que consentiu com um texto que nunca viu.
 #
-# É a data da última revisão publicada dos documentos, não a data de hoje.
-# Precisa bater com `VERSAO_DOCUMENTOS` em frontend-app/src/lib/documentos.ts.
-VERSAO_DOCUMENTOS = "2024-08-05"
+# A DATA É POR DOCUMENTO, e não uma só para os três: eles são revisados em
+# momentos diferentes. A de cookies já estava 10 dias atrás das outras duas e a
+# constante única escondia isso — o registro afirmava uma versão de cookies que
+# nunca existiu. Conferido nos documentos publicados em 2026-09-22.
+#
+# Precisa bater com `DOCUMENTOS` em shared/documentos.ts.
+REVISAO_POR_DOCUMENTO = {
+    "privacidade": "2024-08-05",
+    "termos": "2024-08-05",
+    "cookies": "2024-07-26",
+}
+
+# Versão do CONJUNTO: a revisão mais recente entre os três.
+#
+# O aceite é um só e cobre os três, então a versão gravada precisa ser uma só. A
+# mais recente é a escolha correta — ela avança sempre que QUALQUER documento é
+# revisado, e é isso que faz `versao_atual` acusar quem aceitou antes. Pegar a
+# mais antiga deixaria uma revisão passar em silêncio.
+VERSAO_DOCUMENTOS = max(REVISAO_POR_DOCUMENTO.values())
 
 
 def _origem(request: Request | None) -> tuple[str | None, str | None]:

@@ -17,6 +17,12 @@ Railway, de produção ou de decisão de produto.
 - [ ] **Mover e criptografar os cinco dumps de `backups/`** (58 MB, banco real, sem
       criptografia, na área de trabalho). Apagar os dois `pre-*`. Item 7 do ranking.
 - [ ] **Trocar `NOTICIAS_URL`** no Railway para `https://news-m360.up.railway.app`.
+      **Confirmado em 2026-09-22 que ainda não foi feito**: o digest chega com
+      `localhost:5176` em todos os links. Sem esta env, o padrão do `config.py`
+      é o localhost — vale para produção também, não só para disparo local.
+- [ ] **Conferir `FRONTEND_URL`** no Railway (`https://www.medico360.app`). É a
+      env do link do CONVITE, diferente da de cima. No `.env` local ela aponta
+      para a porta 5174, que é a das calculadoras, não a do chat.
       Hoje aponta para a API, e todo link do digest diário por e-mail dá 404.
 - [ ] **Rotacionar a `PHOENIX_API_KEY`** no Arize (foi colada em texto puro numa conversa).
 - [ ] **Exportar os preços dos modelos de produção** para `scripts/dados/model_pricing.json`.
@@ -218,7 +224,7 @@ Seis itens levantados pelo Ruben olhando a plataforma antes do lançamento.
 | 2 | E-mail de notícias | feito |
 | 3 | Periodicidade do digest (diário, semanal, horário) | feito |
 | 4 | Header das calculadoras: tirar "Sair" no embed | feito |
-| 5 | Termos de uso desatualizados | a fazer |
+| 5 | Termos de uso desatualizados | link e versão corrigidos; o texto depende de jurídico |
 | 6 | Menu do usuário duplicado ao editar perfil | feito |
 
 Os e-mails passaram a sair em HTML com a identidade da marca (`app/services/
@@ -301,3 +307,221 @@ O que a investigação deixou à mostra, e que vale uma decisão:
   verdade. Um `skipif` quando o modelo não está presente resolveria — mas aí a
   cobertura do DLP some sem avisar, o que é pior. A saída boa é o CI garantir o
   modelo (ver `medico360-ci`) e o teste falhar mesmo.
+
+## Termos de uso: o item 5 era três problemas (2026-09-22)
+
+O pedido era "ver onde estão os termos de uso desatualizados". Eles não estão
+desatualizados — **são de outro produto**, e o aceite não levava a lugar nenhum.
+
+### 1. O link do aceite não abria nada — CORRIGIDO
+
+O checkbox "Li e aceito" apontava para `/termos` e `/privacidade`, caminhos que
+**não existem em nenhum dos três apps**. Cada roteador termina em
+`<Route path="*" element={<Navigate to="/" replace />} />`, então clicar não dava
+nem 404: jogava o médico de volta na home. Ele aceitava sem ter como ler.
+
+Havia um `frontend-app/src/lib/documentos.ts` com as URLs corretas e um commit
+chamado "liga os documentos legais reais ao aceite do onboarding" — mas **o
+arquivo nunca foi importado por ninguém**. Nada acusou, porque link quebrado não
+quebra build nem type-check.
+
+Corrigido: o arquivo foi para `shared/onboarding/documentos.ts` (é lá que o
+`OnboardingGate` compartilhado vive) e o checkbox agora usa as URLs reais.
+Travado por `frontend-app/src/components/OnboardingGate.documentos.test.tsx` —
+6 testes, verificados contra o defeito original.
+
+### 2. A versão do consentimento mentia sobre a política de cookies — CORRIGIDO
+
+`VERSAO_DOCUMENTOS` era uma constante única, `2024-08-05`. Mas a **Política de
+Cookies é de 2024-07-26** (conferido no documento publicado). Quem aceitava
+ficava registrado como tendo aceitado uma versão de cookies que nunca existiu.
+
+Agora a data é declarada **por documento** nos dois lados, e a versão do
+conjunto é a mais recente entre as três (avança quando qualquer uma é revisada).
+`tests/test_consentimento.py` compara documento a documento — a comparação só da
+versão do conjunto era justamente o que deixava a de cookies passar.
+
+### 3. Os documentos são do PACIENTE 360 — DEPENDE DE JURÍDICO
+
+Este é o grande, e não se resolve em código.
+
+Os três documentos que o médico aceita falam de **Paciente 360®**. A expressão
+"Médico 360" não aparece em nenhum dos três.
+
+Pior, a Política de Privacidade afirma:
+
+> "A Active **não compartilha com terceiros** os Dados Pessoais fornecidos pelo
+> Usuário através do acesso à Plataforma"
+
+e lista **um** operador (AWS Brasil). Enquanto isso a plataforma envia texto
+clínico para **cinco provedores de LLM** (Anthropic, OpenAI, Google, Perplexity,
+Maritaca), além de Sentry, Intercom, Arize Phoenix, SendGrid e Railway. Sobre
+IA, os documentos não dizem uma palavra.
+
+É dado de saúde (LGPD art. 11, sensível) indo para subprocessadores que a
+política afirma não existirem. O DLP mascara PII antes de enviar — mitigação
+real — mas mitigação não substitui declaração.
+
+**Decisão do Ruben (2026-09-22):** rascunhar os três documentos para revisão
+jurídica, e **não travar o lançamento** por isso. Feito:
+
+- `docs/inventario-tratamento-de-dados.md` — o que o sistema faz, com
+  `arquivo:linha` em cada afirmação;
+- `docs/juridico/RASCUNHO-politica-de-privacidade.md`
+- `docs/juridico/RASCUNHO-termos-de-uso.md`
+- `docs/juridico/RASCUNHO-politica-de-cookies.md`
+
+Os rascunhos marcam com **[DECISÃO]** tudo que é escolha de negócio ou de
+direito, e trazem um checklist no fim. **Nenhum deles está pronto para
+publicar** — são insumo para quem for redigir.
+
+Enquanto o texto certo não existe, os links do P360 foram colocados em TODOS os
+lugares que coletam dado e não tinham nada (decisão do Ruben: "independente de
+estar certo"), para que o titular ao menos tenha o que ler:
+
+| Onde | Antes | Agora |
+| --- | --- | --- |
+| Onboarding (4 apps) | link para rota inexistente | URL real |
+| Cadastro (`RegisterPage`) | nada | termos + privacidade |
+| LP contabilidade | nada | privacidade |
+| LP finanças | nada | privacidade |
+| LP parceiros | nada | privacidade |
+| Rodapé dos 3 e-mails | nada | termos + privacidade |
+
+As URLs nos e-mails são uma segunda cópia (Python não importa TypeScript);
+`tests/test_email_templates.py` compara as duas e quebra se divergirem.
+
+Datas conferidas nos documentos publicados em 2026-09-22:
+| Documento | Revisão publicada |
+| --- | --- |
+| Política de Privacidade | 2024-08-05 |
+| Termos de Uso | 2024-08-05 |
+| Política de Cookies | 2024-07-26 |
+
+
+## Links dos e-mails (2026-09-22)
+
+O digest chegava com `localhost` em todos os links. **Duas causas**, e só uma
+era ambiente:
+
+1. **`NOTICIAS_URL` não definida** no Railway — cai no default `localhost:5176`
+   do `config.py`. É pendência do Ruben, acima. Cada e-mail usa uma env
+   diferente: convite → `FRONTEND_URL`; digest → `NOTICIAS_URL`; OTP → nenhuma
+   (não tem link).
+
+2. **As rotas do digest não existiam.** O `noticias-app` navegava só por estado
+   interno (`fase: 'feed' | 'temas'`), sem roteador nenhum — então
+   `/artigo/153` e `/preferencias` carregavam o feed genérico. O médico clicava
+   num destaque e tinha de procurar de novo o que acabara de escolher ler; e
+   `/preferencias` é o link de **descadastro**, que é o que mais custa caro se
+   não funcionar.
+
+   Corrigido com `react-router-dom` (mesma versão do `frontend-app` e do
+   `calculadoras-app`, para não haver uma terceira forma de navegar no
+   monorepo). O `serve.json` já reescrevia qualquer caminho fora de `/assets`
+   para o index, então o servidor não precisou mudar.
+
+**Desenho das rotas:** a autenticação e o onboarding ficam FORA e ANTES do
+roteador. A URL escolhe entre feed, artigo e temas — não dá acesso. Se
+`/artigo/:id` fosse alcançável por qualquer um, o link do e-mail entraria no
+conteúdo sem passar pela sessão.
+
+`/artigo/:id` abre o feed com o modal daquele destaque; qual modal está aberto é
+**derivado da URL no render**, não copiado para o estado — duas fontes para a
+mesma verdade divergem, e o oxlint reclama de `setState` em efeito com razão.
+
+Travado por `tests/test_links_dos_emails.py` (7 testes), que varre os links
+REAIS gerados pelo template e confere cada caminho contra as rotas lidas do
+`App.tsx`. Um link novo no e-mail entra na verificação sozinho. Verificado
+contra os três defeitos: sem `/artigo/:id`, sem `/preferencias`, e com base
+fixa em localhost.
+
+**Por que o teste é no backend:** o `noticias-app` não tem harness de teste, e
+instalar jsdom aqui exige gerar o lockfile em Linux (mesma restrição do
+dea-app). Testar pelo lado que GERA o link é melhor de qualquer forma — é onde
+o `localhost` nasceu.
+
+### O link abre FORA do iframe — e era isso que faltava
+
+Levantado pelo Ruben: o app é embedado, mas o clique num link de e-mail abre o
+navegador **sem iframe**. Sem `window.parent` o handshake com a Waid é
+impossível (`sem_iframe`), e o médico passa pelo login por código.
+
+Com o roteador sozinho, o destino ainda se perdia: depois do código, o app
+chamava `carregarConteudo()`, que decidia entre feed e temas **ignorando a
+URL**. O `/artigo/153` sobrevivia na barra de endereços e não servia para nada.
+
+Corrigido com `temEntradaDireta()` em `noticias-app/src/App.tsx`, consultada nos
+DOIS caminhos de entrada: o login por código e o reaproveitamento de sessão.
+Quem veio por link de destaque vai para o destaque, mesmo sendo a primeira
+visita — a escolha de temas continua acessível pelo feed e volta a aparecer
+sozinha na próxima visita sem link.
+
+Ela lê `window.location` em vez do roteador de propósito: roda no fluxo de
+autenticação, que vive FORA das rotas. Usar `useLocation` exigiria mover o
+handshake para dentro do roteador, e aí `/artigo/:id` viraria rota alcançável
+sem sessão.
+
+**Bug achado de passagem:** `noticias-app/src/lib/auth.ts::logout` mandava para
+`/login`, rota que não existe neste app (a tela de código é uma FASE, não uma
+rota). Caía no catch-all e trazia o médico de volta ao feed, deslogado. Agora
+vai para a raiz.
+
+### Caminho pela Waid: descartado por ora
+
+Considerado fazer o link apontar para o LMS, que embedaria o app já no artigo —
+o médico não digitaria código nenhum. **Descartado**, e vale registrar o porquê:
+
+1. depende de a Waid aceitar repassar um parâmetro de destino ao iframe —
+   conversa com outro time, prazo fora do nosso controle;
+2. **não resolveria o pior caso.** Nos aplicativos da Waid a seção abre em
+   webview direto, sem iframe (já documentado em `ARQUITETURA_TECNICA.md`), e
+   ali o handshake é impossível de qualquer jeito. Quem clica num digest pelo
+   celular está, provavelmente, no app;
+3. a URL da seção de notícias no LMS não está registrada em lugar nenhum.
+
+Se um dia for retomado, o caminho é uma env nova (`NOTICIAS_EMBED_URL`) com o
+link direto como padrão.
+
+## Ordem do feed de notícias (2026-09-22)
+
+Feedback do chefe da empresa, olhando a tela: *"vamos deixar essas notícias em
+ordem cronológica"*. A lista saía assim: **18 SET · 03 SET · 01 SET · 01 SET ·
+08 SET · 06 SET**.
+
+**Causa:** o feed ordenava por SCORE (relevância do tema), com a data só como
+desempate — `order_by(max(score).desc(), visible_at.desc())`. Funcionava como
+curadoria, mas cada linha da tela mostra o dia e o mês: ela promete cronologia
+na forma e entregava relevância no conteúdo. Lista datada fora de ordem parece
+defeito, mesmo quando a ordem tem lógica.
+
+**Decisão do Ruben:** cronológica na lista, **capa por relevância**. Mantém a
+queixa resolvida sem jogar fora o que diferencia o módulo de um leitor de RSS.
+
+### O risco escondido, que era o trabalho de verdade
+
+A capa (`heroItem`) era escolhida como `candidatos[0]` — o primeiro da lista.
+Isso só significava "o mais relevante" PORQUE o backend ordenava por score. Com
+a ordem cronológica, `[0]` viraria **"o mais recente" em silêncio**, e a
+curadoria sumiria da tela sem ninguém notar.
+
+Por isso a mudança tem duas partes:
+- `_em_ordem_cronologica` ordena a lista final (não dá para ordenar no SQL: o
+  feed é montado de três blocos concatenados — temas, palavras-chave,
+  preenchimento — e ordenar cada consulta ordenaria os blocos, que era
+  exatamente o defeito);
+- o **`score` passou a sair no schema** e a capa escolhe pelo maior,
+  explicitamente. A preferência pelo journal do dia continua vindo antes (é a
+  lógica editorial da revista) e o score desempata entre os do dia.
+
+`score` é opcional no tipo do frontend por causa da janela de deploy: backend
+antigo não manda o campo, todos ficam em 0 e a capa cai no primeiro item — o
+mais recente. Degradação aceitável e temporária; melhor que ficar sem capa.
+
+Travado por `tests/test_news_feed_ordem.py` (7 testes), verificados contra os
+dois defeitos: ordem antiga de volta, e `score` fora da resposta.
+
+**Um teste meu estava afirmando o que o SQL já impedia:** escrevi um caso de
+`visible_at` nulo passando pelo feed, mas a consulta filtra `visible_at >=
+desde` e o nulo nunca chega lá. Reescrito para testar a função diretamente — a
+defesa contra nulo continua valendo, porque a função é genérica.
