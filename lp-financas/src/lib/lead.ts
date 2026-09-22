@@ -23,10 +23,17 @@
 
 import { useEffect, useState } from 'react'
 
-import { useIdentidadeSimplesWaid } from '@shared/embed/identidade'
+import { montarOrigensWaid, useIdentidadeSimplesWaid } from '@shared/embed/identidade'
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 const WAID_ORIGIN = import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app'
+
+/**
+ * Duas origens, não uma: no navegador a resposta vem do portal da Waid; no app
+ * nativo, do domínio público. Vale aqui como nos apps do produto — as LPs são
+ * embedadas do mesmo jeito, e quem abre pelo celular abre pelo app.
+ */
+const ORIGENS_WAID = montarOrigensWaid(WAID_ORIGIN)
 
 export interface Lead {
   email?: string
@@ -55,7 +62,7 @@ export function useLead(): { lead: Lead; pronto: boolean } {
 
   const { fase } = useIdentidadeSimplesWaid({
     apiBase: API_BASE,
-    waidOrigin: WAID_ORIGIN,
+    waidOrigin: ORIGENS_WAID,
     aoIdentificar: ({ nome, email }) => {
       leadAtual = { email, name: nome ?? undefined, emailMissing: !email }
       setLead(leadAtual)

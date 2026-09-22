@@ -16,13 +16,19 @@ import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { buscarMeusTemas } from './api/news';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
-import { useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
 import { LoginOtp } from '@shared/embed/LoginOtp';
 import { clearToken, descartarSessaoDesteNavegador, getToken, isTokenExpired, setToken } from './lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
   import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
+
+/**
+ * Duas origens, não uma: o embed no navegador responde do portal da Waid; o
+ * app nativo responde do domínio público. Ver `montarOrigensWaid`.
+ */
+const ORIGENS_WAID = montarOrigensWaid(WAID_ORIGIN);
 
 type Estado =
   | { fase: 'carregando' }
@@ -91,7 +97,7 @@ export default function App() {
   // plataforma deveria ter dito quem é o médico e não disse.
   const identidade = useIdentidadeWaid({
     apiBase: API_BASE,
-    waidOrigin: WAID_ORIGIN,
+    waidOrigin: ORIGENS_WAID,
     aoAutenticar: resposta => {
       setToken(resposta.access_token);
       void carregarConteudo();

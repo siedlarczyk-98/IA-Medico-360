@@ -15,7 +15,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
 
 const WAID = 'https://waid.exemplo.com';
 const API = 'https://api.exemplo.com';
@@ -250,5 +250,89 @@ describe('fora de um iframe', () => {
     act(() => void vi.advanceTimersByTime(10_000));
 
     expect(postMessage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * O app nativo da Waid NÃO usa iframe.
+ *
+ * Medido em 22/09/2026 na página de diagnóstico, app 1.58.9 (Android): o
+ * relatório mostrou `Dentro de iframe: NAO` e, ainda assim, duas mensagens
+ * `waid:identity` com token, vindas de `https://www.medico360.app`.
+ *
+ * Antes disso o handshake abortava com `sem_iframe` antes de registrar o
+ * ouvinte — a resposta chegava e não havia ninguém escutando. Estes testes
+ * existem para que a correção não seja desfeita por quem só conheça o caso
+ * do navegador.
+ */
+describe('app nativo (webview, sem iframe)', () => {
+  const APP = 'https://www.medico360.app';
+
+  function montarNativo(aoAutenticar = vi.fn()) {
+    // Sem pai: é o que caracteriza o webview.
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(window);
+    (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView = {};
+    const resultado = renderHook(() =>
+      useIdentidadeWaid({
+        apiBase: API,
+        waidOrigin: montarOrigensWaid(WAID, APP),
+        aoAutenticar,
+      }),
+    );
+    return { ...resultado, aoAutenticar };
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+  });
+
+  it('não aborta com sem_iframe quando há ponte nativa', () => {
+    const { result } = montarNativo();
+    expect(result.current.fase).toBe('pedindo');
+  });
+
+  it('aceita o token vindo da origem do app nativo', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'jwt', onboarding_complete: true }),
+    }));
+    const { result, aoAutenticar } = montarNativo();
+
+    despachar({ type: 'waid:identity', token: 'abc' }, APP);
+
+    await aguardar();
+    expect(result.current.fase).toBe('pronto');
+    expect(aoAutenticar).toHaveBeenCalled();
+  });
+
+  it('continua rejeitando origem desconhecida no app', () => {
+    // Aceitar duas origens não pode virar aceitar qualquer uma: esta é a
+    // barreira que impede outra janela de injetar um token que não é nosso.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    montarNativo();
+
+    despachar({ type: 'waid:identity', token: 'abc' }, 'https://invasor.exemplo.com');
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('desiste quando não há iframe NEM ponte', () => {
+    vi.spyOn(window, 'parent', 'get').mockReturnValue(window);
+    const { result } = renderHook(() =>
+      useIdentidadeWaid({ apiBase: API, waidOrigin: WAID, aoAutenticar: vi.fn() }),
+    );
+    expect(result.current.fase).toBe('erro');
+    expect(result.current.erro?.tipo).toBe('sem_iframe');
+  });
+});
+
+describe('montarOrigensWaid', () => {
+  it('não duplica quando portal e app coincidem', () => {
+    expect(montarOrigensWaid(WAID, WAID)).toEqual([WAID]);
+  });
+
+  it('mantém o portal em primeiro e ignora valor vazio', () => {
+    expect(montarOrigensWaid(WAID, '')).toEqual([WAID]);
   });
 });

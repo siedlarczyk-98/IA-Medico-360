@@ -35,6 +35,33 @@ const TIMEOUT_MS = 30_000;
  */
 const MAX_TENTATIVAS = 3;
 
+/**
+ * Origem que os aplicativos nativos da Waid usam ao entregar a identidade.
+ *
+ * Medido em 22/09/2026 no app 1.58.9: a ponte responde a partir de
+ * `https://www.medico360.app`, e não do portal (`adminportalmedico360...`)
+ * que o `VITE_WAID_ORIGIN` aponta para o caso do navegador. As duas são
+ * legítimas e coexistem — por isso uma lista, não uma troca.
+ *
+ * Configurável por env para não exigir deploy de código se a plataforma mudar
+ * de domínio; o default cobre o comportamento observado.
+ */
+export const ORIGEM_APP_NATIVO_WAID = 'https://www.medico360.app';
+
+/**
+ * Monta a lista de origens aceitas a partir da origem configurada do portal.
+ *
+ * Central, e não repetida em cada app: são três `EmbedAuthPage` que precisam
+ * da MESMA lista, e foi justamente a divergência silenciosa entre contextos
+ * que manteve o app nativo quebrado.
+ */
+export function montarOrigensWaid(
+  origemPortal: string,
+  origemApp: string = ORIGEM_APP_NATIVO_WAID,
+): string[] {
+  return Array.from(new Set([origemPortal, origemApp].filter(Boolean)));
+}
+
 export type FaseIdentidade = 'pedindo' | 'trocando' | 'pronto' | 'erro';
 
 export interface MotivoErro {
@@ -54,15 +81,20 @@ export interface RespostaSessao {
 
 interface Opcoes {
   apiBase: string;
-  /** Origem da área de membros da Waid: destino do pedido e origem esperada. */
-  waidOrigin: string;
+  /**
+   * Origem(ns) da Waid: destino do pedido e origens aceitas na resposta.
+   *
+   * Aceita lista porque há dois contextos legítimos — o portal no navegador e
+   * o domínio público que o app nativo usa. Ver `montarOrigensWaid`.
+   */
+  waidOrigin: string | string[];
   /** Chamado com a resposta do backend quando a sessão é criada. */
   aoAutenticar: (resposta: RespostaSessao) => void;
 }
 
 interface OpcoesIdentidade {
   apiBase: string;
-  waidOrigin: string;
+  waidOrigin: string | string[];
   /** Chamado com o nome e o e-mail — sem sessão, sem usuário criado. */
   aoIdentificar: (identidade: IdentidadeSimples) => void;
 }
@@ -100,16 +132,31 @@ function tokenPrecisaSerRenovado(corpo: unknown): boolean {
 /**
  * Existe alguém para responder?
  *
- * `window.parent === window` significa que a página NÃO está dentro de um
- * iframe. Nesse caso o `postMessage` "para o pai" cai na própria janela: os
- * pedidos voltam para nós mesmos e a resposta nunca vem, porque não há Waid do
- * outro lado.
+ * Há DOIS jeitos de a Waid nos entregar identidade, e por muito tempo só
+ * conhecíamos um:
  *
- * Medido nos aplicativos da Waid (setembro/2026): eles abrem a seção num
- * webview direto, sem iframe. Sem esta checagem, o médico encara 30 segundos de
- * spinner esperando algo que não pode acontecer.
+ *  1. **iframe** (navegador): `window.parent !== window`, e a resposta chega
+ *     por `postMessage` do pai;
+ *  2. **webview do app nativo**: NÃO há iframe — `window.parent === window` —
+ *     e a ponte injeta a mensagem direto na nossa janela. Ela se anuncia em
+ *     `window.ReactNativeWebView` / `window.__waidIdentityBridgeInstalled`.
+ *
+ * O código antigo só previa (1) e abortava com `sem_iframe` em (2). O
+ * comentário anterior registrava a medição de setembro/2026 — "eles abrem num
+ * webview direto, sem iframe" — como se fosse veredito permanente. Era
+ * verdade sobre a versão do app de então; a ponte entrou na 1.57.24 da
+ * plataforma. Medido de novo em 22/09/2026, no app 1.58.9 (Android), a página
+ * de diagnóstico recebeu `waid:identity` com token **sem estar em iframe**.
+ *
+ * Por isso a pergunta deixou de ser "estou num iframe?" e passou a ser "existe
+ * algum canal por onde a resposta possa chegar?".
  */
-function estaIncorporada(): boolean {
+interface JanelaComPonte {
+  ReactNativeWebView?: unknown;
+  __waidIdentityBridgeInstalled?: unknown;
+}
+
+function temIframe(): boolean {
   try {
     return window.parent !== window;
   } catch {
@@ -117,6 +164,28 @@ function estaIncorporada(): boolean {
     // um pai de outra origem, então estamos incorporados.
     return true;
   }
+}
+
+/** A ponte do app nativo está instalada nesta janela? */
+function temPonteNativa(): boolean {
+  try {
+    const w = window as unknown as JanelaComPonte;
+    return Boolean(w.ReactNativeWebView) || Boolean(w.__waidIdentityBridgeInstalled);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Só desistimos quando não há NENHUM canal possível — nem pai, nem ponte.
+ *
+ * Note que isto é deliberadamente otimista com a ponte: se ela existe mas não
+ * responde, caímos no timeout de 30s com mensagem própria, em vez de negar
+ * atendimento a quem talvez pudesse ser atendido. Errar para o lado de esperar
+ * é barato; errar para o lado de abortar foi o que manteve o app quebrado.
+ */
+function podeReceberIdentidade(): boolean {
+  return temIframe() || temPonteNativa();
 }
 
 /**
@@ -134,11 +203,19 @@ function estaIncorporada(): boolean {
  * a parte cheia de detalhe que não pode divergir.
  */
 function useHandshakeWaid(
-  waidOrigin: string,
+  waidOrigin: string | string[],
   trocar: (token: string) => Promise<'ok' | 'renovar' | 'desistir'>,
 ): Estado {
+  // Normaliza para lista uma vez só. `useState` com inicializador, e não um
+  // `const` no corpo: um array novo a cada render trocaria a identidade da
+  // dependência do efeito e o remontaria no meio do handshake — removendo o
+  // ouvinte exatamente enquanto a resposta pode estar chegando.
+  const [origens] = useState(() =>
+    (Array.isArray(waidOrigin) ? waidOrigin : [waidOrigin]).filter(Boolean),
+  );
+
   const [estado, setEstado] = useState<Estado>(() =>
-    estaIncorporada()
+    podeReceberIdentidade()
       ? { fase: 'pedindo', erro: null }
       : {
           fase: 'erro',
@@ -157,14 +234,19 @@ function useHandshakeWaid(
   trocarRef.current = trocar;
 
   useEffect(() => {
-    // Sem pai, não há handshake possível: não adianta registrar ouvinte nem
-    // gastar 30s de espera. O estado inicial já reflete isso.
-    if (!estaIncorporada()) return;
+    // Sem nenhum canal (nem pai, nem ponte nativa) não há handshake possível:
+    // não adianta registrar ouvinte nem gastar 30s de espera. O estado inicial
+    // já reflete isso.
+    if (!podeReceberIdentidade()) return;
 
     let vivo = true;
 
     async function aoReceber(event: MessageEvent) {
-      if (event.origin !== waidOrigin) return;
+      // A origem continua sendo conferida — é a única barreira contra outra
+      // janela injetar um token que não é nosso. O que mudou é que há mais de
+      // uma origem legítima: o embed no navegador vem do portal da Waid, e o
+      // app nativo entrega a partir do domínio público da plataforma.
+      if (!origens.includes(event.origin)) return;
       if ((event.data as { type?: string })?.type !== 'waid:identity') return;
       if (concluido.current || !vivo) return;
 
@@ -206,7 +288,33 @@ function useHandshakeWaid(
 
     function pedir() {
       if (concluido.current || !vivo) return;
-      window.parent.postMessage({ type: 'waid:identity-request' }, waidOrigin);
+      const pedido = { type: 'waid:identity-request' };
+
+      // Um pedido por origem aceita: `postMessage` com destino específico é
+      // descartado em silêncio quando o pai não é aquela origem, então mandar
+      // para a lista inteira é o que faz o mesmo código servir aos dois
+      // contextos. Continuamos SEM usar `'*'`: com destino aberto, qualquer
+      // pai — inclusive um que não seja a Waid — leria o pedido.
+      if (temIframe()) {
+        for (const origem of origens) {
+          try {
+            window.parent.postMessage(pedido, origem);
+          } catch {
+            /* origem inválida na lista: as outras seguem valendo */
+          }
+        }
+      }
+
+      // No app nativo não há pai: a ponte escuta a própria janela. Postar para
+      // nós mesmos parece estranho, mas é o canal que a ponte instrumenta —
+      // e o `event.origin` da resposta continua sendo conferido acima.
+      if (temPonteNativa()) {
+        try {
+          window.postMessage(pedido, window.location.origin);
+        } catch {
+          /* sem canal utilizável: o timeout cuida */
+        }
+      }
     }
 
     // 1. ouvinte primeiro; 2. só então o pedido.
@@ -234,7 +342,7 @@ function useHandshakeWaid(
       clearTimeout(desistencia);
       window.removeEventListener('message', aoReceber);
     };
-  }, [waidOrigin]);
+  }, [origens]);
 
   return estado;
 }

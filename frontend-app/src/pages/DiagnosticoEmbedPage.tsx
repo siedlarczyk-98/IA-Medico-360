@@ -70,6 +70,14 @@ function colherContexto() {
     referrer: document.referrer || '(vazio)',
     origemEsperada: WAID_ORIGIN,
     armazenamento: testarArmazenamento(),
+    // O que a plataforma pediu por `console.log` — mas aqui, na tela, porque
+    // num app nativo não há devtools para ler console.
+    webview: Boolean((window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView),
+    ponteNativa: Boolean(
+      (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView,
+    ) || Boolean(
+      (window as unknown as { __waidIdentityBridgeInstalled?: unknown }).__waidIdentityBridgeInstalled,
+    ),
     cookiesHabilitados: navigator.cookieEnabled ? 'SIM' : 'NAO',
     userAgent: navigator.userAgent,
   };
@@ -143,6 +151,8 @@ export function DiagnosticoEmbedPage() {
   const relatorio = [
     `URL              : ${contexto.url}`,
     `Dentro de iframe : ${contexto.dentroDeIframe ? 'SIM' : 'NAO'}`,
+    `webview (app)    : ${contexto.webview ? 'SIM' : 'NAO'}`,
+    `Ponte de identid.: ${contexto.ponteNativa ? 'SIM' : 'NAO'}`,
     `document.referrer: ${contexto.referrer}`,
     `Origem esperada  : ${contexto.origemEsperada}`,
     `localStorage     : ${contexto.armazenamento}`,
@@ -153,11 +163,17 @@ export function DiagnosticoEmbedPage() {
     `UserAgent        : ${contexto.userAgent}`,
   ].join('\n');
 
-  const veredito = !contexto.dentroDeIframe
-    ? 'A página NÃO está dentro de um iframe. Sem iframe, a plataforma não tem como entregar a identidade — nem por evento, nem por parâmetro na URL.'
-    : mensagens.length === 0
+  // O veredito mudou em 22/09/2026. Ele afirmava que sem iframe a identidade
+  // era impossível — e o teste no app 1.58.9 mostrou o contrário: sem iframe,
+  // com ponte nativa, as mensagens chegam. Um diagnóstico que afirma o
+  // impossível manda procurar o defeito no lugar errado.
+  const veredito = mensagens.length > 0
+    ? 'Mensagens recebidas — confira a origem abaixo contra as origens aceitas.'
+    : contexto.dentroDeIframe
       ? 'Está dentro de um iframe, mas nenhuma mensagem chegou. O envio de identidade por token pode não estar ligado nesta seção.'
-      : 'Mensagens recebidas — confira a origem abaixo contra a origem esperada.';
+      : contexto.ponteNativa
+        ? 'Sem iframe, mas a ponte do aplicativo está instalada — este é o caminho do app nativo. Nenhuma mensagem chegou ainda.'
+        : 'Não há iframe NEM ponte do aplicativo. Neste contexto a plataforma não tem por onde entregar a identidade.';
 
   return (
     <div style={{ padding: 20, fontFamily: 'system-ui, sans-serif', color: '#0e252d', background: '#fdfff4', minHeight: '100vh' }}>

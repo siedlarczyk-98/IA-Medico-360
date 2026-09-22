@@ -14,7 +14,7 @@
 import { useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-import { useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
 
 import { descartarSessaoDesteNavegador, setToken } from '../lib/auth';
 
@@ -22,12 +22,18 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').repla
 const WAID_ORIGIN =
   import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
 
+/**
+ * Duas origens, não uma: o embed no navegador responde do portal da Waid; o
+ * app nativo responde do domínio público. Ver `montarOrigensWaid`.
+ */
+const ORIGENS_WAID = montarOrigensWaid(WAID_ORIGIN);
+
 export function EmbedAuthPage() {
   const navigate = useNavigate();
 
   const { fase, erro } = useIdentidadeWaid({
     apiBase: API_BASE,
-    waidOrigin: WAID_ORIGIN,
+    waidOrigin: ORIGENS_WAID,
     aoAutenticar: resposta => {
       setToken(resposta.access_token);
       navigate(resposta.onboarding_complete ? '/' : '/onboarding', { replace: true });

@@ -240,9 +240,29 @@ legado foi desligado (`embed_email_fallback_enabled=False`), e o handshake vive 
 em produção — `CURSEDUCA_VALIDATION_ENABLED=false` derruba o startup (fail-closed), porque
 sem ela o endpoint voltaria a confiar só no `Origin`, que é forjável.
 
-Isso **não funciona nos aplicativos da Waid**, que abrem a seção em webview direto, sem
-iframe: sem `window.parent` não há quem responda ao pedido. No mobile o médico entra por
-OTP — e o `noticias-app`, que não tem tela de login, fica sem saída (ticket aberto).
+**Nos aplicativos da Waid o caminho é outro, e desde 22/09/2026 ele funciona.** Os apps
+abrem a seção em webview direto, sem iframe — `window.parent === window` —, e a
+identidade chega por uma ponte que a plataforma injeta na própria janela
+(`window.ReactNativeWebView` / `window.__waidIdentityBridgeInstalled`). O recurso entrou
+na versão 1.57.24 da plataforma; a versão nas lojas desde 09/09/2026 é a 1.58.9.
+
+Dois detalhes que custaram o diagnóstico, os dois do nosso lado:
+
+1. o handshake abortava com `sem_iframe` **antes de registrar o ouvinte** — a mensagem
+   chegava e não havia quem escutasse. Hoje a pergunta é "existe algum canal?"
+   (`podeReceberIdentidade`), não "existe iframe?";
+2. a resposta no app vem de `https://www.medico360.app`, e não do portal
+   (`adminportalmedico360.curseduca.pro`) de `VITE_WAID_ORIGIN`. A checagem de origem
+   descartaria o token. As duas origens são legítimas e coexistem — daí
+   `montarOrigensWaid`, que monta a lista aceita. **Continua sendo lista fechada:** o
+   pedido nunca vai com `'*'` e resposta de origem desconhecida segue ignorada.
+
+Medido na página `/diagnostico-embed` no app 1.58.9 (Android): `Dentro de iframe: NAO` e,
+ainda assim, `waid:identity` com token. Travado por teste em
+`frontend-app/src/test/identidade-waid.test.ts` ("app nativo (webview, sem iframe)").
+
+A guarda de `Origin` do backend em `/auth/embed/token` não é afetada: ela valida a origem
+de **quem faz o `fetch`** (nossos frontends, já em `EMBED_ALLOWED_ORIGINS`), não a da Waid.
 
 #### De onde vem a especialidade
 
