@@ -1,6 +1,7 @@
 """Médico 360 — Schemas do módulo de Notícias."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,12 +112,30 @@ class MeusTemasIn(BaseModel):
     topic_ids: list[UUID]
 
 
+class AgendaDigest(BaseModel):
+    """Quando o médico quer receber o digest.
+
+    `dia_semana` só é usado quando a frequência é semanal (0 = segunda, como
+    `datetime.weekday()`). A faixa vira hora fixa de Brasília em
+    `news_digest_agenda` — hora exata exigiria guardar o fuso de cada usuário,
+    que o sistema não tem.
+    """
+
+    frequencia: Literal["diario", "semanal"] = "diario"
+    dia_semana: int = Field(default=0, ge=0, le=6)
+    faixa: Literal["manha", "tarde", "noite"] = "manha"
+
+
 class PreferenciasNoticiasIn(BaseModel):
     email: bool
+    # Opcional: um cliente antigo que só mande `email` continua funcionando, e a
+    # agenda de quem já tinha uma NÃO é apagada (ver o endpoint).
+    agenda: AgendaDigest | None = None
 
 
 class PreferenciasNoticiasOut(BaseModel):
     email: bool
+    agenda: AgendaDigest
 
 
 class FavoritosOut(BaseModel):

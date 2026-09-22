@@ -136,14 +136,37 @@ export function salvarMeusTemas(topicIds: string[]): Promise<MeusTemas> {
   });
 }
 
-export function buscarPreferencias(): Promise<{ email: boolean }> {
-  return request<{ email: boolean }>('/news/me/preferences');
+export type Frequencia = 'diario' | 'semanal';
+export type Faixa = 'manha' | 'tarde' | 'noite';
+
+/** Quando o médico quer receber o digest. `dia_semana` só vale no semanal
+ *  (0 = segunda, como o `weekday()` do Python). */
+export interface AgendaDigest {
+  frequencia: Frequencia;
+  dia_semana: number;
+  faixa: Faixa;
 }
 
-export function salvarPreferencias(email: boolean): Promise<{ email: boolean }> {
-  return request<{ email: boolean }>('/news/me/preferences', {
+export interface PreferenciasNoticias {
+  email: boolean;
+  agenda: AgendaDigest;
+}
+
+export function buscarPreferencias(): Promise<PreferenciasNoticias> {
+  return request<PreferenciasNoticias>('/news/me/preferences');
+}
+
+/** `agenda` é opcional: mandando só `email`, o backend PRESERVA a agenda que a
+ *  pessoa já tinha. É o que impede o botão de desligar de zerar o horário
+ *  escolhido — quem religasse depois passaria a receber noutra hora sem nunca
+ *  ter pedido. */
+export function salvarPreferencias(
+  email: boolean,
+  agenda?: AgendaDigest,
+): Promise<PreferenciasNoticias> {
+  return request<PreferenciasNoticias>('/news/me/preferences', {
     method: 'PUT',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(agenda ? { email, agenda } : { email }),
   });
 }
 

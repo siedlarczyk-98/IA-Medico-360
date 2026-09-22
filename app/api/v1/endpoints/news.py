@@ -32,6 +32,7 @@ from app.models.news import (
     UserTopic,
 )
 from app.schemas.news import (
+    AgendaDigest,
     ArticleDetailOut,
     FavoritosOut,
     FavoritoToggleIn,
@@ -49,7 +50,7 @@ from app.schemas.news import (
     TemaOut,
     TemaSugeridoOut,
 )
-from app.services import news_feed_service, news_keyword_service
+from app.services import news_digest_agenda, news_feed_service, news_keyword_service
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +233,12 @@ async def ler_preferencias(
     db: AsyncSession = Depends(get_db),
 ) -> PreferenciasNoticiasOut:
     prefs = await _preferencias(db, user)
+    news = (prefs.notification_prefs or {}).get("news", {})
     return PreferenciasNoticiasOut(
-        email=bool((prefs.notification_prefs or {}).get("news", {}).get("email"))
+        email=bool(news.get("email")),
+        # Normaliza na saída: a tela recebe sempre uma agenda válida, mesmo que
+        # o JSONB tenha lixo de uma versão anterior.
+        agenda=AgendaDigest(**news_digest_agenda.normalizar(news.get("agenda"))),
     )
 
 
@@ -245,10 +250,22 @@ async def salvar_preferencias(
 ) -> PreferenciasNoticiasOut:
     prefs = await _preferencias(db, user)
     atuais = dict(prefs.notification_prefs or {})
-    atuais["news"] = {**atuais.get("news", {}), "email": body.email}
+    news = {**atuais.get("news", {}), "email": body.email}
+
+    # CAMPO AUSENTE = NÃO MEXA. Um cliente que só mande `email` (versão antiga
+    # da tela, ou o botão de desligar) não pode APAGAR a agenda que a pessoa
+    # escolheu — ela voltaria ao padrão em silêncio e passaria a receber em
+    # outro horário. Mesma regra do PUT de pastas.
+    if body.agenda is not None:
+        news["agenda"] = news_digest_agenda.normalizar(body.agenda.model_dump())
+
+    atuais["news"] = news
     prefs.notification_prefs = atuais
     await db.commit()
-    return PreferenciasNoticiasOut(email=body.email)
+    return PreferenciasNoticiasOut(
+        email=body.email,
+        agenda=AgendaDigest(**news_digest_agenda.normalizar(news.get("agenda"))),
+    )
 
 
 # ── Favoritos ────────────────────────────────────────────────────────────────

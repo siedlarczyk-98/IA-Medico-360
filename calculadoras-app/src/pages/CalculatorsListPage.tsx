@@ -7,6 +7,7 @@ import { RequestCalculatorModal } from '../components/RequestCalculatorModal';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { logout } from '../lib/auth';
 import { getSpecialtyStyle } from '../lib/specialtyStyles';
+import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
 
 export function CalculatorsListPage() {
   const { data: allCalculators, isLoading, error } = useCalculators();
@@ -115,20 +116,27 @@ export function CalculatorsListPage() {
               </span>
             </div>
           )}
-          <button
-            type="button"
-            onClick={logout}
-            style={{
-              fontSize: 12,
-              color: 'var(--pen3)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px 8px',
-            }}
-          >
-            Sair
-          </button>
+          {/* Só FORA do iframe. Na área de membros a identidade vem da Waid a cada
+              abertura: "Sair" ali não muda nada (recarregar reautentica) e
+              sugere um estado que não existe. No aplicativo da Waid, que abre
+              sem iframe, o acesso é por código de e-mail — e aí o botão é a
+              única forma de trocar de conta. Ver `shared/embed/dentro-do-iframe`. */}
+          {!dentroDoIframe() && (
+            <button
+              type="button"
+              onClick={logout}
+              style={{
+                fontSize: 12,
+                color: 'var(--pen3)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px 8px',
+              }}
+            >
+              Sair
+            </button>
+          )}
         </div>
       </div>
 

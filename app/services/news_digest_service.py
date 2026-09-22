@@ -37,7 +37,7 @@ from app.models.news import (
     DigestSend,
     UserTopic,
 )
-from app.services import email_service, news_keyword_service
+from app.services import email_service, news_digest_agenda, news_keyword_service
 from app.services.vigilancia_service import ACAO_DIGEST_NOTICIAS
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,12 @@ def quer_digest(prefs: UserPreference | None) -> bool:
     if prefs is None or not prefs.notification_prefs:
         return False
     return bool(prefs.notification_prefs.get("news", {}).get("email"))
+
+
+def agenda_do_usuario(prefs: UserPreference | None) -> dict:
+    """A agenda escolhida em `notification_prefs.news.agenda`, já normalizada."""
+    bruto = (prefs.notification_prefs or {}).get("news", {}).get("agenda") if prefs else None
+    return news_digest_agenda.normalizar(bruto)
 
 
 async def _artigos_do_usuario(
@@ -118,10 +124,8 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
     `agora` é injetável para teste — sem isso, testar a janela exigiria mexer no
     relógio do processo.
     """
-    settings = get_settings()
     agora = agora or datetime.now(UTC)
     data_ref = agora.replace(hour=0, minute=0, second=0, microsecond=0)
-    desde = agora - timedelta(days=settings.news_digest_janela_dias)
 
     linhas = (await db.execute(
         select(User, UserPreference)
@@ -136,13 +140,25 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
     # transação (ver abaixo), e `commit`/`rollback` EXPIRAM os objetos da sessão: o
     # `user.email` do usuário seguinte dispararia uma carga preguiçosa fora de
     # contexto e derrubaria a rodada inteira.
+    #
+    # A AGENDA É POR USUÁRIO, e o filtro de hora mora AQUI e não no agendador.
+    # Antes o agendador só chamava esta função na hora fixa do digest; agora ela
+    # é chamada toda hora e cada médico é servido na faixa que escolheu. Quem
+    # não escolheu nada segue no padrão (diário, de manhã).
     candidatos = [
-        (user.id, user.email, user.name) for user, prefs in linhas if quer_digest(prefs)
+        (user.id, user.email, user.name, agenda_do_usuario(prefs))
+        for user, prefs in linhas
+        if quer_digest(prefs)
     ]
 
     enviados, sem_conteudo, ja_enviados, falhas = 0, 0, 0, 0
+    fora_de_hora = 0
 
-    for user_id, email, nome in candidatos:
+    for user_id, email, nome, agenda in candidatos:
+        if not news_digest_agenda.esta_na_hora(agenda, agora):
+            fora_de_hora += 1
+            continue
+
         ja = await db.scalar(
             select(DigestSend.id).where(
                 DigestSend.user_id == user_id, DigestSend.data_ref == data_ref
@@ -152,6 +168,10 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
             ja_enviados += 1
             continue
 
+        # A janela acompanha a frequência: quem escolheu semanal precisa da
+        # semana inteira, senão receberia só os últimos dois dias e perderia o
+        # resto — o oposto do que pediu.
+        desde = agora - timedelta(days=news_digest_agenda.janela_dias(agenda))
         artigos = await _artigos_do_usuario(db, user_id, desde)
         if not artigos:
             # O caso mais comum e o mais importante: silêncio é a resposta certa.
@@ -195,6 +215,10 @@ async def enviar_digests(db: AsyncSession, agora: datetime | None = None) -> dic
         "sem_conteudo": sem_conteudo,
         "ja_enviados": ja_enviados,
         "falhas": falhas,
+        # Quantos ainda não era a hora. Numa rodada qualquer este é o número
+        # GRANDE — a maioria recebe noutra faixa —, e é o que distingue "a
+        # rodada correu e não era a hora de ninguém" de "a rodada não correu".
+        "fora_de_hora": fora_de_hora,
     }
 
     # HEARTBEAT — e não estatística.

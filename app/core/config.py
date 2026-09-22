@@ -211,10 +211,14 @@ class Settings(BaseSettings):
     # A NCBI pede que ferramentas automatizadas se identifiquem; sem isso um pico
     # de trafego nosso vira bloqueio por IP sem que ninguem consiga nos avisar.
     ncbi_contact_email: str = ""
-    # Horarios em UTC. 11h UTC = 8h BRT, depois que os journals ja publicaram o
-    # numero do dia; digest 1h depois, para o pipeline ter terminado.
+    # Horario em UTC. 11h UTC = 8h BRT, depois que os journals ja publicaram o
+    # numero do dia.
+    #
+    # NAO HA MAIS `news_digest_hour`: o digest roda a cada hora e quem decide se
+    # e a hora de CADA medico e a agenda dele (`news_digest_agenda`), com a
+    # faixa que ele escolheu na tela. Um ajuste global aqui so poderia
+    # atrapalhar — e, pior, ficaria parecendo que funciona.
     news_run_hour: int = 11
-    news_digest_hour: int = 12
     # Modelo do redator. CONFIGURAVEL, e nao constante no codigo: o repo antigo
     # tinha essa variavel e producao a usava para rodar sonnet-5 em vez do
     # padrao. Ao portar, o valor virou constante e teria REBAIXADO o redator
@@ -231,7 +235,8 @@ class Settings(BaseSettings):
     # preenchimento. Ver `news_feed_service.montar_feed`.
     news_feed_minimo_itens: int = 5
     news_feed_janela_dias: int = 30
-    news_digest_janela_dias: int = 2
+    # A janela do digest deixou de ser global: ela acompanha a frequencia que o
+    # medico escolheu (2 dias no diario, 7 no semanal). Ver `news_digest_agenda`.
 
     # --- Palavras-chave do medico ---
     # Teto por usuario. Sem limite, alguem cola 200 termos, tudo casa, e o filtro

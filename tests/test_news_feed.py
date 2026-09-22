@@ -30,6 +30,13 @@ from app.services import email_service, news_digest_service, news_feed_service
 
 pytestmark = pytest.mark.asyncio
 
+# O digest sai na FAIXA que cada médico escolheu, não mais num horário global.
+# Quem nunca escolheu fica no padrão (diário, de manhã = 10h UTC), e é esse
+# instante que os testes usam: com o relógio real, a rodada não seria a hora de
+# ninguém e todo teste de digest viraria um falso-verde silencioso.
+NA_HORA_PADRAO = datetime(2026, 9, 21, 10, tzinfo=UTC)
+
+
 CARDIO = "Cardiologia"
 INFECTO = "Infectologia"
 
@@ -305,7 +312,7 @@ async def test_zero_match_zero_email(db, user, enviados):
     user.specialty = CARDIO
     await db.flush()
 
-    resumo = await news_digest_service.enviar_digests(db)
+    resumo = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert enviados == []
     assert resumo["enviados"] == 0
@@ -322,7 +329,7 @@ async def test_sem_opt_in_nao_recebe(db, user, enviados):
     db.add(prefs)
     await db.flush()
 
-    await news_digest_service.enviar_digests(db)
+    await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert enviados == []
 
@@ -333,7 +340,7 @@ async def test_digest_envia_o_que_casou(db, user, enviados):
     await _escolhe(db, user, [ic])
     await _liga_email(db, user)
 
-    resumo = await news_digest_service.enviar_digests(db)
+    resumo = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert resumo["enviados"] == 1
     assert enviados[0][1] == [art.id]
@@ -349,8 +356,8 @@ async def test_digest_e_idempotente(db, user, enviados):
     await _escolhe(db, user, [ic])
     await _liga_email(db, user)
 
-    await news_digest_service.enviar_digests(db)
-    segunda = await news_digest_service.enviar_digests(db)
+    await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
+    segunda = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert len(enviados) == 1
     assert segunda["enviados"] == 0
@@ -374,7 +381,7 @@ async def test_limiar_do_digest_e_mais_alto_que_o_do_feed(db, user, enviados):
     await db.flush()
 
     feed, _ = await news_feed_service.montar_feed(db, user)
-    await news_digest_service.enviar_digests(db)
+    await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert len([i for i in feed if not i.preenchimento]) == 1
     assert enviados == []
@@ -398,7 +405,7 @@ async def test_usuario_so_com_preenchimento_nao_recebe_email(db, user, enviados)
     await _liga_email(db, user)
 
     feed, _ = await news_feed_service.montar_feed(db, user)
-    await news_digest_service.enviar_digests(db)
+    await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     # A tela não ficou vazia...
     assert len(feed) == 1
@@ -417,7 +424,7 @@ async def test_sem_sendgrid_nao_estoura(db, user, monkeypatch):
     settings = news_digest_service.get_settings()
     monkeypatch.setattr(settings, "sendgrid_api_key", "", raising=False)
 
-    resumo = await news_digest_service.enviar_digests(db)
+    resumo = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert resumo["enviados"] == 1
     assert resumo["falhas"] == 0

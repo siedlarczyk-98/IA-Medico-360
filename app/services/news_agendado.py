@@ -74,9 +74,12 @@ async def _uma_rodada() -> None:
             resultado = await rodar_pipeline(db)
             logger.info("Pipeline de notícias concluído", extra=resultado)
 
-        if agora.hour == settings.news_digest_hour:
-            resumo = await news_digest_service.enviar_digests(db)
-            logger.info("Rodada de digest concluída", extra=resumo)
+        # TODA HORA, e não mais só às `news_digest_hour`: quem decide se é a
+        # hora de cada médico é a agenda dele (`news_digest_agenda`), lá dentro.
+        # A rodada é barata quando não é hora de ninguém — uma consulta de
+        # usuários e nenhum envio.
+        resumo = await news_digest_service.enviar_digests(db)
+        logger.info("Rodada de digest concluída", extra=resumo)
 
 
 async def _laco() -> None:
@@ -102,8 +105,9 @@ def iniciar() -> asyncio.Task | None:
         return None
 
     logger.info(
-        "Pipeline de notícias ativo (coleta às %dh UTC, digest às %dh UTC)",
-        settings.news_run_hour, settings.news_digest_hour,
+        "Pipeline de notícias ativo (coleta às %dh UTC; digest a cada hora, "
+        "na faixa que cada médico escolheu)",
+        settings.news_run_hour,
     )
     return asyncio.create_task(_laco(), name="noticias-agendado")
 

@@ -316,6 +316,11 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
 
   if (isMobile && !open) return null;
 
+  // O PAINEL (`aside`) está na tela quando: é celular, está fixado, ou o mouse
+  // está sobre a barra. Fora isso, só o trilho aparece. É o que decide qual dos
+  // dois mostra o menu do usuário — ver o comentário em `userMenuOpen`.
+  const painelVisivel = isMobile || pinned || hovering;
+
   const rail = (
       <aside data-testid="sidebar-rail" style={{
         width: RAIL_WIDTH, flexShrink: 0, height: '100%',
@@ -375,23 +380,28 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           +
         </button>
         <div
-          onClick={() => setUserMenuOpen(o => !o)}
+          // Com o painel aberto quem manda é o rodapé dele; o avatar do trilho
+          // fica embaixo e um clique aqui só confundiria o estado.
+          onClick={() => { if (!painelVisivel) setUserMenuOpen(o => !o); }}
           title={user?.name ?? ''}
           style={{
             width: 32, height: 32, borderRadius: '50%', background: 'var(--mint)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 13, fontWeight: 600, color: 'var(--pen2)', cursor: 'pointer', position: 'relative',
           }}
-          ref={userMenuRef}
+          ref={painelVisivel ? undefined : userMenuRef}
         >
           {user?.initial ?? '?'}
-          {userMenuOpen && (
+          {/* Só quando o PAINEL não está na tela. Com a barra não fixada, trilho e
+              painel ficam montados ao mesmo tempo e os dois liam o mesmo
+              `userMenuOpen` — o clique abria DOIS menus, um sobre o outro. */}
+          {userMenuOpen && !painelVisivel && (
             <div style={{
               position: 'absolute', bottom: 0, left: 'calc(100% + 8px)',
               background: 'var(--paper)', border: '1px solid var(--line2)',
               borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
               overflow: 'hidden', zIndex: 300, width: 170,
-            }}>
+            }} data-testid="menu-do-usuario">
               <button onClick={() => { setUserMenuOpen(false); setShowProfile(true); }} style={menuItemStyle}>
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                   <circle cx="8" cy="6" r="3" stroke="currentColor" strokeWidth="1.4" />
@@ -713,9 +723,12 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       )}
 
       {/* Footer usuário */}
-      <div ref={userMenuRef} style={{ borderTop: '1px solid var(--line2)', padding: '12px 14px', position: 'relative' }}>
+      {/* A ref do "clicou fora" vai para QUEM está mostrando o menu. Antes os dois
+          elementos a recebiam, o segundo sobrescrevia o primeiro, e clicar no
+          avatar do trilho contava como clique fora — o menu abria e fechava. */}
+      <div ref={painelVisivel ? userMenuRef : undefined} style={{ borderTop: '1px solid var(--line2)', padding: '12px 14px', position: 'relative' }}>
         {userMenuOpen && (
-          <div style={{
+          <div data-testid="menu-do-usuario" style={{
             position: 'absolute', bottom: 'calc(100% + 4px)', left: 14, right: 14,
             background: 'var(--paper)', border: '1px solid var(--line2)',
             borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',

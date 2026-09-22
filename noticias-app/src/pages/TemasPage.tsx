@@ -33,6 +33,9 @@ import {
   removerPalavra,
   salvarMeusTemas,
   salvarPreferencias,
+  type AgendaDigest,
+  type Faixa,
+  type Frequencia,
   type OrigemSugestao,
   type PalavraChave,
   type Tema,
@@ -51,6 +54,20 @@ const COR = {
 } as const;
 
 const FONTE = "var(--m360-font, 'Just Sans', -apple-system, 'Segoe UI', sans-serif)";
+
+// Índice = `dia_semana` do backend, que segue o `weekday()` do Python: 0 é
+// segunda. Não reordenar sem mexer no outro lado.
+const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'] as const;
+
+// A HORA APARECE NO BOTÃO de propósito. "Manhã" sozinho deixa a pessoa
+// adivinhando se são 6h ou 11h; com "7h" ela sabe exatamente o que escolheu e
+// não precisa descobrir pelo primeiro e-mail. É horário de Brasília — a
+// conversão mora em `news_digest_agenda.py`, no backend.
+const FAIXAS: { id: Faixa; rotulo: string; hora: string }[] = [
+  { id: 'manha', rotulo: 'Manhã', hora: '7h' },
+  { id: 'tarde', rotulo: 'Tarde', hora: '13h' },
+  { id: 'noite', rotulo: 'Noite', hora: '19h' },
+];
 
 interface Props {
   primeiraVez: boolean;
@@ -79,6 +96,13 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
   const [verTodos, setVerTodos] = useState(false);
   const [busca, setBusca] = useState('');
   const [email, setEmail] = useState(false);
+  // A agenda nasce com o padrão do backend e é substituída no carregamento.
+  // Nunca fica indefinida: a tela não tem um estado "sem horário".
+  const [agenda, setAgenda] = useState<AgendaDigest>({
+    frequencia: 'diario',
+    dia_semana: 0,
+    faixa: 'manha',
+  });
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
@@ -102,6 +126,7 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
         const base = temas.ja_escolheu ? temas.selecionados : temas.sugeridos;
         setMarcados(new Set(base.map((t) => t.id)));
         setEmail(prefs.email);
+        setAgenda(prefs.agenda);
         setPalavras(chaves);
       } catch (e) {
         if (!cancelado) setErro(e instanceof Error ? e.message : 'Erro ao carregar');
@@ -184,7 +209,7 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
     setErro('');
     try {
       await salvarMeusTemas([...marcados]);
-      await salvarPreferencias(email);
+      await salvarPreferencias(email, agenda);
       aoConcluir();
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao salvar');
@@ -372,10 +397,70 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
             <strong style={{ color: COR.tinta }}>Me avise por e-mail quando houver novidade</strong>
             <br />
             <span style={E.notaEmail}>
-              No máximo um por dia, e nenhum nos dias em que nada casar com seus temas.
+              {agenda.frequencia === 'semanal'
+                ? 'Um resumo por semana, e nenhum se nada casar com seus temas.'
+                : 'No máximo um por dia, e nenhum nos dias em que nada casar com seus temas.'}
             </span>
           </span>
         </label>
+
+        {/* Só com o e-mail ligado. Deixar o horário à mostra com o aviso
+            desligado ofereceria uma escolha que não faz nada. */}
+        {email && (
+          <div style={E.agenda}>
+            <div style={E.agendaLinha}>
+              <span style={E.agendaRotulo}>Com que frequência</span>
+              <div style={E.opcoes}>
+                {(['diario', 'semanal'] as Frequencia[]).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setAgenda((a) => ({ ...a, frequencia: f }))}
+                    style={agenda.frequencia === f ? E.opcaoAtiva : E.opcao}
+                  >
+                    {f === 'diario' ? 'Todo dia' : 'Uma vez por semana'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* O dia só existe no semanal — no diário seria uma pergunta sem
+                resposta possível. */}
+            {agenda.frequencia === 'semanal' && (
+              <div style={E.agendaLinha}>
+                <span style={E.agendaRotulo}>Em que dia</span>
+                <div style={E.opcoes}>
+                  {DIAS.map((nome, i) => (
+                    <button
+                      key={nome}
+                      type="button"
+                      onClick={() => setAgenda((a) => ({ ...a, dia_semana: i }))}
+                      style={agenda.dia_semana === i ? E.opcaoAtiva : E.opcao}
+                    >
+                      {nome}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={E.agendaLinha}>
+              <span style={E.agendaRotulo}>Em que horário</span>
+              <div style={E.opcoes}>
+                {FAIXAS.map(({ id, rotulo, hora }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setAgenda((a) => ({ ...a, faixa: id }))}
+                    style={agenda.faixa === id ? E.opcaoAtiva : E.opcao}
+                  >
+                    {rotulo} <span style={E.hora}>{hora}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {marcados.size === 0 && palavras.length === 0 && (
           <p style={E.alerta}>
@@ -561,6 +646,45 @@ const E: Record<string, React.CSSProperties> = {
   },
   checkbox: { width: 17, height: 17, marginTop: 2, accentColor: COR.verde },
   notaEmail: { fontSize: 13, opacity: 0.8 },
+
+  // Recuado e sobre fundo próprio: são ajustes DO aviso acima, não escolhas
+  // soltas. O recuo alinha com o texto do checkbox, não com a caixa dele.
+  agenda: {
+    margin: '-6px 0 20px 28px',
+    padding: '14px 16px',
+    background: '#f2f7f4',
+    borderRadius: 12,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 13,
+  },
+  agendaLinha: { display: 'flex', flexDirection: 'column', gap: 7 },
+  agendaRotulo: { fontSize: 13, fontWeight: 600, color: COR.petroleo },
+  opcoes: { display: 'flex', flexWrap: 'wrap', gap: 7 },
+  opcao: {
+    padding: '7px 13px',
+    borderRadius: 20,
+    border: `1px solid ${COR.linha}`,
+    background: '#fff',
+    color: COR.petroleo,
+    fontSize: 13,
+    cursor: 'pointer',
+    fontFamily: FONTE,
+  },
+  opcaoAtiva: {
+    padding: '7px 13px',
+    borderRadius: 20,
+    // A borda muda junto com o fundo: quem enxerga pouca cor continua vendo
+    // qual está escolhido.
+    border: `1px solid ${COR.petroleo}`,
+    background: COR.menta,
+    color: COR.tinta,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: FONTE,
+  },
+  hora: { opacity: 0.65, fontWeight: 400 },
 
   alerta: {
     fontSize: 13,

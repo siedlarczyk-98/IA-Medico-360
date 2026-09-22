@@ -21,6 +21,7 @@ from app.models.models import UserPreference
 from app.models.news import Article, ArticleStatus, ArticleTopic, Topic, TopicSpecialty, UserTopic
 from app.news.taxonomia import CORE
 from app.services import email_service, news_digest_service, news_feed_service, news_keyword_service
+from tests.test_news_feed import NA_HORA_PADRAO
 
 # Marca apenas as funcoes async: um `pytestmark` global faria o pytest-asyncio
 # reclamar de todo teste sincrono deste arquivo.
@@ -260,7 +261,7 @@ async def test_usuario_so_com_palavra_chave_recebe_email(db, user, enviados):
     await news_keyword_service.adicionar(db, user.id, "amiloidose")
     await _liga_email(db, user)
 
-    resumo = await news_digest_service.enviar_digests(db)
+    resumo = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert resumo["enviados"] == 1
     assert enviados[0][1] == [(art.id, "amiloidose")]
@@ -276,7 +277,7 @@ async def test_email_nomeia_o_motivo(db, user, enviados):
     await news_keyword_service.adicionar(db, user.id, "amiloidose")
     await _liga_email(db, user)
 
-    await news_digest_service.enviar_digests(db)
+    await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     _, itens = enviados[0]
     assert itens[0][1] == "amiloidose"
@@ -289,7 +290,7 @@ async def test_sem_match_nenhum_continua_sem_email(db, user, enviados):
     await news_keyword_service.adicionar(db, user.id, "amiloidose")
     await _liga_email(db, user)
 
-    resumo = await news_digest_service.enviar_digests(db)
+    resumo = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     assert enviados == []
     assert resumo["enviados"] == 0

@@ -291,3 +291,51 @@ describe('Sidebar no mobile', () => {
     expect(within(painel()!).queryByTitle(/fixar barra lateral/i)).not.toBeInTheDocument();
   });
 });
+
+describe('Menu do usuário (Editar perfil / Sair)', () => {
+  // Com a barra NÃO fixada, o trilho e o painel ficam montados ao mesmo tempo, e
+  // os dois renderizavam o mesmo menu lendo o mesmo `userMenuOpen`: o clique
+  // abria DOIS menus sobrepostos. Relatado com print em 2026-09-21.
+
+  const menus = () => screen.queryAllByTestId('menu-do-usuario');
+
+  it('abre UM menu só com a barra fixada', async () => {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.click(await within(painel()!).findByText('Ana Souza'));
+
+    expect(menus()).toHaveLength(1);
+    expect(screen.getAllByText('Editar perfil')).toHaveLength(1);
+    expect(screen.getAllByText('Sair')).toHaveLength(1);
+  });
+
+  it('abre UM menu só com o painel aberto por hover', async () => {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, '0');
+    const user = userEvent.setup();
+    renderSidebar();
+    fireEvent.mouseEnter(trilho()!.parentElement!);
+
+    await user.click(await within(painel()!).findByText('Ana Souza'));
+
+    expect(menus()).toHaveLength(1);
+    expect(screen.getAllByText('Editar perfil')).toHaveLength(1);
+  });
+
+  it('com só o trilho na tela, o menu sai do avatar do trilho', async () => {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, '0');
+    renderSidebar();
+    expect(painel()).not.toBeInTheDocument();
+
+    // `fireEvent.click`, e não `userEvent`: este último simula o ponteiro e
+    // dispara `mouseover` ANTES do clique — o que abre o painel por hover e
+    // desfaz justamente o cenário "só o trilho na tela".
+    const avatar = await within(trilho()!).findByText('A');
+    fireEvent.click(avatar);
+
+    expect(painel()).not.toBeInTheDocument();
+    expect(menus()).toHaveLength(1);
+    expect(within(trilho()!).getByText('Editar perfil')).toBeInTheDocument();
+  });
+});

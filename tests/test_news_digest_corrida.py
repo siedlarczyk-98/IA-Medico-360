@@ -20,7 +20,15 @@ from sqlalchemy import func, select
 from app.models.models import User
 from app.models.news import DigestSend
 from app.services import email_service, news_digest_service
-from tests.test_news_feed import CARDIO, CORE, _escolhe, _liga_email, _publicado, _tema
+from tests.test_news_feed import (
+    CARDIO,
+    CORE,
+    NA_HORA_PADRAO,
+    _escolhe,
+    _liga_email,
+    _publicado,
+    _tema,
+)
 
 
 @pytest.fixture
@@ -71,13 +79,17 @@ async def test_perder_a_corrida_de_um_medico_nao_reenvia_os_outros(
     monkeypatch.setattr(news_digest_service, "_artigos_do_usuario", _outra_replica_passa_na_frente)
 
     async with fabrica_com_conexoes_reais() as db:
-        primeira = await news_digest_service.enviar_digests(db)
+        primeira = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
     monkeypatch.setattr(news_digest_service, "_artigos_do_usuario", original)
     async with fabrica_com_conexoes_reais() as db:
-        segunda = await news_digest_service.enviar_digests(db)
+        segunda = await news_digest_service.enviar_digests(db, agora=NA_HORA_PADRAO)
 
     # A rodada não abortou: o médico DEPOIS da corrida recebeu o dele.
-    assert primeira == {"enviados": 2, "sem_conteudo": 0, "ja_enviados": 1, "falhas": 0}, primeira
+    assert primeira == {
+        "enviados": 2, "sem_conteudo": 0, "ja_enviados": 1, "falhas": 0,
+        # Todos os três estavam na faixa padrão: nenhum ficou de fora por hora.
+        "fora_de_hora": 0,
+    }, primeira
     assert sorted(enviados) == sorted([primeiro, ultimo])
     assert do_meio not in enviados, "este foi a outra réplica que enviou"
 

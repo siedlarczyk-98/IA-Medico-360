@@ -207,3 +207,97 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
 | 5 | Experiência percebida | feita em parte (ver dívidas) |
 | 6 | Endurecimento e invariantes | feita (ver dívidas) |
 | 7 | Limpeza estrutural | feita em parte (ganhos rápidos, agregador, docs) |
+
+## Rodada de UX para o lançamento (2026-09-21)
+
+Seis itens levantados pelo Ruben olhando a plataforma antes do lançamento.
+
+| # | Item | Estado |
+| --- | --- | --- |
+| 1 | Template do e-mail de OTP | feito |
+| 2 | E-mail de notícias | feito |
+| 3 | Periodicidade do digest (diário, semanal, horário) | feito |
+| 4 | Header das calculadoras: tirar "Sair" no embed | feito |
+| 5 | Termos de uso desatualizados | a fazer |
+| 6 | Menu do usuário duplicado ao editar perfil | feito |
+
+Os e-mails passaram a sair em HTML com a identidade da marca (`app/services/
+email_templates.py`); antes os três eram texto puro. O `send_invite` entrou junto,
+embora não estivesse na lista — era o mesmo texto puro dos outros dois.
+
+### Periodicidade do digest (item 3)
+
+O médico escolhe na tela de temas: **frequência** (todo dia / uma vez por
+semana), **dia** (só no semanal) e **horário** (manhã 7h, tarde 13h, noite 19h).
+
+Decisões que estão travadas em código e comentário:
+
+- **Faixa, e não hora exata.** Hora exata obriga a responder "sete da manhã de
+  ONDE", e o sistema não guarda fuso de usuário nenhum — nem no banco nem vindo
+  do navegador. A faixa resolve em hora fixa de Brasília. Se um dia houver
+  médico fora do Brasil em número que importe, guardar o fuso junto da
+  preferência e converter em `news_digest_agenda.esta_na_hora` é o único ponto
+  que muda.
+- **O filtro de hora saiu do agendador e virou por usuário.** `news_agendado`
+  chama `enviar_digests` TODA HORA; quem decide se é a hora de cada médico é a
+  agenda dele. Por isso `NEWS_DIGEST_HOUR` e `NEWS_DIGEST_JANELA_DIAS` foram
+  REMOVIDAS do `config.py`: um ajuste global ali não faria mais nada e ficaria
+  parecendo que faz. (Se as envs continuarem definidas no Railway não há
+  problema — o pydantic ignora env desconhecida; verificado.)
+- **A janela acompanha a frequência**: 2 dias no diário, 7 no semanal. Sem isso
+  quem escolhesse semanal receberia só os últimos dois dias.
+- **Campo ausente = não mexa**: um PUT só com `email` (o botão de desligar)
+  NÃO apaga a agenda. Senão quem religasse depois passaria a receber noutro
+  horário sem ter pedido. Travado por teste.
+- Preferência sem agenda = diário de manhã, que é o comportamento de antes.
+  Ninguém muda de horário por efeito colateral de deploy.
+- `resumo["fora_de_hora"]` entrou no heartbeat: numa rodada qualquer esse é o
+  número grande, e é o que distingue "não era a hora de ninguém" de "a tarefa
+  morreu".
+
+Testes: `tests/test_news_digest_agenda.py` (26, a agenda pura — percorre a
+semana hora a hora) e `tests/test_news_digest_periodicidade.py` (11, com banco e
+HTTP). Os de digest foram rodados com o relógio deslocado em +100, +365 e -200
+dias para provar que não dependem da data em que rodam.
+
+### Dívidas que esta rodada deixou
+
+- **A marca pede Just Sans e a plataforma não carrega nenhuma.** Três tipografias
+  diferentes rodando: `frontend-app`/`calculadoras-app`/`dea-app` usam Plus Jakarta
+  Sans; `noticias-app` pede `'Just Sans'` que NUNCA é carregada (cai no system-ui,
+  muda de máquina para máquina); `lp-contabilidade`/`lp-financas` usam Hanken
+  Grotesk. Não há arquivo de fonte no repositório. Unificar exige licenciar e
+  hospedar a Just Sans e apontar os seis apps. Nos e-mails o ponto é irrelevante
+  (cliente de e-mail ignora webfont), mas no produto é a marca não batendo consigo.
+- **O logo dos e-mails é só texto, de propósito.** O "M" foi redesenhado em SVG a
+  partir do PDF do manual, virou data URI, e Gmail/Outlook bloquearam: chegava um
+  quadradinho vazio. Se aparecer o SVG/AI original da marca, dá para hospedar e usar
+  nos apps — no e-mail, imagem continua não valendo a pena.
+- Nenhum e-mail foi conferido no Outlook desktop (o motor do Word é o mais restrito);
+  só Gmail. O HTML segue as regras que o Outlook exige (tabelas, estilo inline).
+
+### O NER do DLP falha ABERTO — vale uma decisão
+
+Descoberto em 2026-09-21 ao investigar 13 testes de DLP vermelhos na máquina
+local. Não era regressão: faltava o modelo `pt_core_news_sm` (confirmado contra
+o HEAD numa worktree limpa — as mesmas 13 falhavam sem alteração nenhuma).
+Resolvido com `python -m spacy download pt_core_news_sm`; os 60 passam. O
+`Dockerfile` e o CI instalam o modelo, então nem produção nem CI eram afetados.
+
+O que a investigação deixou à mostra, e que vale uma decisão:
+
+- **O NER falha ABERTO, de propósito.** `app/middleware/ner.py::_load` registra
+  `logger.error` e devolve `None`; o DLP segue com as palavras-gatilho e o
+  `main.py` loga um warning no startup. Ou seja: se o modelo sumir de produção
+  (mudança no Dockerfile, imagem base, falha de download no build), **nomes sem
+  palavra-gatilho passam para os modelos** e a única evidência é uma linha de
+  log que ninguém lê.
+- O `/health/ready` NÃO verifica o NER. Um readiness que olhasse
+  `ner.warmup()` transformaria essa falha silenciosa em deploy que não sobe —
+  mas também impediria a aplicação de subir num ambiente sem o modelo, o que
+  é uma decisão de produto (fail-closed x disponibilidade), não minha.
+- A suíte passa com 13 vermelhos em qualquer máquina sem o modelo. Isso treina
+  a equipe a ignorar vermelho, que é o começo de não perceber o vermelho de
+  verdade. Um `skipif` quando o modelo não está presente resolveria — mas aí a
+  cobertura do DLP some sem avisar, o que é pior. A saída boa é o CI garantir o
+  modelo (ver `medico360-ci`) e o teste falhar mesmo.
