@@ -64,3 +64,6 @@ textarea { font-family: inherit; }
   /* Separa `[1][10]` sem espaço de texto real, que o leitor de tela anunciaria. */
   margin-left: 1px;
 }
+
+/* Logo animada da tela vazia do desktop (ver `components/MedicoLogoAnimada`). */
+.logo-abertura { display: block; height: auto; max-width: 70%; margin-bottom: 20px; }

@@ -101,6 +101,7 @@ POLITICA_DE_CUSTO: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/otp/request"): NAO_GASTA,
     ("POST", "/api/v1/auth/otp/verify"): NAO_GASTA,
     ("POST", "/api/v1/auth/register"): NAO_GASTA,
+    ("POST", "/api/v1/auth/session/renew"): NAO_GASTA,
     # A calculadora em si é fórmula determinística — o LLM só entra no
     # `/extract`, que pré-preenche os campos.
     ("POST", "/api/v1/calculators/{slug}/execute"): NAO_GASTA,

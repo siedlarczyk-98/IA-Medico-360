@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import MedicoLogoAnimada from './MedicoLogoAnimada';
 import type { OrchestratorMode } from './InputBar';
 
 // A ordem deste array é a ordem da grade de duas colunas: cada par de itens
@@ -89,6 +90,9 @@ export function EmptyState({ userName, selectedMode, onModeSelect }: Props) {
     // Com `margin: auto`, cabe → centralizado; não cabe → começa do topo e rola.
     <div className="rolagem" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: isMobile ? 'var(--gap-5) 20px' : 'var(--gap-5) 40px' }}>
       <div style={{ width: 720, maxWidth: '100%', margin: 'auto 0' }}>
+        {/* Alinhada à esquerda, como a saudação e os cartões: centralizada,
+            ficaria solta sobre uma coluna que segue a margem esquerda. */}
+        <MedicoLogoAnimada width={isMobile ? 160 : 210} className="logo-abertura" />
         <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.5 }}>
           {greeting(userName ?? null)}
         </div>

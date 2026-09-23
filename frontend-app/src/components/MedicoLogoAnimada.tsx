@@ -2,8 +2,9 @@ import { useId } from "react";
 
 /**
  * Logo Médico 360 com animação de entrada (~2s, toca uma vez).
- * Usada acima da saudação na tela vazia da casca mobile: a tela remonta a cada
- * nova consulta, e a animação toca de novo sem precisar trocar a `key`.
+ * Usada acima da saudação na tela vazia das duas cascas (`EmptyState` no
+ * desktop, `ConsultaVazia` no celular): a tela vazia remonta a cada nova
+ * consulta, e a animação toca de novo sem precisar trocar a `key`.
  * - Vetorial: nítida em qualquer tela; largura controlada por `width` ou CSS.
  * - Respeita prefers-reduced-motion (mostra a logo estática).
  * - Para tocar de novo, troque a `key` do componente (ex.: a cada nova consulta).

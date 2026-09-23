@@ -52,6 +52,9 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/auth/me/consentimentos"): AUTENTICADA,
     ("POST", "/api/v1/auth/me/consentimentos/{tipo}/revogar"): AUTENTICADA,
     ("POST", "/api/v1/auth/onboarding"): AUTENTICADA,
+    # Troca um token válido por outro: exige estar logado (e `get_current_user`
+    # recusa token revogado), senão seria um jeito de ressuscitar sessão morta.
+    ("POST", "/api/v1/auth/session/renew"): AUTENTICADA,
     ("POST", "/api/v1/auth/invite/generate"): ADMIN,
     # Núcleo clínico
     ("POST", "/api/v1/orquestrador/query"): AUTENTICADA,

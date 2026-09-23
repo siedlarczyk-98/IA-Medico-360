@@ -16,7 +16,7 @@
 
 import type { ChatController } from '../../chat/useChatController';
 import { Icone } from './Icone';
-import MedicoLogoAnimada from './MedicoLogoAnimada';
+import MedicoLogoAnimada from '../../components/MedicoLogoAnimada';
 import { MODOS } from './modos';
 
 function saudacao(nome: string | null | undefined): string {
