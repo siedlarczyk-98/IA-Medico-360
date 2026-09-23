@@ -20,6 +20,9 @@
 
 import { useEffect, useState } from 'react';
 
+import { decidirLayout } from '../shell/layout';
+import { detectarHospedeiro } from '../shell/mobile/hospedeiro';
+
 const WAID_ORIGIN =
   import.meta.env.VITE_WAID_ORIGIN ?? 'https://www.medico360.app';
 
@@ -62,6 +65,46 @@ function testarArmazenamento(): string {
   }
 }
 
+/**
+ * A TELA como a casca mobile a enxerga: medidas, teclado, margens do aparelho
+ * (notch, barra de gestos), ponteiro — e a casca que seria escolhida aqui.
+ *
+ * Existe porque a homologação da casca mobile acontece dentro do app da Waid,
+ * onde não há devtools: sem estes números, "o campo ficou atrás do teclado"
+ * não diz se o culpado é a altura visível, a margem do aparelho ou a escolha
+ * de casca.
+ *
+ * As margens do aparelho só valem com `viewport-fit=cover`, que a casca mobile
+ * liga ao montar. Esta tela liga também (é técnica, não tem layout a proteger)
+ * e mede com um elemento de sonda.
+ */
+function colherTela() {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (meta && !meta.content.includes('viewport-fit')) meta.content += ', viewport-fit=cover';
+
+  const sonda = document.createElement('div');
+  sonda.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  document.body.appendChild(sonda);
+  const cs = getComputedStyle(sonda);
+  const margens = `topo ${cs.paddingTop} · dir ${cs.paddingRight} · baixo ${cs.paddingBottom} · esq ${cs.paddingLeft}`;
+  sonda.remove();
+
+  const consulta = (q: string) => (typeof window.matchMedia === 'function' && window.matchMedia(q).matches ? 'SIM' : 'NAO');
+  const vv = window.visualViewport;
+  return {
+    janela: `${window.innerWidth} × ${window.innerHeight} (dpr ${window.devicePixelRatio})`,
+    areaVisivel: vv ? `${Math.round(vv.width)} × ${Math.round(vv.height)}, topo ${Math.round(vv.offsetTop)}` : 'SEM visualViewport',
+    dvh: typeof CSS !== 'undefined' && CSS.supports?.('height', '100dvh') ? 'SIM' : 'NAO',
+    margens,
+    toque: consulta('(pointer: coarse)'),
+    hover: consulta('(hover: hover)'),
+    deitado: consulta('(orientation: landscape)'),
+    cascaAutomatica: decidirLayout(null),
+    cascaNestaBuild: import.meta.env.VITE_SHELL_MOVEL ?? 'off',
+    hospedeiro: detectarHospedeiro(),
+  };
+}
+
 /** Colhe o que descreve o CONTEXTO em que a página abriu. Roda uma vez. */
 function colherContexto() {
   return {
@@ -97,6 +140,7 @@ export function DiagnosticoEmbedPage() {
   // `ref.current` durante o render é justamente o que `react-hooks/refs`
   // proíbe, porque o React não garante consistência nesse caso.
   const [contexto] = useState(colherContexto);
+  const [tela] = useState(colherTela);
 
   // Marco zero para o carimbo de tempo das mensagens. `useState` com
   // inicializador, e não `useRef(Date.now())`: o argumento de `useRef` é
@@ -161,6 +205,17 @@ export function DiagnosticoEmbedPage() {
     `Mensagens vistas : ${mensagens.length}`,
     ...mensagens.map(m => `  [${m.em}] origem=${m.origin} tipo=${m.tipo} token=${m.temToken ? 'sim' : 'nao'}`),
     `UserAgent        : ${contexto.userAgent}`,
+    '',
+    '— Tela (casca mobile) —',
+    `Janela           : ${tela.janela}`,
+    `Área visível     : ${tela.areaVisivel}`,
+    `Suporta 100dvh   : ${tela.dvh}`,
+    `Margens aparelho : ${tela.margens}`,
+    `Toque / hover    : ${tela.toque} / ${tela.hover}`,
+    `Deitado          : ${tela.deitado}`,
+    `Casca automática : ${tela.cascaAutomatica}`,
+    `Flag da build    : VITE_SHELL_MOVEL=${tela.cascaNestaBuild}`,
+    `Hospedeiro       : ${tela.hospedeiro}`,
   ].join('\n');
 
   // O veredito mudou em 22/09/2026. Ele afirmava que sem iframe a identidade

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { MAX_CHARS_EVOLUCAO, type Folder, type FolderKind } from '../api/folders';
+import { useFormularioPasta } from '../hooks/useFormularioPasta';
 
 interface Props {
   /** Pasta existente para editar; ausente = criando uma nova. */
@@ -21,12 +22,12 @@ interface Props {
  * pareça obrigatório faria o médico inventar conteúdo para preenchê-lo.
  */
 export function FolderModal({ folder, onClose, onSave, saving = false }: Props) {
-  const [name, setName] = useState(folder?.name ?? '');
-  const [clinicalContext, setClinicalContext] = useState(folder?.clinical_context ?? '');
-  const [folderKind, setFolderKind] = useState<FolderKind>(folder?.folder_kind ?? 'clinical');
+  // Estado e validação vêm do hook compartilhado com a sheet da casca mobile.
+  const {
+    editando, name, setName, clinicalContext, setClinicalContext,
+    folderKind, setFolderKind, textos, excedeu, podeSalvar, salvar: handleSave,
+  } = useFormularioPasta(folder, onSave, saving);
   const nameRef = useRef<HTMLInputElement>(null);
-
-  const editando = folder !== undefined;
 
   useEffect(() => {
     nameRef.current?.focus();
@@ -41,15 +42,6 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-
-  const textos = TEXTOS_POR_TIPO[folderKind];
-  const excedeu = clinicalContext.length > MAX_CHARS_EVOLUCAO;
-  const podeSalvar = name.trim().length > 0 && !excedeu && !saving;
-
-  function handleSave() {
-    if (!podeSalvar) return;
-    onSave(name.trim(), clinicalContext.trim(), folderKind);
-  }
 
   return (
     <div
@@ -197,31 +189,6 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
     </div>
   );
 }
-
-/**
- * Rótulo, exemplo e explicação por tipo de pasta.
- *
- * O campo é o mesmo (uma coluna só no banco), mas chamá-lo de "evolução do
- * paciente" numa pasta de estudos não significa nada — foi o que motivou a
- * pergunta no topo da tela. O texto de ajuda também muda: numa pasta clínica o
- * ganho é não repetir o caso; numa geral, é não repetir o objetivo.
- */
-const TEXTOS_POR_TIPO: Record<FolderKind, { rotulo: string; placeholder: string; ajuda: string }> = {
-  clinical: {
-    rotulo: 'Evolução do paciente',
-    placeholder:
-      'Ex.: Jorge, 58a, HAS + DM2 há 8 anos.\nLosartana 50mg 12/12h, metformina 850mg.\nAlergia a dipirona.\nÚltima consulta: PA 150/95, HbA1c 8.2.',
-    ajuda:
-      'Se preenchida, é considerada em todas as conversas desta pasta — sem que você precise repetir o caso a cada pergunta. Pode editar quando o quadro mudar.',
-  },
-  general: {
-    rotulo: 'Contexto da pasta',
-    placeholder:
-      'Ex.: Revisão para prova de título em cardiologia.\nFoco em arritmias e insuficiência cardíaca.\nPreferência por respostas com referência a guidelines.',
-    ajuda:
-      'Se preenchido, é considerado em todas as conversas desta pasta — sem que você precise repetir o objetivo a cada pergunta. Pode editar quando quiser.',
-  },
-};
 
 const labelStyle: React.CSSProperties = {
   display: 'block',

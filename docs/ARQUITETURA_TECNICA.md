@@ -1219,6 +1219,7 @@ Use `python -m scripts.verificar_prontidao_producao` para saber, sem mudar nada,
 | VITE_API_URL | `calculadoras-app/src/api/*.ts` | em dev, ausência = caminho relativo (o proxy do Vite cuida do CORS); em prod aponta para o domínio do backend |
 | VITE_API_URL | `lp-*/src/lib/api.ts` | idem |
 | VITE_INTERCOM_APP_ID | `frontend-app/src/main.tsx` | só no frontend-app; ativa o widget do Intercom |
+| VITE_SHELL_MOVEL | `frontend-app/src/shell/layout.ts` | `off` (padrão, ausente = `off`): sempre a casca de desktop · `qa`: desktop, a menos que a URL traga `?layout=mobile` (vale pela sessão) · `on`: escolhe desktop/mobile pelo espaço da tela. Mesma URL de embed nos três casos. Resolvida em tempo de BUILD |
 
 ---
 

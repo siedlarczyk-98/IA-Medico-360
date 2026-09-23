@@ -9,7 +9,9 @@
 import { CONTRATO_SSE } from '@shared/contrato-sse';
 // `?raw`: o Vite entrega o arquivo como texto. Evita depender de `node:fs` (o chat
 // não tem `@types/node`, e instalar dependência aqui regenera o lockfile).
-import fonteDoChat from '../App.tsx?raw';
+// É o controller, e não o App: o tratamento dos eventos saiu do App quando a
+// lógica do chat foi separada da casca (desktop/mobile).
+import fonteDoChat from '../chat/useChatController.ts?raw';
 import { type StreamEvent, streamQuery } from './orquestrador';
 import { ErroDeApi } from './erros';
 

@@ -518,7 +518,9 @@ function ReferencesPending() {
 
 function AssistantAvatar() {
   return (
-    <div style={{
+    // A classe existe para a casca mobile esconder o avatar: no telefone ele
+    // e o recuo que cria custam ~45 px de uma coluna de 360 (ver `mobile.css`).
+    <div className="cv-avatar" style={{
       width: 30, height: 30, borderRadius: 8, background: 'var(--mint)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
     }}>

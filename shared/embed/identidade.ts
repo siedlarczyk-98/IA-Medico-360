@@ -156,7 +156,7 @@ interface JanelaComPonte {
   __waidIdentityBridgeInstalled?: unknown;
 }
 
-function temIframe(): boolean {
+export function temIframe(): boolean {
   try {
     return window.parent !== window;
   } catch {
@@ -167,7 +167,7 @@ function temIframe(): boolean {
 }
 
 /** A ponte do app nativo está instalada nesta janela? */
-function temPonteNativa(): boolean {
+export function temPonteNativa(): boolean {
   try {
     const w = window as unknown as JanelaComPonte;
     return Boolean(w.ReactNativeWebView) || Boolean(w.__waidIdentityBridgeInstalled);

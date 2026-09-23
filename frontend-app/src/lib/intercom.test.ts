@@ -70,3 +70,19 @@ describe('suporte pelo menu', () => {
     expect(intercom).toHaveBeenCalledWith('show');
   });
 });
+
+describe('casca mobile', () => {
+  it('esconde o balão mesmo acima do corte, e devolve ao sair', async () => {
+    simularTela(false); // celular deitado: largo, acima de 768 px
+    const { loadIntercom, esconderBalaoNaCascaMovel } = await carregarModulo();
+    loadIntercom('app-teste');
+    const intercom = vi.fn();
+    window.Intercom = intercom as unknown as typeof window.Intercom;
+
+    esconderBalaoNaCascaMovel(true);
+    expect(intercom).toHaveBeenLastCalledWith('update', { hide_default_launcher: true });
+
+    esconderBalaoNaCascaMovel(false);
+    expect(intercom).toHaveBeenLastCalledWith('update', { hide_default_launcher: false });
+  });
+});

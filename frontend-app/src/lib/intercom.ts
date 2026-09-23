@@ -24,8 +24,22 @@ let loaded = false;
  */
 const TELEFONE = '(max-width: 768px)';
 
+/**
+ * A casca mobile pede o balão escondido enquanto está montada, qualquer que
+ * seja a largura: ela também monta em telas acima do corte (celular deitado,
+ * tablet em pé), e ali o balão cobriria o botão de enviar do mesmo jeito.
+ */
+let pedidoDaCascaMovel = false;
+
 function launcherEscondido(): boolean {
+  if (pedidoDaCascaMovel) return true;
   return typeof window.matchMedia === 'function' && window.matchMedia(TELEFONE).matches;
+}
+
+/** Chamado pela casca mobile ao montar (`true`) e ao desmontar (`false`). */
+export function esconderBalaoNaCascaMovel(esconder: boolean): void {
+  pedidoDaCascaMovel = esconder;
+  window.Intercom?.('update', { hide_default_launcher: launcherEscondido() });
 }
 
 /** O suporte está disponível nesta sessão? (o widget só carrega com `app_id`) */
@@ -48,8 +62,8 @@ export function loadIntercom(appId: string): void {
   // Girar o aparelho ou redimensionar a janela atravessa o corte: o balão
   // aparece e some junto com o layout.
   if (typeof window.matchMedia === 'function') {
-    window.matchMedia(TELEFONE).addEventListener?.('change', e => {
-      window.Intercom?.('update', { hide_default_launcher: e.matches });
+    window.matchMedia(TELEFONE).addEventListener?.('change', () => {
+      window.Intercom?.('update', { hide_default_launcher: launcherEscondido() });
     });
   }
 

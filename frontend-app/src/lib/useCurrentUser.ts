@@ -48,6 +48,8 @@ export function useCurrentUser() {
     id: user.id,
     name: user.name,
     email: user.email,
+    /** Rótulo pronto do servidor ("Clínica médica"), para mostrar; o slug fica no perfil. */
+    specialty: user.specialty ?? null,
     intercomUserHash: user.intercom_user_hash ?? null,
     firstName,
     crmLabel,

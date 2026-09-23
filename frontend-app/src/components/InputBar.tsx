@@ -1,6 +1,7 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useRef } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { extractFile, ACCEPTED_FILE_TYPES, type ExtractResult } from '../api/uploads';
+import { ACCEPTED_FILE_TYPES } from '../api/uploads';
+import { MAX_ANEXOS, useComposer } from '../chat/useComposer';
 import { chipNeutral, iconButtonBase } from '../lib/styles';
 import { tratarEnterParaEnviar, DICA_ENVIO } from '../lib/enterParaEnviar';
 
@@ -26,11 +27,6 @@ const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }
   { key: 'DATA_OCEAN',         label: 'Data Ocean',           shortLabel: 'Data Ocean' },
 ];
 
-// Teto por mensagem, espelhando MAX_ANEXOS_POR_MENSAGEM no backend. Repetido
-// aqui para avisar o médico ANTES do upload, em vez de deixá-lo anexar cinco
-// arquivos e receber 422 no envio.
-const MAX_ANEXOS = 5;
-
 const FILE_TYPE_ICON: Record<string, string> = {
   pdf: '📄',
   docx: '📝',
@@ -39,11 +35,6 @@ const FILE_TYPE_ICON: Record<string, string> = {
 };
 
 const TEXTAREA_MAX_HEIGHT = 240;            // px — acima disso, rola dentro do textarea em vez de empurrar o botão Enviar para fora
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;   // 5 MB
-const MAX_FILE_BYTES = 10 * 1024 * 1024;    // 10 MB
-const IMAGE_DLP_ACK_KEY = 'img_dlp_ack';    // consentimento (1x por sessão)
-
-const isImageFile = (file: File) => file.type.startsWith('image/');
 
 interface Props {
   onSend: (text: string, effort: Effort, attachments?: Attachment[]) => void;
@@ -66,21 +57,23 @@ interface Props {
 
 export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, placeholder, mode = 'QUICK_SEARCH', onModeChange, onAttachmentChange, webSearchEnabled, onWebSearchToggle, onStop }: Props) {
   const isMobile = useIsMobile();
-  const [value, setValue] = useState('');
-  const [effort, setEffort] = useState<Effort>('detalhado');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploadState, setUploadState] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [uploadError, setUploadError] = useState('');
-  // Lote inteiro fica pendente enquanto o aceite de imagem não vem: basta uma
-  // imagem entre os arquivos para o consentimento ser necessário.
-  const [pendingImage, setPendingImage] = useState<File[] | null>(null);
+  // Regras e estado do campo vêm de `useComposer` (compartilhado com a casca
+  // mobile). Os nomes locais abaixo são os de antes, para o JSX não mudar.
+  const composer = useComposer({ onSend, disabled, sendBlocked, onAttachmentChange });
+  const {
+    texto: value, esforco: effort, anexos: attachments, envio: uploadState,
+    erroDeEnvio: uploadError, imagensPendentes: pendingImage, filled, extraindo,
+  } = composer;
+  const setEffort = composer.mudarEsforco;
+  const confirmImageConsent = composer.confirmarImagens;
+  const cancelImageConsent = composer.cancelarImagens;
+  const removeAttachment = composer.removerAnexo;
+  const clearError = composer.descartarErro;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filled = value.trim().length > 0 || attachments.length > 0;
-
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setValue(e.target.value);
+    composer.mudarTexto(e.target.value);
     if (textareaRef.current) {
       const el = textareaRef.current;
       el.style.height = 'auto';
@@ -94,115 +87,12 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
     e.target.value = '';
-
-    if (attachments.length + files.length > MAX_ANEXOS) {
-      setUploadState('error');
-      setUploadError(`Máximo de ${MAX_ANEXOS} arquivos por mensagem.`);
-      return;
-    }
-
-    // B4: valida tamanho no cliente antes de enviar.
-    const grande = files.find(f => f.size > (isImageFile(f) ? MAX_IMAGE_BYTES : MAX_FILE_BYTES));
-    if (grande) {
-      const limit = isImageFile(grande) ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
-      setUploadState('error');
-      setUploadError(`"${grande.name}" é maior que ${Math.round(limit / (1024 * 1024))} MB.`);
-      return;
-    }
-
-    // S1: imagens não passam pelo filtro de PII (DLP) — pede consentimento 1x por sessão.
-    // Basta uma imagem no lote para exigir o aceite; o lote inteiro fica pendente.
-    if (files.some(isImageFile) && sessionStorage.getItem(IMAGE_DLP_ACK_KEY) !== '1') {
-      setPendingImage(files);
-      return;
-    }
-
-    void doUpload(files);
+    composer.adicionarArquivos(files);
   }
-
-  async function doUpload(files: File[]) {
-    setUploadState('loading');
-    setUploadError('');
-
-    // Em série, não em paralelo: cada imagem dispara uma chamada de visão no
-    // backend, e mandar cinco de uma vez castiga o rate limit de /uploads.
-    //
-    // Cada arquivo é gravado QUANDO CHEGA, e o erro de um não interrompe os
-    // outros. Antes os resultados só entravam no estado depois do laço inteiro:
-    // um erro no terceiro arquivo descartava os dois que já tinham sido
-    // processados (e pagos), e o médico via só "erro", sem saber o que sobrou.
-    const falhas: string[] = [];
-    for (const file of files) {
-      try {
-        const result: ExtractResult = await extractFile(file);
-        const novo: Attachment = {
-          fileId: result.file_id,
-          name: result.file_name,
-          fileType: result.file_type,
-          warning: result.warning,
-        };
-        setAttachments(prev => {
-          const proximos = [...prev, novo];
-          onAttachmentChange?.(proximos);
-          return proximos;
-        });
-      } catch (err) {
-        const motivo = err instanceof Error ? err.message : 'Erro ao processar arquivo.';
-        falhas.push(files.length > 1 ? `"${file.name}": ${motivo}` : motivo);
-      }
-    }
-
-    if (falhas.length > 0) {
-      setUploadState('error');
-      setUploadError(falhas.join(' '));
-    } else {
-      setUploadState('idle');
-    }
-  }
-
-  function confirmImageConsent() {
-    sessionStorage.setItem(IMAGE_DLP_ACK_KEY, '1');
-    const files = pendingImage;
-    setPendingImage(null);
-    if (files) void doUpload(files);
-  }
-
-  function cancelImageConsent() {
-    setPendingImage(null);
-  }
-
-  function removeAttachment(fileId: string) {
-    setAttachments(prev => {
-      const proximos = prev.filter(a => a.fileId !== fileId);
-      onAttachmentChange?.(proximos);
-      return proximos;
-    });
-    setUploadState('idle');
-    setUploadError('');
-  }
-
-  function clearError() {
-    setUploadState('idle');
-    setUploadError('');
-  }
-
-  // Extração em andamento bloqueia o envio — pelo botão E pelo Enter, que passa
-  // por aqui sem olhar o `disabled` do botão. Sem isto a mensagem saía sem o
-  // exame, a resposta clínica vinha sem ele e nada avisava o médico; o arquivo,
-  // ao terminar, grudava na pergunta SEGUINTE.
-  const extraindo = uploadState === 'loading';
 
   function submit() {
-    if (!filled || disabled || sendBlocked || extraindo) return;
-    onSend(value.trim(), effort, attachments.length > 0 ? attachments : undefined);
-    setValue('');
-    setAttachments([]);
-    onAttachmentChange?.([]);
-    setUploadState('idle');
-    setUploadError('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    if (composer.submit() && textareaRef.current) textareaRef.current.style.height = 'auto';
   }
 
   return (

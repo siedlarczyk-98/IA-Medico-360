@@ -10,6 +10,7 @@
   --petrol: #014751;
   --green:  #00d17d;
   --mint:   #aef6c6;
+  --mint-bg: #eafcf0; /* fundo de item selecionado e banner de pasta (casca mobile) */
   --paper:  #fdfff4;
   --pen:    #37464d;
   --pen2:   #6b7a80;
@@ -43,4 +44,12 @@ textarea { font-family: inherit; }
 .app-raiz {
   height: 100vh;
   height: 100dvh;
+}
+
+/* Pulso dos indicadores de espera (ChatView, InputBar). Era um <style> inline
+   dentro do layout do App; as duas cascas usam os mesmos componentes, então a
+   animação vive aqui, global, e não depende de qual casca montou. */
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }

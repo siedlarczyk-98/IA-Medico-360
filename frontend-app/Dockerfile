@@ -34,9 +34,13 @@ COPY frontend-app/ frontend-app/
 ARG VITE_API_URL
 ARG VITE_INTERCOM_APP_ID
 ARG VITE_WAID_ORIGIN
+# Casca mobile: off (padrão) | qa | on. Ver src/shell/layout.ts. Sem esta linha
+# a variável do painel nunca chega ao build e a casca fica desligada em silêncio.
+ARG VITE_SHELL_MOVEL
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_INTERCOM_APP_ID=$VITE_INTERCOM_APP_ID
 ENV VITE_WAID_ORIGIN=$VITE_WAID_ORIGIN
+ENV VITE_SHELL_MOVEL=$VITE_SHELL_MOVEL
 
 # TODA variável `VITE_` nova precisa de UMA LINHA `ARG` AQUI, além de existir no
 # painel do Railway. Sem o ARG, o Docker não recebe o valor do serviço e o Vite

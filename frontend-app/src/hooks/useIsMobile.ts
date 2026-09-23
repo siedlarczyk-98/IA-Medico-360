@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCompacto } from '../shell/layout';
 
-export function useIsMobile(breakpoint = 768): boolean {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= breakpoint);
-
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth <= breakpoint);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, [breakpoint]);
-
-  return isMobile;
+/**
+ * Layout apertado? Segue a casca escolhida em `shell/layout.ts`.
+ *
+ * Era um `useState` com listener de `resize` próprio (largura ≤ 768). Com duas
+ * cascas, uma regra de largura independente discordaria da casca na faixa da
+ * histerese — o desktop montado com ajustes de celular, ou o contrário. Com a
+ * casca mobile desligada (`VITE_SHELL_MOVEL=off`), a regra antiga continua
+ * valendo, lá dentro.
+ */
+export function useIsMobile(): boolean {
+  return useCompacto();
 }
