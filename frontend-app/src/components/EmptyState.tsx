@@ -76,8 +76,19 @@ interface Props {
 export function EmptyState({ userName, selectedMode, onModeSelect }: Props) {
   const isMobile = useIsMobile();
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '0 20px' : '0 40px' }}>
-      <div style={{ width: 720, maxWidth: '100%' }}>
+    // A área dos cartões ROLA, e a caixa de pergunta (irmã, no App) fica fixa
+    // embaixo. Antes esta div crescia até o tamanho do conteúdo: no celular os
+    // cartões passavam da tela, empurravam a caixa de pergunta para fora e o
+    // `overflow: hidden` do pai cortava sem deixar rolar — não havia como
+    // chegar ao campo.
+    //
+    // `minHeight: 0` é o que deixa um item flex encolher abaixo do conteúdo
+    // (o padrão é `auto`, que impede). E a centralização vai por `margin: auto`
+    // no filho, não por `justifyContent: center`: esta centraliza mesmo quando
+    // o conteúdo não cabe, cortando o topo — era o "Bom dia" colado no alto.
+    // Com `margin: auto`, cabe → centralizado; não cabe → começa do topo e rola.
+    <div className="rolagem" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: isMobile ? 'var(--gap-5) 20px' : 'var(--gap-5) 40px' }}>
+      <div style={{ width: 720, maxWidth: '100%', margin: 'auto 0' }}>
         <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 700, color: 'var(--ink)', letterSpacing: -0.5 }}>
           {greeting(userName ?? null)}
         </div>

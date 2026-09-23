@@ -438,8 +438,10 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
           )}
 
           {/* Segmented control de esforço */}
+          {/* `flexShrink: 0`: o layout encolhia este controle em 320px e o
+              `overflow: hidden` cortava o "Detalhado" no meio. */}
           <div style={{
-            display: 'flex', borderRadius: 8, overflow: 'hidden',
+            display: 'flex', borderRadius: 8, overflow: 'hidden', flexShrink: 0,
             border: '1px solid var(--line2)', background: 'var(--fill)',
           }}>
             {(['rápido', 'detalhado'] as Effort[]).map(opt => (
@@ -450,7 +452,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                   ? 'Resposta direta e objetiva — ideal para dúvidas rápidas do dia a dia'
                   : 'Resposta completa com raciocínio clínico detalhado — ideal para casos complexos'}
                 style={{
-                  minHeight: 'var(--toque-min)', padding: '0 var(--gap-3)', fontSize: 'var(--texto-micro)', fontWeight: 600, border: 'none',
+                  minHeight: 'var(--toque-min)', padding: isMobile ? '0 var(--gap-2)' : '0 var(--gap-3)', fontSize: 'var(--texto-micro)', fontWeight: 600, border: 'none', whiteSpace: 'nowrap',
                   background: effort === opt ? 'var(--petrol)' : 'transparent',
                   color: effort === opt ? '#fff' : 'var(--pen3)',
                   cursor: 'pointer', textTransform: 'capitalize',
@@ -467,26 +469,33 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
           {onStop ? (
             // Uma resposta leva de 13 a 57 s. Sem "Parar", quem mandou a pergunta
             // errada esperava tudo isso — pagando o modelo — para poder corrigir.
+            // No celular Parar e Enviar viram só ícone: com texto, a linha não
+            // cabia em 320px e o "Detalhado" ficava escondido atrás do Enviar.
+            // O `aria-label` mantém o nome para leitor de tela (e para os testes).
             <button
               onClick={onStop}
+              aria-label="Parar"
               style={{
                 // Era `height: 32` fixo — no botão que se aperta com pressa.
-                minHeight: 'var(--toque-min)', padding: '0 14px', borderRadius: 10,
+                minHeight: 'var(--toque-min)', padding: isMobile ? 0 : '0 14px', borderRadius: 10,
+                minWidth: 'var(--toque-min)', justifyContent: 'center', flexShrink: 0,
                 border: '1px solid var(--line)', background: '#fff', color: 'var(--ink)',
                 fontWeight: 700, fontSize: 'var(--texto-apoio)',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
-              <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 2, background: 'currentColor' }} />
-              Parar
+              <span aria-hidden="true" style={{ width: isMobile ? 12 : 9, height: isMobile ? 12 : 9, borderRadius: 2, background: 'currentColor' }} />
+              {!isMobile && 'Parar'}
             </button>
           ) : (
             <button
               onClick={submit}
               disabled={!filled || disabled || sendBlocked || extraindo}
               title={extraindo ? 'Aguarde o processamento do anexo' : undefined}
+              aria-label="Enviar"
               style={{
-                minHeight: 'var(--toque-min)', padding: '0 14px', borderRadius: 10, border: 'none',
+                minHeight: 'var(--toque-min)', padding: isMobile ? 0 : '0 14px', borderRadius: 10, border: 'none',
+                minWidth: 'var(--toque-min)', justifyContent: 'center', flexShrink: 0,
                 background: filled && !sendBlocked && !extraindo ? 'var(--green)' : 'var(--fill)',
                 color: filled && !sendBlocked && !extraindo ? 'var(--ink)' : 'var(--pen3)',
                 fontWeight: 700, fontSize: 'var(--texto-apoio)',
@@ -494,8 +503,8 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                 transition: 'background 0.15s, color 0.15s',
               }}
             >
-              Enviar
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              {!isMobile && 'Enviar'}
+              <svg width={isMobile ? 18 : 11} height={isMobile ? 18 : 11} viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3 8 H13 M9 4 L13 8 L9 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
