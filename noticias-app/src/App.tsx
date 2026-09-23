@@ -18,6 +18,7 @@ import { buscarMeusTemas } from './api/news';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
 import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
 import { LoginOtp } from '@shared/embed/LoginOtp';
+import { mensagemDaIdentidade, TelaDeEspera } from '@shared/embed/TelaDeEspera';
 import { clearToken, descartarSessaoDesteNavegador, getToken, isTokenExpired, setToken } from './lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -146,7 +147,11 @@ export default function App() {
   }, [identidade.fase, identidade.erro]);
 
   if (estado.fase === 'carregando') {
-    return <div style={aviso}>Carregando…</div>;
+    // Mesma tela de espera do chat e das calculadoras. Enquanto a Waid não
+    // respondeu, diz que está confirmando quem é o médico; depois, que está
+    // buscando as notícias dele.
+    const esperandoWaid = identidade.fase === 'pedindo' || identidade.fase === 'trocando';
+    return <TelaDeEspera mensagem={esperandoWaid ? mensagemDaIdentidade(identidade.fase) : 'Carregando suas notícias…'} />;
   }
 
   if (estado.fase === 'erro') {
