@@ -35,7 +35,7 @@ export function ClarificationPrompt({ onSend }: Props) {
         padding: 14, boxShadow: '0 4px 18px rgba(0,209,125,0.08)',
         transition: 'border-color 0.15s',
       }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--petrol)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--petrol)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} />
           Responda as perguntas acima para continuar
         </div>
@@ -48,20 +48,21 @@ export function ClarificationPrompt({ onSend }: Props) {
           placeholder="Ex: Paciente masculino, 62 anos. Sintomas há 3 dias. HAS e DM2 controlados."
           style={{
             width: '100%', border: 'none', outline: 'none', resize: 'none',
-            background: 'transparent', fontSize: 13.5, color: 'var(--ink)',
+            // 16px, e não 13,5: abaixo disso o iOS dá zoom ao focar o campo.
+            background: 'transparent', fontSize: 'var(--texto-campo)', color: 'var(--ink)',
             lineHeight: 1.5, minHeight: 52,
           }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
+          {!isMobile && <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
           <button
             onClick={submit}
             disabled={!filled}
             style={{
-              height: 32, padding: '0 14px', borderRadius: 10, border: 'none',
+              minHeight: 'var(--toque-min)', padding: '0 14px', borderRadius: 10, border: 'none',
               background: filled ? 'var(--green)' : 'var(--fill)',
               color: filled ? 'var(--ink)' : 'var(--pen3)',
-              fontWeight: 700, fontSize: 12,
+              fontWeight: 700, fontSize: 'var(--texto-apoio)',
               display: 'flex', alignItems: 'center', gap: 6,
               transition: 'background 0.15s, color 0.15s',
             }}

@@ -6,40 +6,59 @@ import { ModeChip } from './ModeChip';
 import type { CitacaoBruta, Message, PubmedValidation } from '../api/orquestrador';
 import { normalizarCitacoes } from '../lib/citacoes';
 import { comMarcadoresDeCitacao } from '../lib/marcadoresCitacao';
-import { useIsMobile } from '../hooks/useIsMobile';
 
 const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de responsabilidade exclusiva do médico assistente.';
 
 // Defined outside component to keep reference stable across renders
+/**
+ * Estilos do corpo da resposta.
+ *
+ * Tudo aqui usa os tokens de `shared/design/tokens.css`: no telefone os valores
+ * sobem um degrau sozinhos, sem `isMobile`. Antes desta passada o corpo da
+ * resposta era 12–15px fixo — o texto que o médico mais lê era o menor da tela.
+ *
+ * As tabelas continuam com rolagem horizontal própria (`overflowX`), e não
+ * quebrando as células: tabela clínica com coluna espremida troca um problema
+ * de leitura por um pior, que é ler o valor na linha errada.
+ */
 const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
   table: ({ children }) => (
-    <div style={{ overflowX: 'auto', margin: '8px 0' }}>
-      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>{children}</table>
+    <div className="rolagem" style={{ overflowX: 'auto', margin: 'var(--gap-2) 0', maxWidth: '100%' }}>
+      {/* `wordBreak: normal` desfaz o `break-word` herdado do corpo da
+          resposta. Com ele, o navegador espremia as colunas para caber na tela
+          quebrando palavras ao meio — "Apixaba/na", "Dabigatr/ana" numa tabela
+          de dose. Sem ele a tabela fica mais larga que a tela e rola dentro do
+          próprio contêiner, que é o comportamento pretendido. */}
+      <table style={{ borderCollapse: 'collapse', minWidth: '100%', fontSize: 'var(--texto-apoio)', wordBreak: 'normal', overflowWrap: 'normal' }}>{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead style={{ background: 'var(--fill2)' }}>{children}</thead>,
   th: ({ children }) => (
-    <th style={{ border: '1px solid var(--line2)', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</th>
+    <th style={{ border: '1px solid var(--line2)', padding: 'var(--gap-2) var(--gap-3)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</th>
   ),
   td: ({ children }) => (
-    <td style={{ border: '1px solid var(--line2)', padding: '6px 10px', verticalAlign: 'top' }}>{comMarcadoresDeCitacao(children)}</td>
+    <td style={{ border: '1px solid var(--line2)', padding: 'var(--gap-2) var(--gap-3)', verticalAlign: 'top' }}>{comMarcadoresDeCitacao(children)}</td>
   ),
   tr: ({ children }) => <tr style={{ borderBottom: '1px solid var(--line2)' }}>{children}</tr>,
-  p: ({ children }) => <p style={{ margin: '0 0 8px' }}>{comMarcadoresDeCitacao(children)}</p>,
+  p: ({ children }) => <p style={{ margin: '0 0 var(--gap-2)' }}>{comMarcadoresDeCitacao(children)}</p>,
   strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
   em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
-  ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ul>,
-  ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ol>,
-  li: ({ children }) => <li style={{ marginBottom: 2 }}>{comMarcadoresDeCitacao(children)}</li>,
-  h1: ({ children }) => <h1 style={{ fontSize: 15, fontWeight: 700, margin: '12px 0 6px' }}>{children}</h1>,
-  h2: ({ children }) => <h2 style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px' }}>{children}</h2>,
-  h3: ({ children }) => <h3 style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>{children}</h3>,
+  ul: ({ children }) => <ul style={{ margin: 'var(--gap-1) 0 var(--gap-2)', paddingLeft: 'var(--gap-5)' }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: 'var(--gap-1) 0 var(--gap-2)', paddingLeft: 'var(--gap-5)' }}>{children}</ol>,
+  li: ({ children }) => <li style={{ marginBottom: 'var(--gap-1)' }}>{comMarcadoresDeCitacao(children)}</li>,
+  h1: ({ children }) => <h1 style={{ fontSize: 'var(--texto-titulo)', fontWeight: 700, margin: 'var(--gap-3) 0 var(--gap-2)' }}>{children}</h1>,
+  h2: ({ children }) => <h2 style={{ fontSize: 'var(--texto-corpo)', fontWeight: 700, margin: 'var(--gap-3) 0 var(--gap-1)' }}>{children}</h2>,
+  h3: ({ children }) => <h3 style={{ fontSize: 'var(--texto-corpo)', fontWeight: 600, margin: 'var(--gap-2) 0 var(--gap-1)' }}>{children}</h3>,
+  // Bloco de código quebra linha (`pre-wrap`) em vez de rolar: no telefone uma
+  // barra de rolagem por bloco é pior que a linha quebrada. `quebra-segura`
+  // cobre o resto — DOI, URL de fonte e nome de medicamento não têm onde
+  // quebrar e empurravam a coluna inteira para fora da tela.
   code: ({ children, className }) =>
     className
-      ? <code style={{ display: 'block', background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', margin: '4px 0' }}>{children}</code>
-      : <code style={{ background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 4, padding: '1px 5px', fontSize: 12, fontFamily: 'monospace' }}>{children}</code>,
+      ? <code className="quebra-segura" style={{ display: 'block', background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 'var(--raio-1)', padding: 'var(--gap-2) var(--gap-3)', fontSize: 'var(--texto-micro)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', margin: 'var(--gap-1) 0' }}>{children}</code>
+      : <code className="quebra-segura" style={{ background: 'var(--fill2)', border: '1px solid var(--line2)', borderRadius: 'var(--raio-1)', padding: '1px 5px', fontSize: 'var(--texto-micro)', fontFamily: 'monospace' }}>{children}</code>,
   pre: ({ children }) => <>{children}</>,
-  blockquote: ({ children }) => <blockquote style={{ borderLeft: '3px solid var(--line2)', paddingLeft: 12, margin: '4px 0', color: 'var(--pen2)' }}>{children}</blockquote>,
+  blockquote: ({ children }) => <blockquote style={{ borderLeft: '3px solid var(--line2)', paddingLeft: 'var(--gap-3)', margin: 'var(--gap-1) 0', color: 'var(--pen2)' }}>{children}</blockquote>,
 };
 
 const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [rehypeSanitize];
@@ -78,7 +97,6 @@ interface Props {
 }
 
 export function ChatView({ messages, streaming, streamingMode, finalizing, scrollToBottomTrigger, conversationOpenedTrigger, loading, onRetry }: Props) {
-  const isMobile = useIsMobile();
   const areaRef = useRef<HTMLDivElement>(null);
   const turnoRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -131,8 +149,10 @@ export function ChatView({ messages, streaming, streamingMode, finalizing, scrol
   if (turnos.length === 0) turnos.push({ inicio: 0, mensagens: [] });
 
   return (
-    <div ref={areaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 20px 0' : '24px 40px 0', display: 'flex', justifyContent: 'center' }}>
-      <div style={{ width: 720, maxWidth: '100%', paddingBottom: 16 }}>
+    <div ref={areaRef} className="rolagem" style={{ flex: 1, padding: 'var(--gap-5) var(--margem-tela) 0', display: 'flex', justifyContent: 'center' }}>
+      {/* `--coluna-leitura` é `min(720px, 100%)`: mesma largura no desktop, e no
+          telefone acompanha a tela em vez de forçar rolagem horizontal. */}
+      <div style={{ width: 'var(--coluna-leitura)', paddingBottom: 'var(--gap-4)' }}>
         {turnos.map((turno, n) => {
           const ultimo = n === turnos.length - 1;
           return (
@@ -150,9 +170,10 @@ export function ChatView({ messages, streaming, streamingMode, finalizing, scrol
                 <button
                   onClick={onRetry}
                   style={{
-                    margin: '0 0 16px', padding: '7px 14px', borderRadius: 8,
+                    margin: '0 0 16px', padding: '0 var(--gap-4)', borderRadius: 8,
+                    minHeight: 'var(--toque-min)',
                     border: '1px solid var(--line)', background: '#fff', color: 'var(--petrol)',
-                    fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                    fontSize: 'var(--texto-apoio)', fontWeight: 600, cursor: 'pointer',
                   }}
                 >
                   Tentar novamente
@@ -164,7 +185,7 @@ export function ChatView({ messages, streaming, streamingMode, finalizing, scrol
           );
         })}
         {loading && (
-          <p role="status" style={{ fontSize: 13, color: 'var(--pen2)', margin: '8px 0' }}>
+          <p role="status" style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', margin: '8px 0' }}>
             Carregando conversa…
           </p>
         )}
@@ -187,7 +208,7 @@ const UserMessage = memo(function UserMessage({ content, attachments }: {
 }) {
   return (
     <div data-testid="user-message" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
-      <div style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+      <div style={{ maxWidth: 'var(--balao-usuario)', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 'var(--gap-1)' }}>
         {attachments && attachments.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, justifyContent: 'flex-end' }}>
             {attachments.map((att, idx) => (
@@ -198,7 +219,7 @@ const UserMessage = memo(function UserMessage({ content, attachments }: {
                   display: 'inline-flex', alignItems: 'center', gap: 5,
                   padding: '3px 9px', borderRadius: 8,
                   background: 'var(--fill2)', border: '1px solid var(--line2)',
-                  fontSize: 11, color: 'var(--pen2)',
+                  fontSize: 'var(--texto-micro)', color: 'var(--pen2)',
                 }}
               >
                 {ATTACHMENT_ICON[att.file_type] ?? '📎'}
@@ -210,10 +231,10 @@ const UserMessage = memo(function UserMessage({ content, attachments }: {
           </div>
         )}
         {content && (
-          <div style={{
+          <div className="quebra-segura" style={{
             background: 'var(--ink)', color: '#fff',
-            padding: '11px 14px', borderRadius: 14, borderBottomRightRadius: 4,
-            fontSize: 13, lineHeight: 1.5,
+            padding: 'var(--gap-3) var(--gap-4)', borderRadius: 'var(--raio-3)', borderBottomRightRadius: 'var(--raio-1)',
+            fontSize: 'var(--texto-corpo)', lineHeight: 'var(--linha-corpo)',
           }}>{content}</div>
         )}
       </div>
@@ -241,7 +262,7 @@ function AvisoFallback() {
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 6,
         margin: '0 0 8px', padding: '6px 10px',
-        fontSize: 11.5, lineHeight: 1.45,
+        fontSize: 'var(--texto-micro)', lineHeight: 1.45,
         color: 'var(--pen2)', background: 'var(--fill2)',
         border: '1px solid var(--line2)', borderRadius: 6,
       }}
@@ -277,7 +298,7 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
               ? <ModeChip mode={mode} confidence={confidence} />
               : <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                  padding: '4px 10px', fontSize: 'var(--texto-micro)', fontWeight: 600,
                   color: 'var(--petrol)', background: 'var(--fill2)',
                   border: '1px solid var(--line2)', borderRadius: 999,
                 }}>{mode}</span>
@@ -285,19 +306,26 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
           </div>
         )}
         {isFallback && <AvisoFallback />}
-        <div style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.55, wordBreak: 'break-word' }}>
+        {/* O texto que o médico mais lê. Estava fixo em 13px — a varredura
+            por fontes ≤ 12,5 passou por ele. */}
+        <div style={{ fontSize: 'var(--texto-corpo)', color: 'var(--ink)', lineHeight: 'var(--linha-corpo)', wordBreak: 'break-word' }}>
           {rendered}
         </div>
         {fontes.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line2)' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>Fontes</div>
-            <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>Fontes</div>
+            {/* Sem `gap`: o espaço entre as fontes agora vem da altura mínima
+                de cada link, que é o alvo de toque. Com os dois, a lista
+                dobraria de tamanho. */}
+            <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column' }}>
               {fontes.map((fonte, i) => (
-                <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+                <li key={i} className="quebra-segura" style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
                   <a href={fonte.url} target="_blank" rel="noopener noreferrer"
                     title={fonte.url}
                     style={{
                       color: 'var(--petrol)', textDecoration: 'none',
+                      // Alvo de toque: o link tinha a altura da linha (~19px).
+                      display: 'inline-flex', alignItems: 'center', minHeight: 'var(--toque-min)',
                       // Título de artigo quebra em palavras; domínio, que não
                       // tem espaço, precisa de `break-all` para não estourar a
                       // largura da coluna no celular.
@@ -313,7 +341,7 @@ const AssistantMessage = memo(function AssistantMessage({ content, mode, confide
         )}
         {pubmed_validation && <PubmedSection validation={pubmed_validation} />}
         <div style={{
-          marginTop: 14, fontSize: 11, color: 'var(--pen3)',
+          marginTop: 14, fontSize: 'var(--texto-micro)', color: 'var(--pen3)',
           borderTop: '1px solid var(--line2)', paddingTop: 10,
         }}>
           {DISCLAIMER}
@@ -331,12 +359,12 @@ function PubmedSection({ validation }: { validation: PubmedValidation }) {
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line2)' }}>
       {cited_verified.length > 0 && (
         <>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>
+          <div style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 4 }}>
             Referências verificadas no PubMed
           </div>
           <ol style={{ margin: '0 0 6px', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {cited_verified.map((c, i) => (
-              <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+              <li key={i} className="quebra-segura" style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
                 {c.pmid
                   ? <a
                       href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
@@ -358,17 +386,20 @@ function PubmedSection({ validation }: { validation: PubmedValidation }) {
           <button
             onClick={() => setShowGuidelines(v => !v)}
             style={{
+              // `padding: 0` deixava como alvo só o texto de 11px. A altura
+              // mínima aumenta a área tocável sem mudar o desenho.
               background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              fontSize: 11, color: 'var(--petrol)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+              minHeight: 'var(--toque-min)',
+              fontSize: 'var(--texto-micro)', color: 'var(--petrol)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
             }}
           >
-            <span style={{ fontSize: 10 }}>{showGuidelines ? '▾' : '▸'}</span>
+            <span style={{ fontSize: 'var(--texto-micro)' }}>{showGuidelines ? '▾' : '▸'}</span>
             Diretrizes recentes relacionadas ({newer_guidelines.length})
           </button>
           {showGuidelines && (
             <ul style={{ margin: '4px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {newer_guidelines.map((a, i) => (
-                <li key={i} style={{ fontSize: 11.5, color: 'var(--pen2)' }}>
+                <li key={i} className="quebra-segura" style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
                   <a
                     href={`https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`}
                     target="_blank"
@@ -444,19 +475,19 @@ function ThinkingIndicator({ mode }: { mode?: string }) {
               animationDelay: `${i * 0.2}s`,
             }} />
           ))}
-          <span style={{ fontSize: 12, color: 'var(--pen2)', fontWeight: 500 }}>
+          <span style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', fontWeight: 500 }}>
             {label}
           </span>
           {longo && segundos > 0 && (
             // O cronômetro é o que mais separa "trabalhando" de "travado":
             // um número que muda prova que a página está viva.
-            <span style={{ fontSize: 11, color: 'var(--pen3)', fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', fontVariantNumeric: 'tabular-nums' }}>
               {segundos}s
             </span>
           )}
         </div>
         {longo && segundos >= longo.avisoSegundos && (
-          <p style={{ fontSize: 11.5, color: 'var(--pen3)', margin: '6px 0 0', lineHeight: 1.45, maxWidth: 420 }}>
+          <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', margin: '6px 0 0', lineHeight: 1.45, maxWidth: 420 }}>
             Consultas a bases oficiais levam mais tempo que uma busca comum —
             normalmente entre 1 e 2 minutos. A resposta vem com os números e a
             fonte de cada um.
@@ -474,7 +505,7 @@ function ReferencesPending() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
-      padding: '2px 0 8px 42px', fontSize: 12, color: 'var(--pen2)',
+      padding: '2px 0 8px 42px', fontSize: 'var(--texto-apoio)', color: 'var(--pen2)',
     }}>
       <div style={{
         width: 5, height: 5, borderRadius: '50%', background: 'var(--pen2)',

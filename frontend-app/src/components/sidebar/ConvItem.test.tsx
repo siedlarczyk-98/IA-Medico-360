@@ -232,10 +232,14 @@ describe('Em tela de toque', () => {
   });
 
   it('o alvo de toque tem tamanho de dedo', () => {
+    // O valor vem de `--toque-min` (44px no dedo). O jsdom não resolve
+    // variável CSS, então o que se confere é que o botão USA o token — e não um
+    // número solto que alguém possa encolher sem ver a regra.
     simularDispositivo(true);
     renderItem();
 
-    expect(menu()).toHaveStyle({ padding: '10px' });
+    expect(menu().style.minWidth).toBe('var(--toque-min)');
+    expect(menu().style.minHeight).toBe('var(--toque-min)');
   });
 
   it('com mouse o botão continua escondido até o hover', () => {

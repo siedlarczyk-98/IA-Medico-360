@@ -62,7 +62,7 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
   return (
     <div style={{ marginBottom: 2 }}>
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '3px 4px', borderRadius: 6, background: dragOver ? 'var(--fill2)' : 'transparent', transition: 'background 0.1s' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 4px', borderRadius: 6, background: dragOver ? 'var(--fill2)' : 'transparent', transition: 'background 0.1s' }}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={e => { e.preventDefault(); setDragOver(false); onDropConv?.(folder.id); }}
@@ -74,7 +74,7 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
           // é o que diz se a pasta está aberta sem depender da seta girada.
           aria-label={`Pasta ${folder.name}`}
           aria-expanded={open}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 4px', minHeight: 'var(--toque-min)', display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
             style={{ flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
@@ -91,10 +91,10 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
               onBlur={submitRename}
               onKeyDown={e => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') { setEditName(folder.name); setEditing(false); } }}
               onClick={e => e.stopPropagation()}
-              style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', background: 'transparent', border: 'none', outline: '1px solid var(--green)', borderRadius: 3, padding: '0 3px', minWidth: 0, width: '100%' }}
+              style={{ fontSize: 'var(--texto-campo)', fontWeight: 600, color: 'var(--ink)', background: 'transparent', border: 'none', outline: '1px solid var(--green)', borderRadius: 3, padding: '0 3px', minWidth: 0, width: '100%' }}
             />
           ) : (
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {folder.name}
             </span>
           )}
@@ -103,7 +103,11 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
         <button
           onClick={e => { e.stopPropagation(); onNewInFolder(folder.id, folder.name); }}
           title="Nova consulta nesta pasta"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center', flexShrink: 0 }}
+          // Era 15×17px e sem nome acessível — o menor alvo do app, e o leitor
+          // de tela anunciava só "botão".
+          aria-label={`Nova consulta na pasta ${folder.name}`}
+          className="toque"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 0, borderRadius: 4, flexShrink: 0 }}
         >
           <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
             <path d="M8 3 V13 M3 8 H13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -116,7 +120,8 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
             aria-label={`Opções da pasta ${folder.name}`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: '2px 3px', borderRadius: 4, display: 'flex', alignItems: 'center' }}
+            className="toque"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 0, borderRadius: 4 }}
           >
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="3" r="1.3" fill="currentColor" />
@@ -161,20 +166,22 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
                 </button>
               ) : (
                 <div style={{ padding: '8px 12px' }}>
-                  <p style={{ fontSize: 11.5, color: 'var(--ink)', margin: '0 0 6px', lineHeight: 1.4 }}>
+                  <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--ink)', margin: '0 0 6px', lineHeight: 1.4 }}>
                     {conversations.length > 0
                       ? `${conversations.length} conversa${conversations.length > 1 ? 's' : ''} voltará${conversations.length > 1 ? 'ão' : ''} para "Sem pasta".`
                       : 'Confirmar exclusão?'
                     }
                   </p>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  {/* Excluir e Cancelar lado a lado, com ~24px de altura e 6px entre eles:
+                      a ação destrutiva ficava a um erro de dedo do cancelar. */}
+                  <div style={{ display: 'flex', gap: 'var(--gap-2)' }}>
                     <button
                       onClick={() => { onDelete(folder.id); setMenuOpen(false); setConfirmDelete(false); }}
-                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                      style={{ flex: 1, fontSize: 'var(--texto-micro)', minHeight: 'var(--toque-min)', padding: 0, borderRadius: 5, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
                     >Excluir</button>
                     <button
                       onClick={() => setConfirmDelete(false)}
-                      style={{ flex: 1, fontSize: 11.5, padding: '4px 0', borderRadius: 5, border: '1px solid var(--line2)', background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}
+                      style={{ flex: 1, fontSize: 'var(--texto-micro)', minHeight: 'var(--toque-min)', padding: 0, borderRadius: 5, border: '1px solid var(--line2)', background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}
                     >Cancelar</button>
                   </div>
                 </div>
@@ -187,7 +194,7 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
       {open && (
         <div style={{ paddingLeft: 12 }}>
           {conversations.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--pen3)', padding: '4px 10px' }}>Vazia</div>
+            <div style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', padding: '4px 10px' }}>Vazia</div>
           ) : (
             conversations.map(conv => (
               <ConvItem

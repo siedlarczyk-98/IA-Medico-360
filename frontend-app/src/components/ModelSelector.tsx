@@ -30,7 +30,7 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false, has
   }
 
   if (loading) return (
-    <div style={{ padding: isMobile ? '12px 20px' : '12px 40px', fontSize: 12, color: 'var(--pen3)' }}>
+    <div style={{ padding: isMobile ? '12px 20px' : '12px 40px', fontSize: 'var(--texto-apoio)', color: 'var(--pen3)' }}>
       Carregando modelos…
     </div>
   );
@@ -43,7 +43,7 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false, has
       borderBottom: '1px solid var(--line2)',
       display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
     }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--pen3)', marginRight: 4 }}>
+      <span style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen3)', marginRight: 4 }}>
         MODELOS
       </span>
       {available.map(m => {
@@ -62,8 +62,8 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false, has
             onClick={() => toggle(m.model_id)}
             title={tooltipText}
             style={{
-              padding: '4px 10px', borderRadius: 999,
-              fontSize: 11, fontWeight: 600,
+              minHeight: 'var(--toque-min)', padding: '0 var(--gap-3)', borderRadius: 999,
+              fontSize: 'var(--texto-micro)', fontWeight: 600,
               border: `1px solid ${active ? 'transparent' : noVision ? '#f59e0b' : 'var(--line2)'}`,
               background: active ? 'var(--mint)' : '#fff',
               color: active ? 'var(--petrol)' : noVision ? '#b45309' : 'var(--pen2)',
@@ -77,11 +77,11 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false, has
         );
       })}
       {locked ? (
-        <span style={{ fontSize: 10.5, color: 'var(--pen3)', marginLeft: 4, fontStyle: 'italic' }}>
+        <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', marginLeft: 4, fontStyle: 'italic' }}>
           Para trocar de modelo, inicie uma nova consulta
         </span>
       ) : selected.length > 0 && (
-        <span style={{ fontSize: 10.5, color: 'var(--pen3)', marginLeft: 4 }}>
+        <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', marginLeft: 4 }}>
           {selected.length}/4 selecionados
         </span>
       )}
@@ -93,7 +93,7 @@ export function ModelSelector({ selected, onChange, max = 4, locked = false, has
           width: '100%', marginTop: 6,
           padding: '5px 10px', borderRadius: 8,
           background: '#fffbeb', border: '1px solid #fde68a',
-          fontSize: 11, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 'var(--texto-micro)', color: '#92400e', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           📝 Perplexity não suporta visão — analisará uma descrição automática da imagem gerada por IA, não os pixels reais.
         </div>

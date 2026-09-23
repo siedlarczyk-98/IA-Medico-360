@@ -20,10 +20,13 @@ export function Topbar({ title, onMenuToggle }: Props) {
       flexShrink: 0,
     }}>
       {isMobile && (
+        // A única porta para a gaveta no celular: era 34px e sem nome
+        // acessível — o leitor de tela anunciava só "botão".
         <button
           onClick={onMenuToggle}
+          aria-label="Abrir menu"
           style={{
-            width: 34, height: 34, borderRadius: 8, border: '1px solid var(--line2)',
+            width: 'var(--toque-min)', height: 'var(--toque-min)', borderRadius: 8, border: '1px solid var(--line2)',
             background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'var(--pen)', flexShrink: 0, cursor: 'pointer',
           }}
@@ -35,7 +38,7 @@ export function Topbar({ title, onMenuToggle }: Props) {
       )}
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title}
         </span>
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--pen3)', opacity: 0.6, flexShrink: 0 }}>

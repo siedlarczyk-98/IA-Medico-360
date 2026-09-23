@@ -339,3 +339,61 @@ describe('Menu do usuário (Editar perfil / Sair)', () => {
     expect(within(trilho()!).getByText('Editar perfil')).toBeInTheDocument();
   });
 });
+
+/**
+ * O "i" do limite semanal só abria com `onMouseEnter`: no celular, tocar nele
+ * não fazia nada. E a primeira correção — alternar no clique — também falhava
+ * no aparelho: o navegador emula `mouseenter` antes do `click` num toque, então
+ * o balão abria e fechava no mesmo gesto. `userEvent.pointer` com `TouchA`
+ * reproduz essa sequência inteira; `fireEvent.click` não, e passaria verde.
+ */
+describe('explicação do limite semanal', () => {
+  const EXPLICACAO = /cota semanal de uso/i;
+
+  beforeEach(async () => {
+    const { getUserUsage } = await import('../api/usage');
+    vi.mocked(getUserUsage).mockResolvedValue({
+      has_limit: true, usage_percentage: 40, week_reset_at: null,
+    } as Awaited<ReturnType<typeof getUserUsage>>);
+  });
+
+  function renderAberta() {
+    definirLargura(375);
+    return renderComProvedores(
+      <Sidebar onNew={vi.fn()} onSelect={vi.fn()} open onToggle={vi.fn()} />,
+    );
+  }
+
+  it('abre com um toque e continua aberta', async () => {
+    const user = userEvent.setup();
+    renderAberta();
+    const icone = await screen.findByRole('button', { name: /limite semanal/i });
+
+    await user.pointer({ keys: '[TouchA]', target: icone });
+
+    expect(screen.getByText(EXPLICACAO)).toBeInTheDocument();
+  });
+
+  it('fecha com um segundo toque', async () => {
+    const user = userEvent.setup();
+    renderAberta();
+    const icone = await screen.findByRole('button', { name: /limite semanal/i });
+
+    await user.pointer({ keys: '[TouchA]', target: icone });
+    await user.pointer({ keys: '[TouchA]', target: icone });
+
+    expect(screen.queryByText(EXPLICACAO)).not.toBeInTheDocument();
+  });
+
+  it('com mouse continua abrindo ao passar por cima', async () => {
+    const user = userEvent.setup();
+    renderAberta();
+    const icone = await screen.findByRole('button', { name: /limite semanal/i });
+
+    await user.hover(icone);
+    expect(screen.getByText(EXPLICACAO)).toBeInTheDocument();
+
+    await user.unhover(icone);
+    expect(screen.queryByText(EXPLICACAO)).not.toBeInTheDocument();
+  });
+});

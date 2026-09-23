@@ -102,16 +102,16 @@ export function EmptyState({ userName, selectedMode, onModeSelect }: Props) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--petrol)', marginBottom: 6 }}>
                   {icons[s.icon]}
-                  <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                  <span style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>
                     {s.title}
                   </span>
                   {active && (
-                    <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--petrol)', background: 'rgba(1,71,81,0.1)', borderRadius: 4, padding: '2px 6px' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--petrol)', background: 'rgba(1,71,81,0.1)', borderRadius: 4, padding: '2px 6px' }}>
                       selecionado
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 12.5, color: 'var(--pen)', lineHeight: 1.45 }}>{s.desc}</div>
+                <div style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen)', lineHeight: 1.45 }}>{s.desc}</div>
               </button>
             );
           })}

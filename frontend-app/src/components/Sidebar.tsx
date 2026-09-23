@@ -6,6 +6,7 @@ import { listConversations, type ConversationSummary } from '../api/conversation
 import { listFolders, createFolder, renameFolder, updateFolder, deleteFolder, moveConversation, bulkMoveConversations, type Folder, type FolderKind } from '../api/folders';
 import { FolderModal } from './FolderModal';
 import { logout } from '../lib/auth';
+import { abrirSuporte, suporteDisponivel } from '../lib/intercom';
 import { ProfileModal } from './ProfileModal';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { ConvItem } from './sidebar/ConvItem';
@@ -199,6 +200,11 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const [hovering, setHovering] = useState(false);
 
   const [showUsageTip, setShowUsageTip] = useState(false);
+  // Qual ponteiro tocou por último no ícone do limite. No toque o navegador
+  // EMULA eventos de mouse: um tap dispara `mouseenter` e, logo depois,
+  // `click`. Com hover abrindo e clique alternando, o balão abria e fechava no
+  // mesmo toque. Separar por `pointerType` é o que deixa cada um com um papel.
+  const ponteiroDoTip = useRef<string>('mouse');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   // `null` = fechado; `'new'` = criando; um Folder = editando aquele.
@@ -408,7 +414,17 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                   <path d="M2 14c0-2.5 2.7-4 6-4s6 1.5 6 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 </svg>
                 Editar perfil
-              </button>
+                </button>
+                {suporteDisponivel() && (
+                  // No celular o balão do Intercom fica escondido (cobria o
+                  // Enviar); o suporte passa a abrir por aqui. Ver `lib/intercom`.
+                  <button onClick={() => { setUserMenuOpen(false); abrirSuporte(); }} style={menuItemStyle}>
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                      <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                    </svg>
+                    Falar com o suporte
+                  </button>
+                )}
               <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
               <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -437,6 +453,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       display: 'flex', flexDirection: 'column',
       background: '#fbfdf7',
       ...(isMobile ? {
+        // No telefone a gaveta é o que o médico toca: mais largura dá linhas
+        // de conversa legíveis sem reticências na metade do título. 85vw
+        // deixa uma faixa do chat visível — é onde se toca para fechar.
+        width: 'min(320px, 85vw)',
         position: 'fixed', left: 0, top: 0, bottom: 0,
         height: '100dvh', zIndex: 200,
         boxShadow: '2px 0 20px rgba(0,0,0,0.15)',
@@ -513,7 +533,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       )}
       {isMobile && (
         <div style={{ padding: '14px 14px 0', display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--pen3)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
+          {/* Era 16px de ícone + 4 de padding = 24px de alvo, sem nome
+              acessível — o único jeito de fechar a gaveta além de tocar fora. */}
+          <button
+            onClick={onToggle}
+            aria-label="Fechar menu"
+            className="toque"
+            style={{ background: 'none', border: 'none', color: 'var(--pen3)', cursor: 'pointer', padding: 0 }}
+          >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
@@ -526,8 +553,9 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           onClick={closeAfter(onNew)}
           style={{
             width: '100%', background: 'var(--ink)', color: '#fff',
-            border: 'none', borderRadius: 10, padding: '10px 12px',
-            fontSize: 13, fontWeight: 600,
+            border: 'none', borderRadius: 10, padding: '0 12px',
+            minHeight: 'var(--toque-min)',
+            fontSize: 'var(--texto-apoio)', fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
             cursor: 'pointer',
           }}
@@ -546,8 +574,9 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
           style={{
             width: '100%', marginTop: 6,
             background: 'none', color: 'var(--pen)',
-            border: '1px solid var(--line2)', borderRadius: 10, padding: '8px 12px',
-            fontSize: 12.5, fontWeight: 600,
+            border: '1px solid var(--line2)', borderRadius: 10, padding: '0 12px',
+            minHeight: 'var(--toque-min)',
+            fontSize: 'var(--texto-apoio)', fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center',
             cursor: 'pointer',
           }}
@@ -566,7 +595,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         {folders.length > 0 && (
           <div style={{ marginBottom: 8 }}>
             <div style={{ padding: '6px 10px' }}>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)' }}>
+              <span style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)' }}>
                 Pastas
               </span>
             </div>
@@ -603,14 +632,14 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         {/* Grupos por data */}
         {groups.length === 0 && folders.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 80 }}>
-            <p style={{ fontSize: 12, color: 'var(--pen3)', textAlign: 'center', padding: '0 16px' }}>
+            <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen3)', textAlign: 'center', padding: '0 16px' }}>
               Nenhuma consulta anterior
             </p>
           </div>
         ) : (
           groups.map(group => (
             <div key={group.label} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)', padding: '6px 10px' }}>
+              <div style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--pen3)', padding: '6px 10px' }}>
                 {group.label}
               </div>
               {group.items.map(conv => (
@@ -636,27 +665,27 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
       {selectionMode && (
         <div style={{ padding: '8px 12px', borderTop: '1px solid var(--line2)', background: 'var(--fill)', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink)' }}>{selectedConvIds.size} selecionada{selectedConvIds.size > 1 ? 's' : ''}</span>
-            <button onClick={() => setSelectedConvIds(new Set())} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--pen3)', cursor: 'pointer' }}>Limpar</button>
+            <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)' }}>{selectedConvIds.size} selecionada{selectedConvIds.size > 1 ? 's' : ''}</span>
+            <button onClick={() => setSelectedConvIds(new Set())} className="toque" style={{ background: 'none', border: 'none', fontSize: 'var(--texto-micro)', color: 'var(--pen3)', cursor: 'pointer', padding: '0 var(--gap-2)' }}>Limpar</button>
           </div>
           {showBulkFolderPicker ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <button onClick={() => { bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId: null }); setShowBulkFolderPicker(false); }}
-                style={{ ...ctxItemStyle, fontSize: 11.5, padding: '5px 8px', color: 'var(--pen2)' }}>
+                style={{ ...ctxItemStyle, padding: '0 8px', color: 'var(--pen2)' }}>
                 Sem pasta
               </button>
               {folders.map(f => (
                 <button key={f.id} onClick={() => bulkMoveMutation.mutate({ ids: [...selectedConvIds], folderId: f.id })}
-                  style={{ ...ctxItemStyle, fontSize: 11.5, padding: '5px 8px' }}>
+                  style={{ ...ctxItemStyle, padding: '0 8px' }}>
                   {f.name}
                 </button>
               ))}
-              <button onClick={() => setShowBulkFolderPicker(false)} style={{ ...ctxItemStyle, fontSize: 11, padding: '4px 8px', color: 'var(--pen3)' }}>Cancelar</button>
+              <button onClick={() => setShowBulkFolderPicker(false)} style={{ ...ctxItemStyle, padding: '0 8px', color: 'var(--pen3)' }}>Cancelar</button>
             </div>
           ) : (
             <button
               onClick={() => setShowBulkFolderPicker(true)}
-              style={{ width: '100%', padding: '6px 0', borderRadius: 7, border: 'none', background: 'var(--ink)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              style={{ width: '100%', minHeight: 'var(--toque-min)', padding: '0', borderRadius: 7, border: 'none', background: 'var(--ink)', color: '#fff', fontSize: 'var(--texto-apoio)', fontWeight: 600, cursor: 'pointer' }}
             >
               Mover {selectedConvIds.size} conversa{selectedConvIds.size > 1 ? 's' : ''}
             </button>
@@ -683,11 +712,22 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}>
-                    <span style={{ fontSize: 10, color: 'var(--pen3)', fontWeight: 600, letterSpacing: 0.5 }}>LIMITE SEMANAL</span>
+                    <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', fontWeight: 600, letterSpacing: 0.5 }}>LIMITE SEMANAL</span>
+                    {/* Só abria com `onMouseEnter` — no celular não há hover, e
+                        tocar no ícone não fazia nada. O toque alterna; o mouse
+                        continua abrindo ao passar por cima. */}
                     <span
-                      onMouseEnter={() => setShowUsageTip(true)}
-                      onMouseLeave={() => setShowUsageTip(false)}
-                      style={{ display: 'flex', alignItems: 'center', color: 'var(--pen3)', cursor: 'default' }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label="O que é o limite semanal"
+                      aria-expanded={showUsageTip}
+                      onPointerDown={e => { ponteiroDoTip.current = e.pointerType; }}
+                      onClick={() => { if (ponteiroDoTip.current !== 'mouse') setShowUsageTip(v => !v); }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowUsageTip(v => !v); } }}
+                      onPointerEnter={e => { if (e.pointerType === 'mouse') setShowUsageTip(true); }}
+                      onPointerLeave={e => { if (e.pointerType === 'mouse') setShowUsageTip(false); }}
+                      className="toque"
+                      style={{ color: 'var(--pen3)', cursor: 'pointer', margin: 'calc((var(--toque-min) - 11px) / -2) 0' }}
                     >
                       <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
                         <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
@@ -699,7 +739,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                       <div style={{
                         position: 'absolute', bottom: 'calc(100% + 6px)', left: 0,
                         width: 210, background: 'var(--ink)', color: '#fff',
-                        fontSize: 11, lineHeight: 1.5, padding: '8px 10px',
+                        fontSize: 'var(--texto-micro)', lineHeight: 1.5, padding: '8px 10px',
                         borderRadius: 8, zIndex: 300, pointerEvents: 'none',
                         boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
                       }}>
@@ -707,7 +747,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                       </div>
                     )}
                   </div>
-                  <span style={{ fontSize: 10, color: 'var(--pen3)' }}>
+                  <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)' }}>
                     {pct >= 100
                       ? daysLeft !== null ? `Renova em ${daysLeft}d` : 'Limite atingido'
                       : `${pct}%`}
@@ -740,7 +780,17 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 <path d="M2 14c0-2.5 2.7-4 6-4s6 1.5 6 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
               Editar perfil
-            </button>
+              </button>
+              {suporteDisponivel() && (
+                // No celular o balão do Intercom fica escondido (cobria o
+                // Enviar); o suporte passa a abrir por aqui. Ver `lib/intercom`.
+                <button onClick={() => { setUserMenuOpen(false); abrirSuporte(); }} style={menuItemStyle}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                    <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                  </svg>
+                  Falar com o suporte
+                </button>
+              )}
             <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
             <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -754,7 +804,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
         )}
         <div
           onClick={() => setUserMenuOpen(o => !o)}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderRadius: 8, padding: '2px 4px', transition: 'background 0.1s' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderRadius: 8, padding: '2px 4px', minHeight: 'var(--toque-min)', transition: 'background 0.1s' }}
           onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'var(--fill)'}
           onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
         >
@@ -762,10 +812,10 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
             {user?.initial ?? '?'}
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {user?.name ?? '—'}
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--pen2)' }}>
+            <div style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)' }}>
               {[user?.crmLabel, user?.medStatusLabel].filter(Boolean).join(' · ') || 'Beta'}
             </div>
           </div>

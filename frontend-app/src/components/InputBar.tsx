@@ -227,7 +227,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
             <div id="img-consent-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', marginBottom: 10 }}>
               ⚠️ Atenção: envio de imagem
             </div>
-            <div style={{ fontSize: 13, color: 'var(--pen2)', lineHeight: 1.5, marginBottom: 20 }}>
+            <div style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', lineHeight: 1.5, marginBottom: 20 }}>
               Diferente do texto, <strong>imagens não passam pelo filtro automático de dados pessoais (PII)</strong> e
               são analisadas por serviços de IA externos. Evite enviar imagens com nome, CPF, RG ou outros dados que
               identifiquem o paciente. Deseja continuar?
@@ -236,9 +236,9 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
               <button
                 onClick={cancelImageConsent}
                 style={{
-                  height: 34, padding: '0 16px', borderRadius: 8,
+                  minHeight: 'var(--toque-min)', padding: '0 var(--gap-4)', borderRadius: 'var(--raio-1)',
                   border: '1px solid var(--line2)', background: 'transparent',
-                  color: 'var(--pen2)', fontWeight: 600, fontSize: 12.5, cursor: 'pointer',
+                  color: 'var(--pen2)', fontWeight: 600, fontSize: 'var(--texto-apoio)', cursor: 'pointer',
                 }}
               >
                 Cancelar
@@ -246,8 +246,8 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
               <button
                 onClick={confirmImageConsent}
                 style={{
-                  height: 34, padding: '0 16px', borderRadius: 8, border: 'none',
-                  background: 'var(--petrol)', color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+                  minHeight: 'var(--toque-min)', padding: '0 var(--gap-4)', borderRadius: 'var(--raio-1)', border: 'none',
+                  background: 'var(--petrol)', color: '#fff', fontWeight: 700, fontSize: 'var(--texto-apoio)', cursor: 'pointer',
                 }}
               >
                 Entendi, continuar
@@ -257,7 +257,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
         </div>
       )}
       <div style={{
-        width: 720, maxWidth: '92%',
+        width: 'min(720px, calc(100% - 2 * var(--margem-tela)))',
         border: `1px solid ${filled ? 'var(--petrol)' : 'var(--line)'}`,
         borderRadius: 14, background: '#fff',
         padding: 14, boxShadow: '0 4px 18px rgba(14,37,45,0.05)',
@@ -265,7 +265,17 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
       }}>
         {/* Seletor de modo — apenas no Orquestrador */}
         {onModeChange && (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          // No celular os seis chips com altura de toque quebravam em duas
+          // linhas, e o composer passava a ocupar ~40% da tela — sobrava pouco
+          // para ler a resposta. Uma linha com rolagem lateral mantém o alvo
+          // de 44px sem roubar altura. As margens negativas deixam os chips
+          // correrem até a borda do cartão ao rolar.
+          <div
+            className={isMobile ? 'rolagem-lateral' : undefined}
+            style={isMobile
+              ? { display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'nowrap', margin: '0 -14px 10px', padding: '0 14px' }
+              : { display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}
+          >
             {MODE_OPTIONS.map(opt => {
               const active = mode === opt.key;
               return (
@@ -274,7 +284,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                   onClick={() => onModeChange?.(opt.key)}
                   title={opt.label}
                   style={{
-                    padding: '4px 11px', fontSize: 11, fontWeight: 600, borderRadius: 8,
+                    minHeight: 'var(--toque-min)', padding: 'var(--gap-1) var(--gap-3)', fontSize: 'var(--texto-micro)', fontWeight: 600, borderRadius: 'var(--raio-1)',
                     border: `1px solid ${active ? 'var(--petrol)' : 'var(--line2)'}`,
                     background: active ? 'var(--petrol)' : 'transparent',
                     color: active ? '#fff' : 'var(--pen2)',
@@ -297,7 +307,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
             style={{
               marginBottom: 8, padding: '7px 10px', borderRadius: 8,
               background: '#fffbeb', border: '1px solid #fcd34d',
-              fontSize: 11.5, lineHeight: 1.45, color: '#92400e',
+              fontSize: 'var(--texto-micro)', lineHeight: 'var(--linha-apertada)', color: '#92400e',
             }}
           >
             <strong>{att.name}</strong> — {att.warning}
@@ -326,7 +336,9 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                   aria-label={`Remover ${att.name}`}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--pen3)', padding: 0, fontSize: 14, lineHeight: 1,
+                    color: 'var(--pen3)', padding: 0, fontSize: 'var(--texto-apoio)', lineHeight: 1,
+                    minHeight: 'var(--toque-min)', minWidth: 'var(--toque-min)',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   }}
                 >×</button>
               </div>
@@ -342,13 +354,13 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 padding: '4px 10px', borderRadius: 8,
                 background: '#fff5f5', border: '1px solid #fca5a5',
-                fontSize: 11.5, color: '#dc2626',
+                fontSize: 'var(--texto-micro)', color: '#dc2626',
               }}>
                 ⚠️ {uploadError}
                 <button
                   onClick={clearError}
                   aria-label="Descartar erro"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 0, fontSize: 13, lineHeight: 1 }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 0, fontSize: 'var(--texto-micro)', lineHeight: 1, minHeight: 'var(--toque-min)', minWidth: 'var(--toque-min)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >×</button>
               </div>
             )}
@@ -367,7 +379,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
             width: '100%', border: 'none', outline: 'none', resize: 'none',
             // 16 px no celular: abaixo disso o iOS dá ZOOM na página ao focar o
             // campo, e o médico precisa desfazer o zoom a cada pergunta.
-            background: 'transparent', fontSize: isMobile ? 16 : 13.5, color: 'var(--ink)',
+            background: 'transparent', fontSize: 'var(--texto-campo)', color: 'var(--ink)',
             lineHeight: 1.5, minHeight: 36, maxHeight: TEXTAREA_MAX_HEIGHT,
             overflowY: 'auto',
           }}
@@ -394,7 +406,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
             aria-label="Anexar arquivos"
             style={{
               ...iconButtonBase,
-              width: 30,
+              width: 'var(--toque-min)',
               background: attachments.length > 0 ? 'var(--fill2)' : 'transparent',
               color: attachments.length > 0 ? 'var(--petrol)' : 'var(--pen3)',
             }}
@@ -412,12 +424,12 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
               aria-label={webSearchEnabled ? 'Desativar busca web' : 'Ativar busca web'}
               aria-pressed={webSearchEnabled}
               style={{
-                height: 30, padding: '0 10px', borderRadius: 8,
+                minHeight: 'var(--toque-min)', padding: '0 var(--gap-3)', borderRadius: 'var(--raio-1)',
                 border: `1px solid ${webSearchEnabled ? 'var(--petrol)' : 'var(--line2)'}`,
                 background: webSearchEnabled ? 'var(--petrol)' : 'transparent',
                 color: webSearchEnabled ? '#fff' : 'var(--pen3)',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
-                flexShrink: 0, fontSize: 11, fontWeight: 600,
+                flexShrink: 0, fontSize: 'var(--texto-micro)', fontWeight: 600,
                 transition: 'all 0.12s',
               }}
             >
@@ -438,7 +450,7 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
                   ? 'Resposta direta e objetiva — ideal para dúvidas rápidas do dia a dia'
                   : 'Resposta completa com raciocínio clínico detalhado — ideal para casos complexos'}
                 style={{
-                  padding: '3px 10px', fontSize: 10.5, fontWeight: 600, border: 'none',
+                  minHeight: 'var(--toque-min)', padding: '0 var(--gap-3)', fontSize: 'var(--texto-micro)', fontWeight: 600, border: 'none',
                   background: effort === opt ? 'var(--petrol)' : 'transparent',
                   color: effort === opt ? '#fff' : 'var(--pen3)',
                   cursor: 'pointer', textTransform: 'capitalize',
@@ -451,16 +463,17 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
           </div>
 
           <div style={{ flex: 1 }} />
-          {!isMobile && <span style={{ fontSize: 10.5, color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
+          {!isMobile && <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)' }}>{DICA_ENVIO}</span>}
           {onStop ? (
             // Uma resposta leva de 13 a 57 s. Sem "Parar", quem mandou a pergunta
             // errada esperava tudo isso — pagando o modelo — para poder corrigir.
             <button
               onClick={onStop}
               style={{
-                height: 32, padding: '0 14px', borderRadius: 10,
+                // Era `height: 32` fixo — no botão que se aperta com pressa.
+                minHeight: 'var(--toque-min)', padding: '0 14px', borderRadius: 10,
                 border: '1px solid var(--line)', background: '#fff', color: 'var(--ink)',
-                fontWeight: 700, fontSize: 12,
+                fontWeight: 700, fontSize: 'var(--texto-apoio)',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
@@ -473,10 +486,10 @@ export const InputBar = memo(function InputBar({ onSend, disabled, sendBlocked, 
               disabled={!filled || disabled || sendBlocked || extraindo}
               title={extraindo ? 'Aguarde o processamento do anexo' : undefined}
               style={{
-                height: 32, padding: '0 14px', borderRadius: 10, border: 'none',
+                minHeight: 'var(--toque-min)', padding: '0 14px', borderRadius: 10, border: 'none',
                 background: filled && !sendBlocked && !extraindo ? 'var(--green)' : 'var(--fill)',
                 color: filled && !sendBlocked && !extraindo ? 'var(--ink)' : 'var(--pen3)',
-                fontWeight: 700, fontSize: 12,
+                fontWeight: 700, fontSize: 'var(--texto-apoio)',
                 display: 'flex', alignItems: 'center', gap: 6,
                 transition: 'background 0.15s, color 0.15s',
               }}

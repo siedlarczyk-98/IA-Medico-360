@@ -38,21 +38,21 @@ export function ModeIntro({ userName, onChoose }: Props) {
             >
               <div>
                 <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase',
+                  fontSize: 'var(--texto-micro)', fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase',
                   color: 'var(--petrol)', background: 'var(--mint)', borderRadius: 999, padding: '3px 9px',
                 }}>
                   {m.tagline}
                 </span>
               </div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>{m.label}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--pen2)', lineHeight: 1.5 }}>{m.desc}</div>
+              <div style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', lineHeight: 1.5 }}>{m.desc}</div>
               <ul style={{ margin: '4px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {m.bullets.map((b, i) => (
-                  <li key={i} style={{ fontSize: 12, color: 'var(--pen)', lineHeight: 1.4 }}>{b}</li>
+                  <li key={i} style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen)', lineHeight: 1.4 }}>{b}</li>
                 ))}
               </ul>
               <div style={{
-                marginTop: 8, alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: 'var(--petrol)',
+                marginTop: 8, alignSelf: 'flex-start', fontSize: 'var(--texto-apoio)', fontWeight: 700, color: 'var(--petrol)',
                 display: 'flex', alignItems: 'center', gap: 4,
               }}>
                 Usar {m.label}

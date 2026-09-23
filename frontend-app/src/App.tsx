@@ -16,6 +16,7 @@ import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth'
 // Mesma convenção dos módulos de `api/`: o backend por env, sem barra final.
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 import { useCurrentUser } from './lib/useCurrentUser';
+import { useSessaoViva } from './lib/useSessaoViva';
 import { getConversation } from './api/conversations';
 
 /** Intervalo entre atualizações do texto em streaming. Ver `scheduleFlush`. */
@@ -94,6 +95,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function MainApp() {
+  // Renova o token ao voltar do segundo plano. Antes disto, minimizar o app por
+  // mais de uma hora derrubava o médico no login.
+  useSessaoViva();
+
   const currentUser = useCurrentUser();
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);

@@ -1,0 +1,172 @@
+/**
+ * Fundação responsiva — tipografia, espaçamento e alvos de toque.
+ *
+ * POR QUE EXISTE
+ * O `frontend-app` não era um front desktop com problemas de celular: era um
+ * front SEM camada de responsivo nenhuma. Zero media queries no projeto
+ * inteiro, e um `useIsMobile` em JavaScript trocando paddings soltos. O
+ * resultado, medido em 22/09/2026: 100 ocorrências de fonte ≤ 12px e ZERO
+ * alvos de toque de 44px.
+ *
+ * Isto é ausência de fundação, não dívida de arquitetura — e fundação se
+ * coloca embaixo do que já existe.
+ *
+ * VIVE EM `shared/` DE PROPÓSITO
+ * Os mesmos tokens servem ao app atual e ao front novo do Kortex. Escrever
+ * dentro de um app e copiar depois seria recriar de propósito a divergência
+ * que o `shared/embed` existe para evitar — e foi exatamente a divergência
+ * silenciosa entre contextos que manteve o app nativo quebrado até ontem.
+ *
+ * COMO USAR
+ * Importe uma vez no `index.css` do app, ANTES das regras dele:
+ *   @import '../../shared/design/tokens.css';
+ *
+ * Os valores respondem ao tamanho da tela sozinhos: um componente que usa
+ * `var(--texto-corpo)` fica legível no telefone sem `isMobile` nenhum. Isso
+ * importa porque `useIsMobile` mede a largura da JANELA, e um valor em JS não
+ * acompanha a barra do navegador abrindo e fechando — o CSS acompanha.
+ */
+
+:root {
+  /* ── Tipografia ────────────────────────────────────────────────────────
+     A escala começa em 14px, e não em 11–12px como o código atual. Abaixo de
+     14 a leitura no telefone cobra esforço, e quem usa isto lê entre
+     atendimentos, não sentado.
+
+     `--texto-campo` é 16px e NÃO diminui: abaixo disso o iOS dá zoom
+     automático ao focar um campo, e a página inteira salta. O `InputBar` já
+     fazia isso à mão (`fontSize: isMobile ? 16 : 13.5`); aqui vira regra. */
+  --texto-micro:  0.8125rem;  /* 13px — etiquetas, contadores. O menor que existe. */
+  --texto-apoio:  0.875rem;   /* 14px — texto secundário, legendas */
+  --texto-corpo:  0.9375rem;  /* 15px — corpo de mensagem, leitura longa */
+  --texto-campo:  1rem;       /* 16px — QUALQUER input. Não reduzir: zoom no iOS. */
+  --texto-titulo: 1.125rem;   /* 18px */
+  --texto-destaque: 1.375rem; /* 22px */
+
+  --linha-apertada: 1.35;
+  --linha-corpo:    1.55;     /* leitura longa em tela pequena pede mais ar */
+
+  /* ── Espaçamento ───────────────────────────────────────────────────────
+     Escala de 4px. Os nomes dizem a intenção, não o número, para que o valor
+     possa mudar no telefone sem renomear nada. */
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+  --gap-5: 24px;
+  --gap-6: 32px;
+
+  /* Respiro lateral da tela. No telefone, conteúdo colado na borda é difícil
+     de ler e faz o polegar esbarrar em links ao rolar. */
+  --margem-tela: 16px;
+
+  /* ── Alvo de toque ─────────────────────────────────────────────────────
+     44px é o mínimo que se acerta com o polegar sem mirar. Hoje há botões de
+     30–34px de altura, alguns com `padding: 0`.
+
+     `--toque-min` é para QUALQUER coisa clicável no telefone. No mouse pode
+     encolher — daí o segundo valor, aplicado só em ponteiro fino. */
+  --toque-min: 44px;
+  --toque-min-mouse: 32px;
+
+  /* ── Larguras ──────────────────────────────────────────────────────────
+     Coluna de leitura. O chat usava `width: 720` fixo e `maxWidth: 480` na
+     mensagem do usuário — em tela de 360px isso força rolagem horizontal ou
+     corta. `min()` resolve sem media query. */
+  --coluna-leitura: min(720px, 100%);
+  --balao-usuario: min(480px, 85%);
+
+  --raio-1: 8px;
+  --raio-2: 12px;
+  --raio-3: 16px;
+}
+
+/* No telefone o texto sobe um degrau e as margens encolhem.
+   Sobe, e não desce: a tela é menor, mas a distância até o olho é a mesma —
+   e a mão treme mais do que o mouse. */
+@media (max-width: 768px) {
+  :root {
+    --texto-apoio:  0.9375rem;  /* 15px */
+    --texto-corpo:  1rem;       /* 16px */
+    --texto-titulo: 1.1875rem;  /* 19px */
+    --margem-tela: 16px;
+    --gap-5: 20px;
+    --gap-6: 24px;
+  }
+}
+
+/* Ponteiro fino (mouse, trackpad) = alvo menor é aceitável.
+   `pointer: coarse` é o dedo; `fine`, o mouse. Isto é mais confiável que
+   largura de janela: um tablet com teclado tem janela grande e dedo grosso. */
+@media (pointer: fine) {
+  :root {
+    --toque-min: var(--toque-min-mouse);
+  }
+}
+
+/* ── Utilitários ────────────────────────────────────────────────────────── */
+
+/**
+ * Alvo de toque mínimo, sem mudar a aparência.
+ *
+ * `min-height`/`min-width` em vez de `height`: o botão cresce se o conteúdo
+ * precisar, e nunca encolhe abaixo do dedo. Um ícone de 16px dentro de um
+ * botão com esta classe continua parecendo de 16px — a área clicável é que
+ * fica maior.
+ */
+.toque {
+  min-height: var(--toque-min);
+  min-width: var(--toque-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/**
+ * Impede que uma palavra longa estoure a largura da tela.
+ *
+ * Acontece de verdade aqui: nome de medicamento, DOI de artigo e URL de fonte
+ * não têm onde quebrar, e em 360px empurram a coluna inteira para o lado.
+ */
+.quebra-segura {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/**
+ * Área rolável que não prende o toque nem gruda no fim.
+ *
+ * `overscroll-behavior: contain` evita que rolar o fim da lista role a página
+ * atrás — dentro do webview da Waid isso faz a seção inteira deslizar.
+ */
+.rolagem {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/**
+ * Faixa de itens que rola para o lado, sem barra visível.
+ *
+ * Para seletores em linha no telefone (chips de modo, filtros): quebrar em
+ * várias linhas com alvos de 44px come a altura da tela; uma linha rolável não.
+ * A barra de rolagem some porque, no toque, arrastar é óbvio — e ela ocupava
+ * altura justo onde se queria economizar.
+ */
+.rolagem-lateral {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.rolagem-lateral::-webkit-scrollbar { display: none; }
+
+/* Quem pediu menos movimento recebe menos movimento. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

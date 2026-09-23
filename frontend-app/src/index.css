@@ -1,3 +1,8 @@
+/* Fundação responsiva — tipografia, espaçamento e alvos de toque.
+   Vive em `shared/` para o front novo do Kortex consumir os mesmos valores.
+   Vem PRIMEIRO: as regras abaixo podem sobrescrever, o contrário não vale. */
+@import '../../shared/design/tokens.css';
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {

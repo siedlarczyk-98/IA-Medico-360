@@ -25,7 +25,8 @@ export const chipNeutral: CSSProperties = {
 
 /** Botão só-ícone (ações compactas, 30x30). */
 export const iconButtonBase: CSSProperties = {
-  height: 30,
+  // `--toque-min`: 44px no dedo, 32px no mouse. Era 30px fixo.
+  height: 'var(--toque-min)',
   borderRadius: 8,
   border: '1px solid var(--line2)',
   cursor: 'pointer',

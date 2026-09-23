@@ -135,6 +135,59 @@ async def test_renovar_pelo_perfil_NAO_estica_a_sessao(client, user):
     assert novo["exp"] <= login_ha_20h + 24 * 3600
 
 
+async def test_renovar_sessao_devolve_token_novo(client, user):
+    """O app volta do background e troca o token antes de ele vencer."""
+    resp = await client.post("/api/v1/auth/session/renew", headers=auth_headers(user))
+
+    assert resp.status_code == 200
+    assert _claims(resp.json()["access_token"])["sub"] == str(user.id)
+
+
+async def test_renovar_sessao_NAO_estica_as_24h(client, user):
+    """Renovar não pode virar sessão eterna: o relógio conta do login."""
+    login_ha_20h = int((datetime.now(UTC) - timedelta(hours=20)).timestamp())
+    antigo = _token_com(user, auth_time=login_ha_20h)
+
+    resp = await client.post(
+        "/api/v1/auth/session/renew",
+        headers={"Authorization": f"Bearer {antigo}"},
+    )
+
+    assert resp.status_code == 200
+    novo = _claims(resp.json()["access_token"])
+    assert novo["auth_time"] == login_ha_20h, "a renovação zerou o relógio da sessão"
+    assert novo["exp"] <= login_ha_20h + 24 * 3600
+
+
+async def test_renovar_sessao_vencida_e_recusada(client, user):
+    """Passadas as 24h, renovar não ressuscita — é aí que o login volta a valer."""
+    login_ha_25h = int((datetime.now(UTC) - timedelta(hours=25)).timestamp())
+    vencido = _token_com(user, auth_time=login_ha_25h)
+
+    resp = await client.post(
+        "/api/v1/auth/session/renew",
+        headers={"Authorization": f"Bearer {vencido}"},
+    )
+
+    assert resp.status_code == 401
+
+
+async def test_renovar_depois_do_logout_e_recusado(client, user):
+    """Renovação não pode ser porta dos fundos para um token revogado."""
+    cabecalho = auth_headers(user)
+    await client.post("/api/v1/auth/logout", headers=cabecalho)
+
+    resp = await client.post("/api/v1/auth/session/renew", headers=cabecalho)
+
+    assert resp.status_code == 401
+
+
+async def test_renovar_sem_token_e_recusado(client):
+    resp = await client.post("/api/v1/auth/session/renew")
+
+    assert resp.status_code == 401
+
+
 async def test_exp_nunca_passa_do_fim_da_sessao(user):
     login_ha_23h50 = int((datetime.now(UTC) - timedelta(hours=23, minutes=50)).timestamp())
 

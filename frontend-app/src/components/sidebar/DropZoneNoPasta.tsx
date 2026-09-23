@@ -13,7 +13,7 @@ export function DropZoneNoPasta({ onDrop }: { onDrop: () => void }) {
         borderRadius: 6,
         border: `1.5px dashed ${over ? 'var(--green)' : 'var(--line2)'}`,
         background: over ? 'var(--fill2)' : 'transparent',
-        fontSize: 11,
+        fontSize: 'var(--texto-micro)',
         color: over ? 'var(--green)' : 'var(--pen3)',
         textAlign: 'center',
         transition: 'all 0.1s',

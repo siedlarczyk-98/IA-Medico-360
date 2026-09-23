@@ -59,7 +59,7 @@ export function ModeChip({ mode, confidence }: Props) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '4px 10px', fontSize: 11, fontWeight: 600,
+      padding: '4px 10px', fontSize: 'var(--texto-micro)', fontWeight: 600,
       color: 'var(--petrol)', background: 'var(--mint)', borderRadius: 999,
     }}>
       <span style={{ color: 'var(--petrol)', display: 'flex' }}>{icons[mode]}</span>

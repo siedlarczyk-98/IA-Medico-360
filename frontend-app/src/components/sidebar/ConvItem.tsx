@@ -69,10 +69,17 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
       <div
         onClick={() => selectionMode ? onToggleSelect?.(conv.id) : onSelect(conv.id)}
         style={{
-          padding: '7px 10px',
+          // Altura mínima de toque (44px no dedo, 32px no mouse — ver
+          // `shared/design/tokens.css`). Antes, 7px de padding + fonte 12,5
+          // davam ~32px também no telefone, e a lista era a parte da gaveta
+          // onde mais se errava o toque.
+          minHeight: 'var(--toque-min)',
+          padding: '0 10px',
           paddingLeft: (selectionMode || hovered) ? 6 : 10,
-          paddingRight: showBtn ? 26 : 10,
-          fontSize: 12.5,
+          // No toque o botão de opções tem 44px de largura; o título não pode
+          // correr por baixo dele.
+          paddingRight: showBtn ? (toque ? 48 : 26) : 10,
+          fontSize: 'var(--texto-apoio)',
           color: 'var(--pen)',
           cursor: 'pointer',
           fontWeight: isActive ? 600 : 400,
@@ -115,12 +122,15 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
               border: 'none',
               cursor: 'pointer',
               color: 'var(--pen2)',
-              // Alvo de toque: 12 px de ícone + 20 de respiro = 32 px. Com 2 px
-              // o dedo acertava a conversa, não o menu.
-              padding: toque ? '10px' : '2px 4px',
+              // Alvo de toque: 44 px no dedo. Com 2 px o dedo acertava a
+              // conversa, não o menu; os 32 px de antes ainda ficavam abaixo
+              // do mínimo que se acerta sem mirar.
+              padding: toque ? 0 : '2px 4px',
+              ...(toque ? { minWidth: 'var(--toque-min)', minHeight: 'var(--toque-min)' } : {}),
               borderRadius: 4,
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -173,11 +183,11 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
             </div>
           ) : (
             <div>
-              <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.8, textTransform: 'uppercase' }}>
+              <div style={{ padding: '6px 12px 4px', fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen3)', letterSpacing: 0.8, textTransform: 'uppercase' }}>
                 Escolher pasta
               </div>
               {folders.length === 0 && (
-                <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--pen3)' }}>Nenhuma pasta criada</div>
+                <div style={{ padding: '6px 12px', fontSize: 'var(--texto-apoio)', color: 'var(--pen3)' }}>Nenhuma pasta criada</div>
               )}
               {folders.map(f => (
                 <button

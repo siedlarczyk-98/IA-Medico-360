@@ -486,6 +486,42 @@ async def complete_onboarding(
     )
 
 
+@router.post("/session/renew", response_model=TokenResponse)
+@limiter.limit("60/hour")
+async def renovar_sessao(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Troca um token válido por outro, sem pedir credencial de novo.
+
+    POR QUE EXISTE
+    O JWT vale 60 min e não havia como renová-lo: quem passava desse tempo caía
+    no login. No navegador isso quase não aparece, porque a aba fica viva e o
+    médico recarrega. No aplicativo é o caso comum — minimizar e voltar depois
+    do almoço é uso normal, e o sintoma era "o app me desloga sozinho".
+
+    NÃO ESTICA A SESSÃO. `auth_time` é repassado do token em uso, então o teto
+    de `session_max_age_hours` (24h) continua contando do momento em que o
+    usuário PROVOU quem é. Renovar mil vezes não compra um minuto a mais: quando
+    a janela fecha, `create_access_token` emite um token já expirado e a próxima
+    chamada cai em 401 — que é exatamente o comportamento desejado.
+
+    Também não contorna o logout: `get_current_user` confere `tv`
+    (`token_version`), então um token revogado é rejeitado ANTES de chegar aqui.
+    Renovar exige um token que ainda valia; não é um caminho para ressuscitar
+    sessão morta.
+    """
+    token = auth_service.create_access_token(
+        current_user, auth_time=auth_time_da_sessao(request)
+    )
+    _set_session_cookie(response, token)
+    return TokenResponse(
+        access_token=token,
+        onboarding_complete=current_user.onboarding_complete,
+    )
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: User = Depends(get_current_user),

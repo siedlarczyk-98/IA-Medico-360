@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { MAX_CHARS_EVOLUCAO, type Folder, type FolderKind } from '../api/folders';
-import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   /** Pasta existente para editar; ausente = criando uma nova. */
@@ -22,7 +21,6 @@ interface Props {
  * pareça obrigatório faria o médico inventar conteúdo para preenchê-lo.
  */
 export function FolderModal({ folder, onClose, onSave, saving = false }: Props) {
-  const isMobile = useIsMobile();
   const [name, setName] = useState(folder?.name ?? '');
   const [clinicalContext, setClinicalContext] = useState(folder?.clinical_context ?? '');
   const [folderKind, setFolderKind] = useState<FolderKind>(folder?.folder_kind ?? 'clinical');
@@ -68,18 +66,23 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: isMobile ? 'calc(100vw - 32px)' : 480,
-          maxWidth: 480,
+          // Largura por `min()`, e altura limitada à tela VISÍVEL (`dvh`) com
+          // rolagem própria. Antes o cartão tinha `overflow: hidden` sem altura
+          // máxima: com o teclado do celular aberto, o que passava da metade
+          // da tela era cortado e não havia como rolar até lá.
+          width: 'min(480px, calc(100vw - 32px))',
+          maxHeight: 'calc(100dvh - 32px)',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
           background: 'var(--paper)', borderRadius: 14,
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-          overflow: 'hidden',
         }}
       >
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>
             {editando ? 'Editar pasta' : 'Nova pasta'}
           </span>
-          <button onClick={onClose} aria-label="Fechar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', display: 'flex' }}>
+          <button onClick={onClose} aria-label="Fechar" className="toque" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen3)', padding: 0, margin: 'calc((var(--toque-min) - 16px) / -2)' }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
@@ -112,10 +115,10 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
                       borderRadius: 8, padding: '8px 10px',
                     }}
                   >
-                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>
+                    <span style={{ display: 'block', fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)' }}>
                       {opt.titulo}
                     </span>
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--pen3)', marginTop: 1 }}>
+                    <span style={{ display: 'block', fontSize: 'var(--texto-micro)', color: 'var(--pen3)', marginTop: 1 }}>
                       {opt.sub}
                     </span>
                   </button>
@@ -151,18 +154,18 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
 
           {/* Explicar o efeito, não o campo. O médico decide o que escrever se
               souber que isto vai junto de TODA pergunta feita na pasta. */}
-          <p style={{ fontSize: 11.5, color: 'var(--pen3)', margin: '6px 0 0', lineHeight: 1.45 }}>
+          <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', margin: '6px 0 0', lineHeight: 1.45 }}>
             {textos.ajuda}
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-            <span style={{ fontSize: 11, color: excedeu ? '#ef4444' : 'var(--pen3)' }}>
+            <span style={{ fontSize: 'var(--texto-micro)', color: excedeu ? '#ef4444' : 'var(--pen3)' }}>
               {clinicalContext.length.toLocaleString('pt-BR')} / {MAX_CHARS_EVOLUCAO.toLocaleString('pt-BR')}
             </span>
           </div>
 
           {excedeu && (
-            <p style={{ fontSize: 12, color: '#ef4444', margin: '8px 0 0' }}>
+            <p style={{ fontSize: 'var(--texto-apoio)', color: '#ef4444', margin: '8px 0 0' }}>
               A evolução ficou acima do limite. Resuma o essencial do caso.
             </p>
           )}
@@ -170,7 +173,7 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button
               onClick={onClose}
-              style={{ flex: 1, background: '#fff', border: '1px solid var(--line2)', borderRadius: 8, padding: '10px', fontSize: 13, cursor: 'pointer', color: 'var(--pen)' }}
+              style={{ flex: 1, background: '#fff', border: '1px solid var(--line2)', borderRadius: 8, padding: '0 10px', minHeight: 'var(--toque-min)', fontSize: 'var(--texto-apoio)', cursor: 'pointer', color: 'var(--pen)' }}
             >
               Cancelar
             </button>
@@ -181,7 +184,7 @@ export function FolderModal({ folder, onClose, onSave, saving = false }: Props) 
                 flex: 1,
                 background: 'var(--ink)', color: '#fff',
                 border: 'none', borderRadius: 8, padding: '10px',
-                fontSize: 13, fontWeight: 600,
+                fontSize: 'var(--texto-apoio)', fontWeight: 600,
                 cursor: podeSalvar ? 'pointer' : 'not-allowed',
                 opacity: podeSalvar ? 1 : 0.6,
               }}
@@ -222,7 +225,7 @@ const TEXTOS_POR_TIPO: Record<FolderKind, { rotulo: string; placeholder: string;
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
-  fontSize: 12,
+  fontSize: 'var(--texto-apoio)',
   fontWeight: 600,
   color: 'var(--pen)',
   marginBottom: 6,
@@ -233,8 +236,8 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
   border: '1px solid var(--line2)',
   borderRadius: 8,
-  padding: '9px 11px',
-  fontSize: 13,
+  padding: '11px 12px',
+  fontSize: 'var(--texto-campo)',
   color: 'var(--ink)',
   background: '#fff',
   outline: 'none',
