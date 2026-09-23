@@ -76,7 +76,7 @@ export function LoginPage() {
           <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>
             Calculadoras Clínicas
           </h1>
-          <p style={{ fontSize: 13, color: 'var(--pen2)', lineHeight: 1.4 }}>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', lineHeight: 1.4 }}>
             {step === 'email'
               ? 'Entre com seu email para acessar'
               : <><span>Código enviado para</span><br /><strong style={{ color: 'var(--ink)' }}>{email}</strong></>
@@ -87,7 +87,7 @@ export function LoginPage() {
         {step === 'email' ? (
           <form onSubmit={handleEmailSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 6 }}>
+              <label style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 6 }}>
                 Email
               </label>
               <input
@@ -102,7 +102,7 @@ export function LoginPage() {
                   padding: '10px 12px',
                   border: '1px solid var(--line)',
                   borderRadius: 8,
-                  fontSize: 14,
+                  fontSize: 'var(--texto-campo)',
                   color: 'var(--ink)',
                   outline: 'none',
                   transition: 'border-color 0.15s',
@@ -115,7 +115,7 @@ export function LoginPage() {
             </div>
 
             {error && (
-              <p style={{ fontSize: 12, color: 'var(--red)', background: 'var(--red-bg)', padding: '8px 10px', borderRadius: 6 }}>
+              <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', background: 'var(--red-bg)', padding: '8px 10px', borderRadius: 6 }}>
                 {error}
               </p>
             )}
@@ -129,7 +129,7 @@ export function LoginPage() {
                 color: loading ? 'var(--pen3)' : '#fff',
                 border: 'none',
                 borderRadius: 8,
-                fontSize: 14,
+                fontSize: 'var(--texto-apoio)',
                 fontWeight: 600,
                 cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'background 0.15s',
@@ -142,7 +142,7 @@ export function LoginPage() {
         ) : (
           <form onSubmit={handleOTPSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 6 }}>
+              <label style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 6 }}>
                 Código de 6 dígitos
               </label>
               <input
@@ -175,7 +175,7 @@ export function LoginPage() {
             </div>
 
             {error && (
-              <p style={{ fontSize: 12, color: 'var(--red)', background: 'var(--red-bg)', padding: '8px 10px', borderRadius: 6 }}>
+              <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', background: 'var(--red-bg)', padding: '8px 10px', borderRadius: 6 }}>
                 {error}
               </p>
             )}
@@ -189,7 +189,7 @@ export function LoginPage() {
                 color: loading ? 'var(--pen3)' : '#fff',
                 border: 'none',
                 borderRadius: 8,
-                fontSize: 14,
+                fontSize: 'var(--texto-apoio)',
                 fontWeight: 600,
                 cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'background 0.15s',
@@ -206,7 +206,7 @@ export function LoginPage() {
                 padding: '8px',
                 background: 'none',
                 border: 'none',
-                fontSize: 13,
+                fontSize: 'var(--texto-apoio)',
                 color: 'var(--pen3)',
                 cursor: 'pointer',
                 textAlign: 'center',

@@ -2,14 +2,25 @@ import { useId } from "react";
 
 /**
  * Logo Médico 360 com animação de entrada (~2s, toca uma vez).
- * Usada acima da saudação na tela vazia das duas cascas (`EmptyState` no
- * desktop, `ConsultaVazia` no celular): a tela vazia remonta a cada nova
- * consulta, e a animação toca de novo sem precisar trocar a `key`.
+ *
+ * Vive em `shared/` porque é a marca de todos os apps: a tela vazia do chat
+ * (desktop e celular), a lista das calculadoras e o hero das landing pages.
+ * Um arquivo só, para um ajuste na animação chegar a todos juntos.
+ *
+ * `variante`: "claro" (padrão) para fundo claro — "Médico" em tinta escura;
+ * "escuro" para fundo escuro (o hero petróleo das landing pages), com "Médico"
+ * claro. O "360" e o pingo do i ficam verdes nas duas: são a cor da marca.
+ *
+ * A tela que monta a logo de novo a cada visita (nova consulta, por exemplo)
+ * faz a animação tocar de novo sem precisar trocar a `key`.
  * - Vetorial: nítida em qualquer tela; largura controlada por `width` ou CSS.
  * - Respeita prefers-reduced-motion (mostra a logo estática).
  * - Para tocar de novo, troque a `key` do componente (ex.: a cada nova consulta).
  */
-type Props = { width?: number | string; className?: string };
+type Props = { width?: number | string; className?: string; variante?: "claro" | "escuro" };
+
+/** Cor de "Médico" e do arco, por fundo. O verde da marca não muda. */
+const TINTA = { claro: "#0E252D", escuro: "#FDFFF4" } as const;
 
 const CSS = `.m360 *{transform-box:fill-box}
 .m360 .rv{mask-type:luminance}
@@ -38,7 +49,8 @@ const CSS = `.m360 *{transform-box:fill-box}
  100%{opacity:1;transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){.m360 *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}}`;
 
-export default function MedicoLogoAnimada({ width = 200, className }: Props) {
+export default function MedicoLogoAnimada({ width = 200, className, variante = "claro" }: Props) {
+  const tinta = TINTA[variante];
   // Só letras, dígitos, `_` e `-`: o formato do `useId` mudou entre versões do
   // React (`:r0:`, `«r0»`, `_r_0_`), e um caractere fora disso dentro de
   // `url(#…)` quebra a máscara em silêncio — a logo some.
@@ -54,13 +66,13 @@ export default function MedicoLogoAnimada({ width = 200, className }: Props) {
     >
       <style>{CSS}</style>
 <defs>
-<linearGradient id={`${uid}-ga`} x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor="#0E252D" stopOpacity=".22"/><stop offset=".55" stopColor="#0E252D" stopOpacity=".75"/><stop offset="1" stopColor="#0E252D" stopOpacity=".95"/></linearGradient>
+<linearGradient id={`${uid}-ga`} x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor={tinta} stopOpacity=".22"/><stop offset=".55" stopColor={tinta} stopOpacity=".75"/><stop offset="1" stopColor={tinta} stopOpacity=".95"/></linearGradient>
 <mask id={`${uid}-mk1`} className="rv" maskUnits="userSpaceOnUse" x="236" y="340" width="170" height="170"><path className="sw" pathLength="1" d="M 246.9 481 A 128.5 128.5 0 0 0 375.4 352.2"/></mask>
 <mask id={`${uid}-mk2`} className="rv" maskUnits="userSpaceOnUse" x="380" y="340" width="170" height="170"><path className="sw sw2" pathLength="1" d="M 391.1 481 A 128.5 128.5 0 0 0 519.6 352.2"/></mask>
 </defs>
 <g mask={`url(#${uid}-mk1)`}><path fill={`url(#${uid}-ga)`} d="M 359.613281 352.214844 C 359.613281 415.015625 309.070312 466.109375 246.945312 466.109375 L 246.945312 497.878906 C 326.398438 497.878906 391.039062 432.535156 391.039062 352.214844 Z M 359.613281 352.214844"/></g>
 <g mask={`url(#${uid}-mk2)`}><path fill={`url(#${uid}-ga)`} d="M 503.78125 352.203125 C 503.78125 403.269531 470.363281 446.589844 424.503906 461.039062 C 413.941406 464.332031 402.75 466.121094 391.117188 466.121094 L 391.117188 497.875 C 402.625 497.875 413.78125 496.496094 424.503906 493.925781 C 487.921875 478.660156 535.222656 420.917969 535.222656 352.203125 Z M 503.78125 352.203125"/></g>
-<g fill="#0E252D">
+<g fill={tinta}>
 <path className="bar b1" d="M 391.027344 352.203125 L 391.027344 497.875 L 391.121094 497.875 C 402.625 497.875 413.785156 496.496094 424.503906 493.925781 L 424.503906 352.203125 Z M 391.027344 352.203125"/>
 <path className="bar b2" d="M 535.300781 497.878906 L 568.773438 497.878906 L 568.773438 352.214844 L 535.300781 352.214844 Z M 535.300781 497.878906"/>
 <path className="l l1" d="M 655.695312 384.484375 C 634.769531 384.484375 620.066406 397.492188 616.390625 417.570312 L 691.609375 417.570312 C 691.328125 397.210938 677.46875 384.484375 655.695312 384.484375 M 708.859375 480.628906 C 698.960938 488.265625 680.296875 497.878906 654.847656 497.878906 C 611.300781 497.878906 584.152344 466.488281 584.152344 427.75 C 584.152344 388.726562 613.28125 357.335938 654.847656 357.335938 C 699.246094 357.335938 723.847656 388.441406 723.847656 427.464844 C 723.847656 431.140625 723.28125 435.382812 722.433594 439.34375 L 616.957031 439.34375 C 621.480469 458.855469 637.597656 470.449219 657.109375 470.449219 C 676.621094 470.449219 687.367188 463.378906 693.589844 458.289062 Z M 708.859375 480.628906"/>

@@ -71,10 +71,10 @@ export function EmbedAuthPage() {
           borderRadius: 16,
           boxShadow: '0 4px 24px rgba(14,37,45,0.07)',
         }}>
-          <p style={{ fontSize: 14, color: 'var(--ink)', margin: '0 0 8px', fontWeight: 600 }}>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--ink)', margin: '0 0 8px', fontWeight: 600 }}>
             {erro?.mensagem}
           </p>
-          <p style={{ fontSize: 13, color: 'var(--pen2)', margin: '0 0 20px', lineHeight: 1.5 }}>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', margin: '0 0 20px', lineHeight: 1.5 }}>
             {erro?.tipo === 'sem_iframe'
               // Caso conhecido: os aplicativos da Waid abrem a seção sem iframe,
               // e ali a plataforma não tem como nos dizer quem é o médico.
@@ -84,7 +84,7 @@ export function EmbedAuthPage() {
           <button
             onClick={() => navigate('/login')}
             style={{
-              fontSize: 13, color: 'var(--petrol)', background: 'none',
+              fontSize: 'var(--texto-apoio)', color: 'var(--petrol)', background: 'none',
               border: '1px solid var(--line)', borderRadius: 8,
               padding: '8px 16px', cursor: 'pointer',
             }}
@@ -100,7 +100,7 @@ export function EmbedAuthPage() {
             animation: 'spin 0.8s linear infinite',
             margin: '0 auto 16px',
           }} />
-          <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
             {fase === 'trocando' ? 'Confirmando sua identidade…' : 'Autenticando…'}
           </p>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

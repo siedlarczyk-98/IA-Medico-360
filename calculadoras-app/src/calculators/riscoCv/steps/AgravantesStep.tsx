@@ -93,7 +93,7 @@ export function AgravantesStep({ state, currentRisk, onChange, onResult, onBack 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {AGGRAVATING_CATEGORIES.map(category => (
             <div key={category.title}>
-              <h4 style={{ fontSize: 12, fontWeight: 700, color: 'var(--pen2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <h4 style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 {category.title}
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -108,13 +108,13 @@ export function AgravantesStep({ state, currentRisk, onChange, onResult, onBack 
                       onChange={() => toggleFactor(item)}
                       style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, accentColor: 'var(--petrol)' }}
                     />
-                    <span style={{ fontSize: 13.5, color: 'var(--ink)', lineHeight: 1.4 }}>{item}</span>
+                    <span style={{ fontSize: 'var(--texto-apoio)', color: 'var(--ink)', lineHeight: 1.4 }}>{item}</span>
                   </label>
                 ))}
               </div>
             </div>
           ))}
-          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--fill2)', fontSize: 13 }}>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--fill2)', fontSize: 'var(--texto-apoio)' }}>
             Agravantes selecionados: <strong>{state.aggravatingFactors.length}</strong>
             {hasAggravants && currentRisk !== finalRisk && (
               <span style={{ marginLeft: 8, color: 'var(--risk-high)', fontWeight: 700 }}>→ Risco reclassificado</span>

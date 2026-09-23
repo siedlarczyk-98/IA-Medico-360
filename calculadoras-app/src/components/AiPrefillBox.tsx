@@ -31,8 +31,8 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
       gap: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--info)' }}>✦ Preencher com IA</span>
-        <span style={{ fontSize: 12, color: 'var(--info)' }}>Cole um trecho da evolução e a IA extrai os campos</span>
+        <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 700, color: 'var(--info)' }}>✦ Preencher com IA</span>
+        <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--info)' }}>Cole um trecho da evolução e a IA extrai os campos</span>
       </div>
 
       <textarea
@@ -45,7 +45,7 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
           padding: '10px 12px',
           border: '1px solid var(--info-border)',
           borderRadius: 8,
-          fontSize: 13,
+          fontSize: 'var(--texto-campo)',
           color: 'var(--ink)',
           lineHeight: 1.5,
           outline: 'none',
@@ -56,7 +56,7 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
       />
 
       {error && (
-        <p style={{ fontSize: 12, color: 'var(--red)', background: 'var(--red-bg)', padding: '6px 10px', borderRadius: 6 }}>
+        <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', background: 'var(--red-bg)', padding: '6px 10px', borderRadius: 6 }}>
           {error instanceof Error ? error.message : 'Erro ao extrair campos'}
         </p>
       )}
@@ -72,7 +72,7 @@ export function AiPrefillBox({ slug, onPrefill }: Props) {
           color: isPending || !text.trim() ? 'var(--pen3)' : '#fff',
           border: 'none',
           borderRadius: 8,
-          fontSize: 13,
+          fontSize: 'var(--texto-apoio)',
           fontWeight: 600,
           cursor: isPending || !text.trim() ? 'not-allowed' : 'pointer',
           transition: 'background 0.15s',

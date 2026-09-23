@@ -26,7 +26,7 @@ export function AiPrefillSection({ slug, aiFilledCount, onPrefill }: Props) {
               background: '#fff',
               border: '1px solid var(--line)',
               borderRadius: 10,
-              fontSize: 13,
+              fontSize: 'var(--texto-apoio)',
               fontWeight: 600,
               color: 'var(--pen)',
               cursor: 'pointer',
@@ -35,7 +35,7 @@ export function AiPrefillSection({ slug, aiFilledCount, onPrefill }: Props) {
             onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--petrol)')}
             onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--line)')}
           >
-            <span style={{ fontSize: 14 }}>✦</span>
+            <span style={{ fontSize: 'var(--texto-apoio)' }}>✦</span>
             Preencher a partir de uma evolução
           </button>
         ) : (
@@ -44,7 +44,7 @@ export function AiPrefillSection({ slug, aiFilledCount, onPrefill }: Props) {
             <button
               type="button"
               onClick={() => setShowAiBox(false)}
-              style={{ marginTop: 8, fontSize: 12, color: 'var(--pen3)', background: 'none', border: 'none', cursor: 'pointer' }}
+              style={{ marginTop: 8, fontSize: 'var(--texto-micro)', color: 'var(--pen3)', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               ← Cancelar
             </button>
@@ -59,7 +59,7 @@ export function AiPrefillSection({ slug, aiFilledCount, onPrefill }: Props) {
           borderRadius: 10,
           padding: '10px 14px',
           marginBottom: 16,
-          fontSize: 12,
+          fontSize: 'var(--texto-micro)',
           color: 'var(--info)',
           display: 'flex',
           alignItems: 'center',

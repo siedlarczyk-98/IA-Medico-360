@@ -28,14 +28,14 @@ export function WizardStepper({ steps, activeIndex }: Props) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 12,
+                  fontSize: 'var(--texto-micro)',
                   fontWeight: 700,
                   flexShrink: 0,
                 }}
               >
                 {isDone ? '✓' : i + 1}
               </div>
-              <span style={{ fontSize: 11, fontWeight: isActive ? 700 : 600, color: textColor, whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 'var(--texto-micro)', fontWeight: isActive ? 700 : 600, color: textColor, whiteSpace: 'nowrap' }}>
                 {step.title}
               </span>
             </div>

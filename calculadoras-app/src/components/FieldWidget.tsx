@@ -14,7 +14,8 @@ const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   border: '1px solid var(--line)',
   borderRadius: 8,
-  fontSize: 14,
+  // 16 px e NÃO menos: abaixo disso o iOS dá zoom na página ao tocar no campo.
+  fontSize: 'var(--texto-campo)',
   color: 'var(--ink)',
   outline: 'none',
   background: '#fff',
@@ -31,13 +32,13 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
   const base = hasError ? inputErrorStyle : inputStyle;
 
   const labelNode = (
-    <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+    <label style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
       {field.label}
       {field.unit && <span style={{ fontWeight: 400, color: 'var(--pen2)' }}>({field.unit})</span>}
       {field.required && <span style={{ color: 'var(--red)', fontWeight: 700 }}>*</span>}
       {aiPrefilled && (
         <span style={{
-          fontSize: 10,
+          fontSize: 'var(--texto-micro)',
           fontWeight: 600,
           background: 'var(--info-bg)',
           color: 'var(--info)',
@@ -77,7 +78,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
                       : '1px solid var(--line)',
                   background: active ? 'var(--petrol)' : '#fff',
                   color: active ? '#fff' : 'var(--pen)',
-                  fontSize: 13,
+                  fontSize: 'var(--texto-apoio)',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.12s',
@@ -88,7 +89,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
             );
           })}
         </div>
-        {hasError && <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+        {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
       </div>
     );
   }
@@ -107,7 +108,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        {hasError && <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+        {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
       </div>
     );
   }
@@ -129,7 +130,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
           {(field.options ?? []).map(o => {
             const checked = arrVal.includes(o.value);
             return (
-              <label key={o.value} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13, color: 'var(--pen)', lineHeight: 1.4 }}>
+              <label key={o.value} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 'var(--texto-apoio)', color: 'var(--pen)', lineHeight: 1.4 }}>
                 <input
                   type="checkbox"
                   checked={checked}
@@ -146,7 +147,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
             );
           })}
         </div>
-        {hasError && <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+        {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
       </div>
     );
   }
@@ -168,7 +169,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
           }}
           style={base}
         />
-        {hasError && <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+        {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
       </div>
     );
   }
@@ -182,7 +183,7 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
         onChange={e => onChange(e.target.value || undefined)}
         style={base}
       />
-      {hasError && <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+      {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
     </div>
   );
 }

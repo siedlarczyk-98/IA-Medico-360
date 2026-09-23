@@ -61,10 +61,13 @@ export function CalculatorCard({ calculator, onToggleFavorite }: Props) {
         }}
         style={{
           position: 'absolute',
-          top: 12,
-          right: 12,
-          width: 26,
-          height: 26,
+          // Área de toque de dedo (`--toque-min`) com o ícone no mesmo ponto
+          // de antes — 25 px do canto. Era 26 px, e errar a estrela abria a
+          // calculadora em vez de favoritá-la.
+          top: 'calc(25px - var(--toque-min) / 2)',
+          right: 'calc(25px - var(--toque-min) / 2)',
+          width: 'var(--toque-min)',
+          height: 'var(--toque-min)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -91,7 +94,7 @@ export function CalculatorCard({ calculator, onToggleFavorite }: Props) {
         </div>
         <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
           <p style={{
-            fontSize: 14,
+            fontSize: 'var(--texto-apoio)',
             fontWeight: 700,
             color: 'var(--ink)',
             lineHeight: 1.3,
@@ -105,7 +108,7 @@ export function CalculatorCard({ calculator, onToggleFavorite }: Props) {
           <span style={{
             display: 'inline-block',
             marginTop: 4,
-            fontSize: 10,
+            fontSize: 'var(--texto-micro)',
             fontWeight: 700,
             color: specialty.color,
             background: specialty.bg,
@@ -116,13 +119,12 @@ export function CalculatorCard({ calculator, onToggleFavorite }: Props) {
             {specialty.label}
           </span>
         </div>
-        {path && (
-          <span style={{ fontSize: 16, color: 'var(--pen3)', flexShrink: 0, alignSelf: 'flex-start', marginTop: 2 }}>›</span>
-        )}
+        {/* Sem "›" de abrir: o card inteiro já é o botão, e o "›" ficava no
+            mesmo canto da estrela de favorito — aparecia solto embaixo dela. */}
       </div>
       {calculator.description && (
         <p style={{
-          fontSize: 12,
+          fontSize: 'var(--texto-micro)',
           color: 'var(--pen2)',
           lineHeight: 1.5,
           marginLeft: 46,

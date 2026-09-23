@@ -193,7 +193,7 @@ export function PreventForm() {
         {data && (
           <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--fill2)' }}>
             {nadaCalculado ? (
-              <p style={{ fontSize: 13, color: 'var(--pen2)', textAlign: 'center' }}>
+              <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', textAlign: 'center' }}>
                 O PREVENT não foi calculado para este paciente.
               </p>
             ) : (
@@ -204,7 +204,7 @@ export function PreventForm() {
         )}
 
         {error && (
-          <p style={{ fontSize: 12.5, color: 'var(--red)' }}>
+          <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)' }}>
             Não foi possível calcular o PREVENT. Confira os dados acima.
           </p>
         )}
@@ -219,7 +219,7 @@ export function PreventForm() {
         </Button>
       </div>
 
-      <p style={{ fontSize: 11.5, color: 'var(--pen3)', lineHeight: 1.5 }}>
+      <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', lineHeight: 1.5 }}>
         Khan SS, Matsushita K, Sang Y, et al. Development and Validation of the American Heart
         Association PREVENT Equations. <em>Circulation</em>. 2024;149(6):430–449. Modelo base (sem
         HbA1c, relação albumina/creatinina urinária ou índice de privação social).

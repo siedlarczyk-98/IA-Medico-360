@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
-import MedicoLogoAnimada from './MedicoLogoAnimada';
+import MedicoLogoAnimada from '@shared/design/MedicoLogoAnimada';
 import type { OrchestratorMode } from './InputBar';
 
 // A ordem deste array é a ordem da grade de duas colunas: cada par de itens

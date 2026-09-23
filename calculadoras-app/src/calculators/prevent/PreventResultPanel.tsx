@@ -72,7 +72,7 @@ function BlocoHorizonte({
 
   return (
     <div style={{ textAlign: 'left' }}>
-      <p style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+      <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
         Risco de DCV total em {rotulo}
       </p>
       <p id={`prevent-${principal}`} style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.01em', margin: '2px 0 10px' }}>
@@ -90,17 +90,17 @@ function BlocoHorizonte({
                 background: marcado ? 'var(--fill1, rgba(0,0,0,0.03))' : 'transparent',
               }}
             >
-              <span style={{ fontSize: 12.5, color: 'var(--pen2)' }}>
+              <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)' }}>
                 {nome}
                 {marcado && (
-                  <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--petrol)', fontWeight: 600 }}>
+                  <span style={{ marginLeft: 6, fontSize: 'var(--texto-micro)', color: 'var(--petrol)', fontWeight: 600 }}>
                     define a classificação SBC
                   </span>
                 )}
               </span>
               <span
                 id={`prevent-${campo}`}
-                style={{ fontSize: 13.5, fontWeight: marcado ? 700 : 500, color: 'var(--ink)', whiteSpace: 'nowrap' }}
+                style={{ fontSize: 'var(--texto-apoio)', fontWeight: marcado ? 700 : 500, color: 'var(--ink)', whiteSpace: 'nowrap' }}
               >
                 {formataRisco(dados[campo])}
               </span>
@@ -148,7 +148,7 @@ export function AvisosPrevent({ avisos }: { avisos: PreventAviso[] }) {
         <p
           key={aviso.codigo}
           style={{
-            fontSize: 12.5,
+            fontSize: 'var(--texto-micro)',
             color: 'var(--pen2)',
             lineHeight: 1.45,
             paddingLeft: 10,

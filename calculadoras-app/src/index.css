@@ -1,3 +1,8 @@
+/* Fundação de celular compartilhada com o chat (`shared/design/tokens.css`):
+   texto que sobe um degrau no telefone, alvo de toque de 44 px no dedo, campo
+   de 16 px. Vem PRIMEIRO: as regras abaixo podem sobrescrever, o contrário não. */
+@import '../../shared/design/tokens.css';
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -51,3 +56,13 @@ html, body, #root {
 
 button { font-family: inherit; cursor: pointer; }
 textarea { font-family: inherit; }
+
+/* Alvo de toque: todo botão e select tem, no mínimo, altura de dedo — 44 px no
+   toque, 32 no mouse (`--toque-min`). Especificidade zero (`:where`): qualquer
+   estilo do componente vence, e `.link-na-frase` desliga para o botão que é só
+   uma palavra sublinhada no meio do texto (lá, 44 px empurrariam a linha). */
+:where(button, select) { min-height: var(--toque-min); }
+.link-na-frase { min-height: 0; }
+
+/* Logo animada na abertura da lista (ver `shared/design/MedicoLogoAnimada`). */
+.logo-abertura { display: block; height: auto; max-width: 60%; margin-bottom: 20px; }

@@ -33,7 +33,7 @@ export function StepIndicator({ steps, currentStep, completedSteps }: StepIndica
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 12.5,
+                  fontSize: 'var(--texto-micro)',
                   fontWeight: 700,
                   flexShrink: 0,
                   background: circleBg,
@@ -47,7 +47,7 @@ export function StepIndicator({ steps, currentStep, completedSteps }: StepIndica
               </div>
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 'var(--texto-micro)',
                   fontWeight: isActive ? 700 : 600,
                   color: labelColor,
                   textAlign: 'center',

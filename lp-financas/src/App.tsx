@@ -10,7 +10,7 @@ import {
 
 import heroImage from '@/assets/investimentos-hero.jpg'
 import { InterestForm } from '@/components/med360/InterestForm'
-import { Wordmark } from '@/components/med360/Wordmark'
+import MedicoLogoAnimada from '@shared/design/MedicoLogoAnimada'
 
 const steps = [
   {
@@ -67,11 +67,12 @@ export function App() {
           <div className="pointer-events-none absolute -right-10 top-1/2 hidden size-64 -translate-y-1/2 arc-360 opacity-80 md:block" />
 
           <div className="relative max-w-2xl px-6 py-14 sm:px-10 sm:py-20">
+            {/* Marca animada, na versão para fundo escuro (o hero é petróleo). */}
+            <MedicoLogoAnimada variante="escuro" width={230} className="mb-6 block h-auto w-[180px] sm:w-[230px]" />
             <span className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-brand">
               Em breve
             </span>
-            <Wordmark className="mt-7 block text-2xl sm:text-3xl" />
-            <h1 className="mt-5 text-4xl font-semibold leading-[1.05] sm:text-5xl">
+            <h1 className="mt-6 text-4xl font-semibold leading-[1.05] sm:text-5xl">
               Sua vida financeira
               <br />
               <span className="text-brand">em 360 graus.</span>

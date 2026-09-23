@@ -76,7 +76,7 @@ export function GenericCalculatorPage() {
   if (isLoading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--fill2)' }}>
-        <p style={{ fontSize: 14, color: 'var(--pen2)' }}>Carregando calculadora…</p>
+        <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>Carregando calculadora…</p>
       </div>
     );
   }
@@ -126,7 +126,7 @@ export function GenericCalculatorPage() {
               color: executing ? 'var(--pen3)' : '#fff',
               border: 'none',
               borderRadius: 10,
-              fontSize: 15,
+              fontSize: 'var(--texto-corpo)',
               fontWeight: 700,
               cursor: executing ? 'not-allowed' : 'pointer',
               transition: 'background 0.15s',
@@ -145,7 +145,7 @@ export function GenericCalculatorPage() {
               color: 'var(--pen3)',
               border: '1px solid var(--line)',
               borderRadius: 10,
-              fontSize: 13,
+              fontSize: 'var(--texto-apoio)',
               fontWeight: 600,
               cursor: 'pointer',
             }}

@@ -25,7 +25,7 @@ const cardStyle: React.CSSProperties = {
 function GoalCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div style={{ ...cardStyle, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--pen2)' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen2)' }}>
         {icon} {label}
       </span>
       <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', lineHeight: 1.25 }}>{value}</span>
@@ -48,7 +48,7 @@ export function RiscoCvResultDashboard({ riskLevel, onRestart }: Props) {
           {isSevere ? <IconAlertTriangle size={30} color={cfg.color} /> : <IconShieldAlert size={30} color={cfg.color} />}
         </div>
         <div>
-          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+          <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
             Categoria de Risco
           </p>
           <p style={{ fontSize: 30, fontWeight: 800, color: cfg.color, letterSpacing: '-0.01em' }}>
@@ -58,7 +58,7 @@ export function RiscoCvResultDashboard({ riskLevel, onRestart }: Props) {
       </div>
 
       <div>
-        <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+        <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
           Metas terapêuticas
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
@@ -74,12 +74,12 @@ export function RiscoCvResultDashboard({ riskLevel, onRestart }: Props) {
       </div>
 
       <div style={{ ...cardStyle, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--texto-corpo)', fontWeight: 700, color: 'var(--ink)' }}>
           <IconPill size={17} color="var(--petrol)" /> Recomendações farmacológicas
         </span>
         <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {goal.pharmacotherapy.map((rec, i) => (
-            <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5, color: 'var(--pen)' }}>
+            <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 'var(--texto-apoio)', color: 'var(--pen)' }}>
               <span style={{ flexShrink: 0, marginTop: 6, width: 6, height: 6, borderRadius: '50%', background: cfg.color, display: 'inline-block' }} />
               {rec}
             </li>
@@ -87,7 +87,7 @@ export function RiscoCvResultDashboard({ riskLevel, onRestart }: Props) {
         </ul>
       </div>
 
-      <p style={{ fontSize: 11.5, color: 'var(--pen3)', textAlign: 'center', padding: '4px 12px' }}>
+      <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', textAlign: 'center', padding: '4px 12px' }}>
         {DISCLAIMER}
       </p>
 
@@ -102,7 +102,7 @@ export function RiscoCvResultDashboard({ riskLevel, onRestart }: Props) {
             color: 'var(--pen)',
             border: '1px solid var(--line)',
             borderRadius: 10,
-            fontSize: 13.5,
+            fontSize: 'var(--texto-apoio)',
             fontWeight: 700,
             cursor: 'pointer',
           }}

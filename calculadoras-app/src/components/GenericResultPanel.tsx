@@ -47,14 +47,14 @@ export function GenericResultPanel({ result }: Props) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
             {r.scores.map(s => (
               <div key={s.key} style={{ background: 'var(--fill2)', borderRadius: 10, padding: '16px 18px' }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
                   {s.label}
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 800, color: 'var(--petrol)' }}>
-                  {s.value}{s.max != null && <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--pen3)' }}> / {s.max}</span>}
+                  {s.value}{s.max != null && <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--pen3)' }}> / {s.max}</span>}
                 </p>
                 {s.interpretation && (
-                  <p style={{ fontSize: 13, color: 'var(--pen)', marginTop: 6 }}>{s.interpretation}</p>
+                  <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen)', marginTop: 6 }}>{s.interpretation}</p>
                 )}
               </div>
             ))}
@@ -63,17 +63,17 @@ export function GenericResultPanel({ result }: Props) {
 
         {!r.scores && r.primary && (
           <div style={{ background: 'var(--fill2)', borderRadius: 10, padding: '16px 18px' }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
               {r.primary.label}
             </p>
             <p style={{ fontSize: 28, fontWeight: 800, color: 'var(--petrol)' }}>
-              {r.primary.value}{r.primary.unit && <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--pen3)' }}> {r.primary.unit}</span>}
+              {r.primary.value}{r.primary.unit && <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--pen3)' }}> {r.primary.unit}</span>}
             </p>
           </div>
         )}
 
         {result.interpretation && (
-          <p style={{ fontSize: 13, color: 'var(--pen)', lineHeight: 1.6 }}>{result.interpretation}</p>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen)', lineHeight: 1.6 }}>{result.interpretation}</p>
         )}
 
         {r.alerts && r.alerts.length > 0 && (
@@ -88,7 +88,7 @@ export function GenericResultPanel({ result }: Props) {
                     border: `1px solid ${style.border}`,
                     borderRadius: 10,
                     padding: '10px 14px',
-                    fontSize: 13,
+                    fontSize: 'var(--texto-apoio)',
                     color: style.color,
                     lineHeight: 1.5,
                   }}
@@ -100,7 +100,7 @@ export function GenericResultPanel({ result }: Props) {
           </div>
         )}
 
-        <p style={{ fontSize: 11, color: 'var(--pen3)', borderTop: '1px solid var(--line2)', paddingTop: 12 }}>
+        <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', borderTop: '1px solid var(--line2)', paddingTop: 12 }}>
           {DISCLAIMER}
         </p>
       </div>

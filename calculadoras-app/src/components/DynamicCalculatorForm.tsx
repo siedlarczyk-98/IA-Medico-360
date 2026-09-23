@@ -29,7 +29,7 @@ function isVisible(conditions: VisibleWhen[] | undefined, values: Record<string,
 }
 
 const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: 'var(--texto-apoio)',
   fontWeight: 700,
   color: 'var(--petrol)',
   textTransform: 'uppercase',
@@ -89,13 +89,13 @@ export function DynamicCalculatorForm({ fields, formSpec, values, onChange, aiFi
             <div key={si} style={{ margin: '8px 0 20px', paddingTop: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: section.dividerDescription ? 8 : 0 }}>
                 <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
                   {section.title}
                 </span>
                 <div style={{ flex: 1, height: 1, background: 'var(--line)' }} />
               </div>
               {section.dividerDescription && (
-                <p style={{ fontSize: 12, color: 'var(--pen2)', textAlign: 'center', lineHeight: 1.5 }}>
+                <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', textAlign: 'center', lineHeight: 1.5 }}>
                   {section.dividerDescription}
                 </p>
               )}
@@ -116,7 +116,7 @@ export function DynamicCalculatorForm({ fields, formSpec, values, onChange, aiFi
             >
               <span>{section.title}</span>
               {section.collapsible && (
-                <span style={{ fontSize: 11, color: 'var(--pen3)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▲</span>
+                <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▲</span>
               )}
             </div>
 

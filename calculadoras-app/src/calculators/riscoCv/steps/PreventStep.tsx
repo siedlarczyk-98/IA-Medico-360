@@ -195,14 +195,14 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
           <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--fill2)', textAlign: 'center' }}>
             {unavailable ? (
               <>
-                <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
+                <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
                   O PREVENT não foi calculado para este paciente. Segue direto para os fatores
                   agravantes.
                 </p>
                 {data ? (
                   <AvisosPrevent avisos={data.avisos} />
                 ) : (
-                  <p style={{ fontSize: 12.5, color: 'var(--pen2)', marginTop: 10 }}>
+                  <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginTop: 10 }}>
                     Algum dado está fora da faixa em que o escore foi validado. Recalcule para ver
                     qual.
                   </p>
@@ -219,7 +219,7 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
                   // Sem o payload (ao voltar para o passo), resta o valor que
                   // ficou no estado do wizard — que é o que definiu a conduta.
                   <div style={{ textAlign: 'left' }}>
-                    <p style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                       Risco aterosclerótico em 10 anos
                     </p>
                     <p id="prevent-ascvd_10a" style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink)' }}>
@@ -236,14 +236,14 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
           <div>
             <Label htmlFor="prevent-ldl">LDL-c (mg/dL)</Label>
             <InputField id="prevent-ldl" type="number" placeholder="Ex: 145" value={state.ldlMgdl} onChange={v => onChange({ ldlMgdl: v })} />
-            <p style={{ fontSize: 12, color: 'var(--pen2)', marginTop: 6 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginTop: 6 }}>
               Necessário para estratificação quando o risco PREVENT é inferior a 5%.
             </p>
           </div>
         )}
 
         {error && (
-          <p style={{ fontSize: 12.5, color: 'var(--red)' }}>
+          <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)' }}>
             Não foi possível calcular o PREVENT. Confira os dados acima.
           </p>
         )}

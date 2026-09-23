@@ -30,7 +30,7 @@ function LoadingScreen() {
       justifyContent: 'center',
       background: 'var(--fill2)',
     }}>
-      <p style={{ fontSize: 14, color: 'var(--pen2)' }}>Carregando…</p>
+      <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>Carregando…</p>
     </div>
   );
 }

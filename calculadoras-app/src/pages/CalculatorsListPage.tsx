@@ -8,6 +8,7 @@ import { useCurrentUser } from '../lib/useCurrentUser';
 import { logout } from '../lib/auth';
 import { getSpecialtyStyle } from '../lib/specialtyStyles';
 import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
+import MedicoLogoAnimada from '@shared/design/MedicoLogoAnimada';
 
 export function CalculatorsListPage() {
   const { data: allCalculators, isLoading, error } = useCalculators();
@@ -91,7 +92,7 @@ export function CalculatorsListPage() {
               <path d="M9 12l2 2 4-4m-5-7H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V9l-5-5z" stroke="var(--petrol)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>Calculadoras Clínicas</span>
+          <span style={{ fontSize: 'var(--texto-corpo)', fontWeight: 700, color: 'var(--ink)' }}>Calculadoras Clínicas</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {user && (
@@ -102,7 +103,7 @@ export function CalculatorsListPage() {
                 borderRadius: '50%',
                 background: 'var(--petrol)',
                 color: '#fff',
-                fontSize: 11,
+                fontSize: 'var(--texto-micro)',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
@@ -111,7 +112,7 @@ export function CalculatorsListPage() {
               }}>
                 {initials}
               </div>
-              <span style={{ fontSize: 12, color: 'var(--pen2)' }}>
+              <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)' }}>
                 {user.firstName ?? user.email}
               </span>
             </div>
@@ -126,7 +127,7 @@ export function CalculatorsListPage() {
               type="button"
               onClick={logout}
               style={{
-                fontSize: 12,
+                fontSize: 'var(--texto-micro)',
                 color: 'var(--pen3)',
                 background: 'none',
                 border: 'none',
@@ -142,13 +143,15 @@ export function CalculatorsListPage() {
 
       {/* Conteúdo */}
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px' }}>
+        {/* A mesma logo animada do chat (`shared/design`), abrindo a lista. */}
+        <MedicoLogoAnimada width={190} className="logo-abertura" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28 }}>
           <div style={{ width: 4, height: 30, borderRadius: 2, background: 'var(--petrol)' }} />
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink)', marginBottom: 4 }}>
               Calculadoras
             </h1>
-            <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
+            <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
               Ferramentas de apoio à decisão clínica baseadas em diretrizes.
             </p>
           </div>
@@ -180,7 +183,7 @@ export function CalculatorsListPage() {
               borderRadius: 12,
               border: '1px solid var(--line)',
               background: '#fff',
-              fontSize: 13,
+              fontSize: 'var(--texto-campo)',
               color: 'var(--ink)',
               outline: 'none',
             }}
@@ -203,7 +206,7 @@ export function CalculatorsListPage() {
               border: '1px solid #f5a623',
               background: specialtyFilter === 'favorites' ? '#f5a623' : 'none',
               color: specialtyFilter === 'favorites' ? '#fff' : '#f5a623',
-              fontSize: 12,
+              fontSize: 'var(--texto-micro)',
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -226,7 +229,7 @@ export function CalculatorsListPage() {
                 border: '1px solid var(--line)',
                 background: '#fff',
                 color: 'var(--ink)',
-                fontSize: 12,
+                fontSize: 'var(--texto-campo)',
                 fontWeight: 600,
                 cursor: 'pointer',
                 outline: 'none',
@@ -249,7 +252,7 @@ export function CalculatorsListPage() {
               transform: 'translateY(-50%)',
               pointerEvents: 'none',
               color: 'var(--pen2)',
-              fontSize: 10,
+              fontSize: 'var(--texto-micro)',
             }}>
               ▾
             </span>
@@ -268,7 +271,7 @@ export function CalculatorsListPage() {
               border: '1px solid var(--petrol)',
               background: 'none',
               color: 'var(--petrol)',
-              fontSize: 12,
+              fontSize: 'var(--texto-micro)',
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -278,7 +281,7 @@ export function CalculatorsListPage() {
         </div>
 
         {isLoading && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: 14 }}>
             {[1, 2, 3, 4].map(i => (
               <div key={i} style={{ height: 110, borderRadius: 14, background: 'var(--fill)', animation: 'pulse 1.4s ease-in-out infinite' }} />
             ))}
@@ -286,13 +289,13 @@ export function CalculatorsListPage() {
         )}
 
         {error && (
-          <p style={{ fontSize: 13, color: 'var(--red)', background: 'var(--red-bg)', padding: '12px 14px', borderRadius: 10 }}>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--red)', background: 'var(--red-bg)', padding: '12px 14px', borderRadius: 10 }}>
             Erro ao carregar calculadoras: {error instanceof Error ? error.message : 'Tente novamente.'}
           </p>
         )}
 
         {calculators && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: 14 }}>
             {calculators.map(c => (
               <CalculatorCard
                 key={c.id}
@@ -301,7 +304,7 @@ export function CalculatorsListPage() {
               />
             ))}
             {calculators.length === 0 && (
-              <p style={{ fontSize: 13, color: 'var(--pen2)', textAlign: 'center', padding: 40, gridColumn: '1 / -1' }}>
+              <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', textAlign: 'center', padding: 40, gridColumn: '1 / -1' }}>
                 {specialtyFilter === 'favorites'
                   ? 'Nenhuma calculadora favoritada ainda. Clique na estrela de um card para adicioná-la aqui.'
                   : 'Nenhuma calculadora encontrada.'}

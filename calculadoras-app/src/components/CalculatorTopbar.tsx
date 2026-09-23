@@ -28,10 +28,10 @@ export function CalculatorTopbar({ title, subtitle, onBack, progress }: Props) {
         ←
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <p style={{ fontSize: 'var(--texto-apoio)', fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title}
         </p>
-        {subtitle && <p style={{ fontSize: 11, color: 'var(--pen2)' }}>{subtitle}</p>}
+        {subtitle && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)' }}>{subtitle}</p>}
       </div>
       {progress != null && (
         <div style={{ width: 80, height: 4, background: 'var(--line2)', borderRadius: 2, flexShrink: 0 }}>

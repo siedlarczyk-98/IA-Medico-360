@@ -69,7 +69,7 @@ export function RequestCalculatorModal({ open, onClose }: RequestCalculatorModal
         {mutation.isSuccess ? (
           <>
             <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink)' }}>Pedido registrado</h3>
-            <p style={{ fontSize: 13, color: 'var(--pen2)' }}>
+            <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>
               Obrigado! Sua sugestão entra na priorização das próximas calculadoras.
             </p>
             <button type="button" onClick={handleClose} style={closeBtnStyle}>Fechar</button>
@@ -78,7 +78,7 @@ export function RequestCalculatorModal({ open, onClose }: RequestCalculatorModal
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink)' }}>Solicitar calculadora</h3>
-              <p style={{ fontSize: 13, color: 'var(--pen2)', marginTop: 4 }}>
+              <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', marginTop: 4 }}>
                 Qual calculadora clínica você gostaria de ver aqui? Digite o nome e adicione quantas quiser.
               </p>
             </div>
@@ -98,9 +98,10 @@ export function RequestCalculatorModal({ open, onClose }: RequestCalculatorModal
                 style={{
                   flex: 1,
                   padding: '10px 12px',
+                  // 16 px e NÃO menos: abaixo disso o iOS dá zoom ao tocar no campo.
+                  fontSize: 'var(--texto-campo)',
                   borderRadius: 10,
                   border: '1px solid var(--line)',
-                  fontSize: 13,
                   color: 'var(--ink)',
                   outline: 'none',
                 }}
@@ -133,13 +134,13 @@ export function RequestCalculatorModal({ open, onClose }: RequestCalculatorModal
                 onChange={e => setNotify(e.target.checked)}
                 style={{ marginTop: 2, accentColor: 'var(--petrol)' }}
               />
-              <span style={{ fontSize: 12, color: 'var(--pen2)' }}>
+              <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)' }}>
                 Quero ser comunicado quando essa calculadora estiver disponível
               </span>
             </label>
 
             {mutation.isError && (
-              <p style={{ fontSize: 12, color: 'var(--red)' }}>
+              <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)' }}>
                 {mutation.error instanceof AlreadyRequestedError
                   ? mutation.error.message
                   : 'Não foi possível registrar agora. Tente novamente.'}
@@ -168,7 +169,7 @@ const addBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--line)',
   background: '#fff',
-  fontSize: 12,
+  fontSize: 'var(--texto-micro)',
   fontWeight: 600,
   color: 'var(--ink)',
   cursor: 'pointer',
@@ -182,7 +183,7 @@ const chipStyle: React.CSSProperties = {
   padding: '6px 10px',
   borderRadius: 20,
   background: 'var(--fill2)',
-  fontSize: 12,
+  fontSize: 'var(--texto-micro)',
   color: 'var(--ink)',
 };
 
@@ -190,7 +191,7 @@ const chipRemoveStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
   cursor: 'pointer',
-  fontSize: 14,
+  fontSize: 'var(--texto-apoio)',
   lineHeight: 1,
   color: 'var(--pen3)',
   padding: 0,
@@ -201,7 +202,7 @@ const cancelBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--line)',
   background: '#fff',
-  fontSize: 13,
+  fontSize: 'var(--texto-apoio)',
   fontWeight: 600,
   color: 'var(--pen2)',
   cursor: 'pointer',
@@ -212,7 +213,7 @@ const submitBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: 'none',
   background: 'var(--petrol)',
-  fontSize: 13,
+  fontSize: 'var(--texto-apoio)',
   fontWeight: 700,
   color: '#fff',
   cursor: 'pointer',
@@ -224,7 +225,7 @@ const closeBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--line)',
   background: '#fff',
-  fontSize: 13,
+  fontSize: 'var(--texto-apoio)',
   fontWeight: 600,
   color: 'var(--ink)',
   cursor: 'pointer',

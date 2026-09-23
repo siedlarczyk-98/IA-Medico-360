@@ -49,7 +49,7 @@ export function ResultPanel({ result }: Props) {
         <div style={{
           flex: 1,
         }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+          <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
             Estratificação de Risco CV — SBC 2025
           </p>
           <p style={{ fontSize: 24, fontWeight: 800, color: cfg.color }}>
@@ -61,7 +61,7 @@ export function ResultPanel({ result }: Props) {
           color: '#fff',
           borderRadius: 10,
           padding: '8px 14px',
-          fontSize: 12,
+          fontSize: 'var(--texto-micro)',
           fontWeight: 700,
           textAlign: 'center',
           whiteSpace: 'nowrap',
@@ -74,25 +74,25 @@ export function ResultPanel({ result }: Props) {
 
         {/* Meta LDL */}
         <div style={{ background: 'var(--fill2)', borderRadius: 10, padding: '14px 16px' }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Meta terapêutica</p>
-          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--petrol)' }}>{r.meta_ldl_recomendada}</p>
+          <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Meta terapêutica</p>
+          <p style={{ fontSize: 'var(--texto-corpo)', fontWeight: 700, color: 'var(--petrol)' }}>{r.meta_ldl_recomendada}</p>
         </div>
 
         {/* Interpretação */}
         {result.interpretation && (
-          <p style={{ fontSize: 13, color: 'var(--pen)', lineHeight: 1.6 }}>{result.interpretation}</p>
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen)', lineHeight: 1.6 }}>{result.interpretation}</p>
         )}
 
         {/* Scores PREVENT */}
         {preventEntries.length > 0 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
               Escore PREVENT (AHA)
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
               {preventEntries.map(([key, val]) => (
                 <div key={key} style={{ background: 'var(--fill2)', borderRadius: 8, padding: '10px 12px' }}>
-                  <p style={{ fontSize: 11, color: 'var(--pen2)', marginBottom: 2 }}>{PREVENT_LABEL[key] ?? key}</p>
+                  <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginBottom: 2 }}>{PREVENT_LABEL[key] ?? key}</p>
                   <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>{val}%</p>
                 </div>
               ))}
@@ -103,12 +103,12 @@ export function ResultPanel({ result }: Props) {
         {/* Fatores agravantes */}
         {r.fatores_agravantes.length > 0 && (
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
               Fatores agravantes presentes
             </p>
             <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
               {r.fatores_agravantes.map(k => (
-                <li key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: 'var(--pen)' }}>
+                <li key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 'var(--texto-apoio)', color: 'var(--pen)' }}>
                   <span style={{ color: 'var(--red)', flexShrink: 0, marginTop: 1 }}>●</span>
                   {FATOR_LABEL[k] ?? k}
                 </li>
@@ -118,7 +118,7 @@ export function ResultPanel({ result }: Props) {
         )}
 
         {/* Disclaimer */}
-        <p style={{ fontSize: 11, color: 'var(--pen3)', borderTop: '1px solid var(--line2)', paddingTop: 12 }}>
+        <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)', borderTop: '1px solid var(--line2)', paddingTop: 12 }}>
           {DISCLAIMER}
         </p>
       </div>

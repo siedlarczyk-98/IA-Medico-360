@@ -127,7 +127,7 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SubHeading>EMAR-1 — Sem evento CV prévio</SubHeading>
-            <p style={{ fontSize: 12, color: 'var(--pen2)', marginTop: -6 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginTop: -6 }}>
               Estratificadores de Muito Alto Risco sem evento cardiovascular aterosclerótico manifesto prévio.
             </p>
             {EMAR_1_ITEMS.map(item => (
@@ -142,7 +142,8 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
                       <button
                         type="button"
                         onClick={e => { e.preventDefault(); e.stopPropagation(); setShowRenalDialog(true); }}
-                        style={{ marginLeft: 4, fontSize: 12, color: 'var(--petrol)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+                        className="link-na-frase"
+                        style={{ marginLeft: 4, fontSize: 'var(--texto-micro)', color: 'var(--petrol)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
                       >
                         {item.linkLabel}
                       </button>
@@ -157,7 +158,7 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SubHeading>EMAR-2 — Com evento CV prévio</SubHeading>
-            <p style={{ fontSize: 12, color: 'var(--pen2)', marginTop: -6 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginTop: -6 }}>
               Evento cardiovascular aterosclerótico manifesto prévio.
             </p>
             {EMAR_2_ITEMS.map(item => (
@@ -174,7 +175,7 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SubHeading hint={`Selecionados: ${state.dm2EarItems.length}/3`}>EAR — Estratificadores de Alto Risco</SubHeading>
-            <p style={{ fontSize: 12, color: 'var(--pen2)', marginTop: -6 }}>
+            <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', marginTop: -6 }}>
               ≥ 3 itens selecionados = Muito Alto Risco.
             </p>
             {EAR_ITEMS.map(item => (
@@ -189,7 +190,8 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
                       <button
                         type="button"
                         onClick={e => { e.preventDefault(); e.stopPropagation(); setShowRenalDialog(true); }}
-                        style={{ marginLeft: 4, fontSize: 12, color: 'var(--petrol)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+                        className="link-na-frase"
+                        style={{ marginLeft: 4, fontSize: 'var(--texto-micro)', color: 'var(--petrol)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
                       >
                         {item.linkLabel}
                       </button>

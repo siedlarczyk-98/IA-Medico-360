@@ -23,7 +23,7 @@ export function Button({ children, onClick, variant = 'default', disabled, type 
         gap: 8,
         padding: '11px 18px',
         borderRadius: 10,
-        fontSize: 14,
+        fontSize: 'var(--texto-apoio)',
         fontWeight: 700,
         border: isDefault ? 'none' : '1px solid var(--line)',
         background: disabled ? 'var(--fill)' : isDefault ? 'var(--petrol)' : '#fff',
@@ -69,7 +69,7 @@ export function ToggleGroup<T extends string>({ value, onChange, options }: Togg
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} style={{ fontSize: 12, fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 5 }}>
+    <label htmlFor={htmlFor} style={{ fontSize: 'var(--texto-micro)', fontWeight: 600, color: 'var(--pen)', letterSpacing: '0.03em', display: 'block', marginBottom: 5 }}>
       {children}
     </label>
   );
@@ -102,7 +102,7 @@ export function InputField({ id, value, onChange, type = 'text', placeholder, mi
         padding: '8px 10px',
         border: '1px solid var(--line)',
         borderRadius: 8,
-        fontSize: 14,
+        fontSize: 'var(--texto-campo)',
         color: 'var(--ink)',
         outline: 'none',
         background: '#fff',
@@ -146,7 +146,7 @@ export function Dialog({ open, onClose, title, description, children }: DialogPr
       >
         <div>
           <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--ink)' }}>{title}</h3>
-          {description && <p style={{ fontSize: 13, color: 'var(--pen2)', marginTop: 4 }}>{description}</p>}
+          {description && <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', marginTop: 4 }}>{description}</p>}
         </div>
         {children}
         <Button variant="outline" onClick={onClose}>Fechar</Button>
@@ -196,7 +196,7 @@ export function CardHeader({ icon, title, description, iconColor }: CardHeaderPr
         <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-0.01em' }}>{title}</span>
       </div>
       {description && (
-        <p style={{ fontSize: 13.5, color: 'var(--pen2)', lineHeight: 1.5 }}>{description}</p>
+        <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', lineHeight: 1.5 }}>{description}</p>
       )}
     </div>
   );
@@ -214,10 +214,10 @@ interface SubHeadingProps {
 export function SubHeading({ children, hint }: SubHeadingProps) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-      <h4 style={{ fontSize: 12, fontWeight: 700, color: 'var(--pen)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+      <h4 style={{ fontSize: 'var(--texto-micro)', fontWeight: 700, color: 'var(--pen)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         {children}
       </h4>
-      {hint && <span style={{ fontSize: 11, color: 'var(--pen3)' }}>{hint}</span>}
+      {hint && <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen3)' }}>{hint}</span>}
     </div>
   );
 }
@@ -239,6 +239,7 @@ export function CheckItem({ checked, onChange, label, description, error }: Chec
         alignItems: 'flex-start',
         gap: 10,
         padding: '8px 10px',
+        minHeight: 'var(--toque-min)',
         borderRadius: 8,
         cursor: 'pointer',
         border: error ? '1px solid var(--red)' : '1px solid transparent',
@@ -253,9 +254,9 @@ export function CheckItem({ checked, onChange, label, description, error }: Chec
         style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, accentColor: 'var(--petrol)' }}
       />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.4 }}>{label}</span>
+        <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', lineHeight: 1.4 }}>{label}</span>
         {description && (
-          <span style={{ fontSize: 12, color: 'var(--pen2)', lineHeight: 1.4 }}>{description}</span>
+          <span style={{ fontSize: 'var(--texto-micro)', color: 'var(--pen2)', lineHeight: 1.4 }}>{description}</span>
         )}
       </div>
     </label>
