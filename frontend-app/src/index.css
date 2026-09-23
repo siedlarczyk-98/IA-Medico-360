@@ -53,3 +53,14 @@ textarea { font-family: inherit; }
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
 }
+
+/* Marcador de citação `[1]` na resposta (ver `lib/marcadoresCitacao.tsx`). */
+.marcador-citacao {
+  font-size: 0.72em;
+  line-height: 0;
+  vertical-align: super;
+  color: var(--pen3);
+  font-weight: 600;
+  /* Separa `[1][10]` sem espaço de texto real, que o leitor de tela anunciaria. */
+  margin-left: 1px;
+}

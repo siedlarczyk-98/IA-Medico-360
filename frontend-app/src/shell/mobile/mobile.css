@@ -18,6 +18,13 @@
   --anel-foco: 0 0 0 3px rgba(1, 71, 81, .1);
   --scrim: rgba(14, 37, 45, .42);
 
+  /* Margens do aparelho (notch, barra de status, barra de gestos). Zeradas
+     dentro da Waid — ver a regra `[data-hospedeiro="hospedado"]` abaixo. */
+  --seguro-topo: env(safe-area-inset-top);
+  --seguro-dir: env(safe-area-inset-right);
+  --seguro-baixo: env(safe-area-inset-bottom);
+  --seguro-esq: env(safe-area-inset-left);
+
   /* Presa à área VISÍVEL (ver `useTeclado`): no iOS o teclado cobre a página
      em vez de encolhê-la, e o campo de pergunta ficava atrás dele. */
   position: fixed;
@@ -31,12 +38,27 @@
   background: var(--paper);
   color: var(--ink);
   font-size: var(--texto-corpo);
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: var(--seguro-topo) var(--seguro-dir) 0 var(--seguro-esq);
 }
 /* Em separado: um valor desconhecido dentro de `var()` anula a declaração
    inteira, e a de cima (100vh) não serviria de reserva. */
 @supports (height: 100dvh) {
   .shell-movel { height: var(--altura-visivel, 100dvh); }
+}
+
+/* DENTRO DA WAID, margem do aparelho é zero.
+   O app da Waid já desenha a barra de status e a de navegação em volta do
+   webview — e mesmo assim o webview do Android INFORMA as margens ao
+   `env(safe-area-inset-*)`. Aplicadas, viravam duas faixas vazias (~44 px em
+   cima e embaixo) no print de 23/09/2026. O protótipo já avisava; o palpite de
+   que `env()` daria 0 ali estava errado. Se o app passar a ocupar a tela
+   inteira (edge-to-edge), é aqui que se volta atrás — o `/diagnostico-embed`
+   mostra as margens que o aparelho informa. */
+.shell-movel[data-hospedeiro="hospedado"] {
+  --seguro-topo: 0px;
+  --seguro-dir: 0px;
+  --seguro-baixo: 0px;
+  --seguro-esq: 0px;
 }
 
 /* Reset de botão com especificidade ZERO (`:where`): qualquer classe abaixo
@@ -86,26 +108,35 @@
 /* ── Corpo ─────────────────────────────────────────────────────────────── */
 .mv-corpo { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-/* Tela vazia: bloco colado no campo de pergunta, não centralizado no meio. */
-.mv-vazia { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--margem-tela); }
-.mv-vazia-bloco { margin-top: auto; padding: var(--gap-4) 0 var(--gap-2); }
-.mv-saudacao { font-size: var(--texto-destaque); font-weight: 700; letter-spacing: -.4px; margin: 0 0 4px; line-height: 1.25; }
-.mv-saudacao.compacta { margin-bottom: var(--gap-3); }
-.mv-lede { font-size: var(--texto-apoio); color: var(--pen2); line-height: 1.5; margin: 0 0 var(--gap-5); }
-.mv-sugs { display: flex; flex-direction: column; gap: var(--gap-2); }
-.mv-sug {
-  display: flex; gap: 12px; align-items: center; min-height: 52px; padding: 10px 12px 10px 14px;
-  border: 1px solid var(--line2); border-radius: var(--raio-2); background: #fff;
-  font-size: var(--texto-apoio); line-height: 1.4; text-align: left; width: 100%; color: var(--ink);
+/* Tela vazia (opção C): saudação no centro do espaço livre, atalhos de modo
+   presos em cima do campo de pergunta. */
+.mv-vazia { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.mv-vazia-centro {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--gap-4); text-align: center;
 }
-.mv-sug:active { background: var(--fill2); }
-.mv-sug-i { width: 32px; height: 32px; border-radius: var(--raio-1); background: var(--fill); color: var(--petrol); display: grid; place-items: center; flex: none; }
+.mv-logo { display: block; height: auto; margin-bottom: var(--gap-5); max-width: 60%; }
+.mv-saudacao { font-size: 1.5rem; font-weight: 700; letter-spacing: -.4px; margin: 0; line-height: 1.25; }
+.mv-lede { font-size: var(--texto-apoio); color: var(--pen2); line-height: 1.5; margin: 6px 0 0; }
+/* Teclado aberto: a saudação sai, os atalhos ficam (é onde o polegar está). */
+.shell-movel[data-teclado="aberto"] .mv-vazia-centro { visibility: hidden; }
+
+.mv-atalhos { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 0 4px; }
+.mv-atalhos > .mv-sec-l { padding: 0 var(--margem-tela); }
+.mv-chips { display: flex; gap: 8px; padding: 0 var(--margem-tela); }
+.mv-chip {
+  flex: none; display: flex; align-items: center; gap: 6px; height: var(--toque-min); padding: 0 14px;
+  border-radius: 22px; background: #fff; border: 1px solid var(--line2);
+  font-size: var(--texto-apoio); font-weight: 600; color: var(--ink); white-space: nowrap;
+}
+.mv-chip:active { background: var(--fill2); }
+.mv-chip[aria-pressed="true"] { background: var(--petrol); border-color: var(--petrol); color: #fff; }
 
 /* ── Campo de pergunta ─────────────────────────────────────────────────── */
 .mv-composer {
   flex: none; padding: 8px var(--margem-tela);
   /* A barra de gestos do iPhone fica embaixo do campo, não em cima dele. */
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-bottom: max(12px, var(--seguro-baixo));
   background: var(--paper);
 }
 .shell-movel[data-teclado="aberto"] .mv-composer { padding-bottom: 8px; }
@@ -166,7 +197,7 @@
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 41; max-height: 92%;
   display: flex; flex-direction: column; outline: none;
   background: var(--paper); border-radius: var(--raio-3) var(--raio-3) 0 0; box-shadow: var(--sombra-sheet);
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-bottom: max(16px, var(--seguro-baixo));
   animation: mv-sobe .24s ease-out;
 }
 @keyframes mv-sobe { from { transform: translateY(100%); } to { transform: none; } }
@@ -238,7 +269,7 @@
   position: absolute; top: 0; bottom: 0; left: 0; width: 88%; max-width: 420px; z-index: 30;
   background: var(--paper); display: flex; flex-direction: column;
   box-shadow: 8px 0 30px rgba(14, 37, 45, .18);
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--seguro-topo);
   animation: mv-entra-esq .24s ease-out;
 }
 @keyframes mv-entra-esq { from { transform: translateX(-100%); } to { transform: none; } }
@@ -247,7 +278,7 @@
 .mv-gaveta-linha b { flex: 1; font-size: var(--texto-titulo); font-weight: 700; }
 .mv-gaveta-rodape {
   flex: none; display: flex; align-items: center; gap: 12px; min-height: 64px; width: 100%; text-align: left;
-  padding: 8px 12px max(8px, env(safe-area-inset-bottom)) var(--margem-tela);
+  padding: 8px 12px max(8px, var(--seguro-baixo)) var(--margem-tela);
   border-top: 1px solid var(--line2); color: var(--pen2);
 }
 .mv-gaveta-rodape-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -261,7 +292,7 @@
 /* ── Barra de abas (fora da Waid) ─────────────────────────────────────── */
 .mv-abas {
   flex: none; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line2); background: var(--paper);
-  padding: 4px 8px max(4px, env(safe-area-inset-bottom));
+  padding: 4px 8px max(4px, var(--seguro-baixo));
 }
 /* Teclado aberto: as abas somem e o campo de pergunta fica colado nele. */
 .shell-movel[data-teclado="aberto"] .mv-abas { display: none; }
@@ -303,7 +334,7 @@
 .mv-sk { border-radius: var(--raio-1); background: linear-gradient(90deg, var(--fill) 0%, var(--fill2) 50%, var(--fill) 100%); background-size: 200% 100%; animation: mv-brilho 1.4s infinite linear; }
 @keyframes mv-brilho { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-.mv-selbar { flex: none; display: flex; gap: 8px; padding: 12px var(--margem-tela) max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line2); background: var(--paper); }
+.mv-selbar { flex: none; display: flex; gap: 8px; padding: 12px var(--margem-tela) max(12px, var(--seguro-baixo)); border-top: 1px solid var(--line2); background: var(--paper); }
 .mv-fab { position: absolute; right: var(--margem-tela); bottom: 16px; z-index: 5; min-height: 56px; border-radius: var(--raio-3); box-shadow: 0 6px 20px rgba(14, 37, 45, .18); }
 
 /* Resposta chegando enquanto o médico está em outra tela. */
@@ -367,3 +398,20 @@
 .mv-conta-rodape { margin: 0; text-align: center; font-size: var(--texto-micro); color: var(--pen3); }
 .mv-inp-ro { background: var(--fill2); color: var(--pen); display: flex; align-items: center; }
 .mv-erro-txt { margin: 0; font-size: var(--texto-apoio); color: var(--red); }
+
+/* Citação como chip: "¹¹¹²" colado era ilegível no telefone (print de 23/09).
+   Cada número vira uma pastilha separada, como no protótipo. */
+.shell-movel .marcador-citacao {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 5px;
+  margin-left: 3px;
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--petrol);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: 2px;
+}

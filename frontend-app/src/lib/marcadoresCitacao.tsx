@@ -43,16 +43,6 @@ import { Fragment, isValidElement, type ReactNode } from 'react'
  */
 const MARCADOR = /\[(\d{1,3})\]/g
 
-const estiloSup: React.CSSProperties = {
-  fontSize: '0.72em',
-  lineHeight: 0,
-  verticalAlign: 'super',
-  color: 'var(--pen3)',
-  fontWeight: 600,
-  // Separa `[1][10]` sem espaço de texto real, que o leitor de tela anunciaria.
-  marginLeft: 1,
-}
-
 /** Quebra uma string em texto + `<sup>`, preservando tudo que não for marcador. */
 function transformarTexto(texto: string, chaveBase: string): ReactNode[] | null {
   // `matchAll` não sofre do estado global de `lastIndex` que `test`/`exec`
@@ -67,7 +57,9 @@ function transformarTexto(texto: string, chaveBase: string): ReactNode[] | null 
     const inicio = achado.index
     if (inicio > cursor) partes.push(texto.slice(cursor, inicio))
     partes.push(
-      <sup key={`${chaveBase}-${i}`} style={estiloSup}>
+      // Estilo em `.marcador-citacao` (index.css), e não inline: a casca
+      // mobile desenha o marcador como chip, e estilo inline não se sobrescreve.
+      <sup key={`${chaveBase}-${i}`} className="marcador-citacao">
         {achado[1]}
       </sup>,
     )

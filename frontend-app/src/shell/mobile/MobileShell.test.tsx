@@ -2,8 +2,8 @@
  * A Consulta na casca mobile, com o app inteiro montado num celular.
  *
  * O que a lógica garante já está coberto pelo controller e pelo composer. Aqui
- * se trava o que é DESTA tela: o que aparece dentro e fora da Waid, a sugestão
- * que preenche (e não envia), a folha de modo, o aviso de imagem — que, sem
+ * se trava o que é DESTA tela: o que aparece dentro e fora da Waid, os atalhos
+ * de modo, a folha de modo, o aviso de imagem — que, sem
  * uma tela para ele, deixaria o anexo parado para sempre — e o Parar.
  */
 import { screen, waitFor, within } from '@testing-library/react';
@@ -85,30 +85,37 @@ afterEach(() => {
 });
 
 describe('casca mobile — tela vazia', () => {
-  it('fora da Waid: marca no cabeçalho, saudação com o nome e quatro sugestões', async () => {
+  it('fora da Waid: marca no cabeçalho, logo, saudação com o nome e os atalhos de modo', async () => {
     await abrirNoCelular();
 
     expect(screen.getByText('Médico 360')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Médico 360' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: /ana/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /claritromicina|dor torácica|amoxicilina|resumo de alta/i })).toHaveLength(4);
+    const atalhos = screen.getByRole('group', { name: /começar por/i });
+    expect(within(atalhos).getAllByRole('button')).toHaveLength(6);
+    // O modo atual vem marcado.
+    expect(within(atalhos).getByRole('button', { name: /busca/i })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('dentro do app da Waid: sem marca e só três sugestões (a altura é menor)', async () => {
+  it('dentro do app da Waid: sem marca no cabeçalho, mesma tela vazia', async () => {
     (window as { ReactNativeWebView?: unknown }).ReactNativeWebView = {};
     await abrirNoCelular();
 
     expect(document.querySelector('[data-hospedeiro]')?.getAttribute('data-hospedeiro')).toBe('hospedado');
     expect(screen.queryByText('Médico 360')).toBeNull();
-    expect(screen.getAllByRole('button', { name: /claritromicina|dor torácica|amoxicilina|resumo de alta/i })).toHaveLength(3);
+    expect(screen.getByRole('group', { name: /começar por/i })).toBeInTheDocument();
   });
 
-  it('tocar numa sugestão PREENCHE o campo e ajusta o modo — não envia', async () => {
+  it('tocar num atalho troca o modo — sem abrir folha e sem enviar nada', async () => {
     const user = await abrirNoCelular();
+    const atalhos = screen.getByRole('group', { name: /começar por/i });
 
-    await user.click(screen.getByRole('button', { name: /claritromicina/i }));
+    await user.click(within(atalhos).getByRole('button', { name: /fármacos/i }));
 
-    expect(campo()).toHaveValue('Interação entre claritromicina e sinvastatina');
+    expect(within(atalhos).getByRole('button', { name: /fármacos/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(atalhos).getByRole('button', { name: /busca/i })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: /modo: fármacos/i })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(streamQueryMock).not.toHaveBeenCalled();
   });
 });

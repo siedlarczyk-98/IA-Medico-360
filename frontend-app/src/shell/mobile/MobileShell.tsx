@@ -145,7 +145,7 @@ export default function MobileShell({ chat }: { chat: ChatController }) {
 
           <main className="mv-corpo">
             {chat.vazio ? (
-              <ConsultaVazia chat={chat} nome={currentUser?.firstName} compacta={hospedado} />
+              <ConsultaVazia chat={chat} nome={currentUser?.firstName} />
             ) : (
               <ChatView
                 messages={messages}
