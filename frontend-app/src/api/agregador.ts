@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -20,6 +20,7 @@ export interface AIModel {
 
 export async function fetchModels(): Promise<AIModel[]> {
   const res = await fetch(`${BASE}/api/v1/agregador/models`, { headers: authHeaders() });
+  conferirSessao(res);
   if (!res.ok) throw new Error(`fetchModels error ${res.status}`);
   return res.json();
 }
@@ -71,6 +72,7 @@ export async function* streamAgregador(
     signal,
   });
 
+  conferirSessao(res);
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     console.error(`Agregador API ${res.status}:`, detail);

@@ -10,8 +10,10 @@
  * O estado mora em `rascunho.ts`, não aqui: ver o docblock de lá.
  */
 
+import { ErroDeApi } from '../api/erros';
 import { extractFile, type ExtractResult } from '../api/uploads';
 import type { Attachment, Effort } from '../components/InputBar';
+import { sessaoExpirou } from '../lib/auth';
 import { alterarRascunho, lerRascunho, useRascunho } from './rascunho';
 
 // Teto por mensagem, espelhando MAX_ANEXOS_POR_MENSAGEM no backend. Repetido
@@ -73,6 +75,13 @@ export function useComposer({ onSend, disabled, sendBlocked, onAttachmentChange 
         };
         mudarAnexos(anexos => [...anexos, novo]);
       } catch (err) {
+        if (err instanceof ErroDeApi && err.status === 401) {
+          // O texto que o médico estava escrevendo volta depois da reentrada. Os
+          // anexos não voltam: o rascunho vive em memória e a reentrada recarrega
+          // a página. Anexar de novo é um toque.
+          sessaoExpirou({ pergunta: lerRascunho().texto });
+          return;
+        }
         const motivo = err instanceof Error ? err.message : 'Erro ao processar arquivo.';
         falhas.push(files.length > 1 ? `"${file.name}": ${motivo}` : motivo);
       }

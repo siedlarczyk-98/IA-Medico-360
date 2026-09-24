@@ -1,9 +1,10 @@
-import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
 import { hospedadoNaWaid } from '@shared/embed/sessao';
-import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth';
+import { consumirRetomada, getToken, isAuthenticated, isTokenExpired, sessaoExpirou, setToken } from './lib/auth';
 import { useSessaoViva } from './lib/useSessaoViva';
+import { alterarRascunho, lerRascunho } from './chat/rascunho';
 import { useChatController } from './chat/useChatController';
 import { DesktopShell } from './shell/desktop/DesktopShell';
 import { cascaMovelDisponivel, useLayout } from './shell/layout';
@@ -62,10 +63,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
  */
 function MainApp() {
   // Renova o token ao voltar do segundo plano; se ele já venceu (o app ficou
-  // parado mais de uma hora), entra de novo — pela Waid, quando hospedado.
-  const navigate = useNavigate();
-  useSessaoViva(() => navigate(rotaDeEntrada(), { replace: true }));
+  // parado mais de uma hora) ou o servidor o recusou (Sair em outro aparelho),
+  // entra de novo — pela Waid, quando hospedado. `sessaoExpirou`, e não uma
+  // navegação do roteador: ela limpa o token e trava o laço de reentrada. Leva
+  // junto a conversa aberta e o que estava no campo, para voltar como estava.
   const chat = useChatController();
+  useSessaoViva(() => sessaoExpirou({ conversaId: chat.activeConvId, pergunta: lerRascunho().texto }));
+
+  // Depois de uma reentrada: devolve a conversa que estava aberta e a pergunta
+  // que não chegou a ir. Ver `sessaoExpirou`.
+  const { handleSelectConversation } = chat;
+  useEffect(() => {
+    const retomada = consumirRetomada();
+    if (!retomada) return;
+    if (retomada.pergunta) alterarRascunho({ texto: retomada.pergunta });
+    if (retomada.conversaId) void handleSelectConversation(retomada.conversaId);
+  }, [handleSelectConversation]);
   const layout = useLayout();
   return (
     <Suspense fallback={null}>

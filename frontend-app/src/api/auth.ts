@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -55,6 +55,8 @@ async function post<T>(path: string, body: unknown, auth = false): Promise<T> {
     credentials: 'include',
     body: JSON.stringify(body),
   });
+  // Só com token: sem ele, 401 é resposta de negócio (código de e-mail errado).
+  if (auth) conferirSessao(res);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? 'Erro desconhecido');
@@ -74,6 +76,7 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
     credentials: 'include',
     body: JSON.stringify(body),
   });
+  conferirSessao(res);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? 'Erro desconhecido');
@@ -92,6 +95,7 @@ async function del(path: string, body: unknown): Promise<void> {
     credentials: 'include',
     body: JSON.stringify(body),
   });
+  conferirSessao(res);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? 'Erro desconhecido');
@@ -107,6 +111,7 @@ async function get<T>(path: string): Promise<T> {
     },
     credentials: 'include',
   });
+  conferirSessao(res);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? 'Erro desconhecido');

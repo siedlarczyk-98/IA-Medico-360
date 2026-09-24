@@ -5,6 +5,7 @@ import { useUserUsage } from '../lib/useUserUsage';
 import type { Folder, FolderKind } from '../api/folders';
 import { useConversasEPastas } from '../hooks/useConversasEPastas';
 import { FolderModal } from './FolderModal';
+import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
 import { logout } from '../lib/auth';
 import { abrirSuporte, suporteDisponivel } from '../lib/intercom';
 import { ProfileModal } from './ProfileModal';
@@ -62,6 +63,12 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const ponteiroDoTip = useRef<string>('mouse');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  // Sem "Sair" dentro do iframe, a mesma regra da casca mobile (`shell/mobile/Conta`
+  // e `shared/embed/dentro-do-iframe.ts`): ali a identidade vem do handshake a
+  // cada abertura, e o botão só servia para revogar a sessão de TODOS os
+  // aparelhos do médico — inclusive o chat aberto no celular. Lido uma vez: o
+  // contexto não muda durante a sessão.
+  const [podeSair] = useState(() => !dentroDoIframe());
   // `null` = fechado; `'new'` = criando; um Folder = editando aquele.
   // Substituiu o input inline de nome: a evolução é texto de várias linhas e
   // não cabe na sidebar, e criar/editar na mesma tela evita duas UIs.
@@ -244,15 +251,19 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                     Falar com o suporte
                   </button>
                 )}
-              <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
-              <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                  <path d="M10 11 L14 8 L10 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M14 8 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                  <path d="M6 3 H3 V13 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Sair
-              </button>
+              {podeSair && (
+                <>
+                  <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
+                  <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                      <path d="M10 11 L14 8 L10 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M14 8 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      <path d="M6 3 H3 V13 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Sair
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -610,15 +621,19 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                   Falar com o suporte
                 </button>
               )}
-            <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
-            <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <path d="M10 11 L14 8 L10 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M14 8 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                <path d="M6 3 H3 V13 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Sair
-            </button>
+            {podeSair && (
+              <>
+                <div style={{ height: 1, background: 'var(--line2)', margin: '0 10px' }} />
+                <button onClick={logout} style={{ ...menuItemStyle, color: '#ef4444' }}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                    <path d="M10 11 L14 8 L10 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 8 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                    <path d="M6 3 H3 V13 H6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Sair
+                </button>
+              </>
+            )}
           </div>
         )}
         <div

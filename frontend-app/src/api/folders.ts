@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -32,6 +32,7 @@ export const MAX_CHARS_EVOLUCAO = 8000;
 
 export async function listFolders(): Promise<Folder[]> {
   const res = await fetch(`${BASE}/api/v1/folders`, { headers: authHeaders() });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao carregar pastas');
   return res.json();
 }
@@ -50,6 +51,7 @@ export async function createFolder(
       ...(clinicalContext ? { clinical_context: clinicalContext } : {}),
     }),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao criar pasta');
   return res.json();
 }
@@ -67,6 +69,7 @@ export async function renameFolder(id: string, name: string): Promise<Folder> {
     headers: authHeaders(),
     body: JSON.stringify({ name }),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao renomear pasta');
   return res.json();
 }
@@ -88,6 +91,7 @@ export async function updateFolder(
     headers: authHeaders(),
     body: JSON.stringify({ name, clinical_context: clinicalContext, folder_kind: folderKind }),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao salvar pasta');
   return res.json();
 }
@@ -97,6 +101,7 @@ export async function deleteFolder(id: string): Promise<void> {
     method: 'DELETE',
     headers: authHeaders(),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao excluir pasta');
 }
 
@@ -106,6 +111,7 @@ export async function moveConversation(conversationId: string, folderId: string 
     headers: authHeaders(),
     body: JSON.stringify({ folder_id: folderId }),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao mover conversa');
 }
 
@@ -115,5 +121,6 @@ export async function bulkMoveConversations(conversationIds: string[], folderId:
     headers: authHeaders(),
     body: JSON.stringify({ conversation_ids: conversationIds, folder_id: folderId }),
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Erro ao mover conversas');
 }

@@ -135,6 +135,11 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
       **Corrigido em 2026-09-24 (item 59):** a eleição decidia só no boot e todo
       deploy deixava o backend sem agendadores. Agora é disputada a cada 60 s.
       Até este código subir, Restart (não Redeploy) do backend depois de cada deploy.
+- [ ] **Homologar o item 60 no celular** (passo 3 do roteiro em `docs/pitacos-do-fable-2.md`):
+      Sair no computador ou nas calculadoras, abrir o chat no celular em menos de 60 min e
+      mandar uma pergunta. Esperado: tela de espera por um instante, o chat volta na mesma
+      conversa e a pergunta volta para o campo, sem código por e-mail. Corrigido em
+      2026-09-24: todo 401 do chat leva a `sessaoExpirou` (`frontend-app/src/lib/auth.ts`).
 - [ ] **Homologar o item 59 em produção:** dois deploys seguidos SEM Restart, e nos
       dois o log mostra "Agendador 'agendadores': este processo é o líder" em até
       ~2 min depois que o container antigo sai.

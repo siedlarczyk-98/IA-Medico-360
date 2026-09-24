@@ -9,8 +9,12 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Sidebar, SIDEBAR_PINNED_KEY } from './Sidebar';
 import { renderComProvedores } from '../test/utils';
+import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
+
+vi.mock('@shared/embed/dentro-do-iframe', () => ({ dentroDoIframe: vi.fn(() => false) }));
 
 vi.mock('../lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   logout: vi.fn(),
   getTokenPayload: () => ({ sub: 'user-1', exp: 9999999999 }),
   getToken: () => 'token-de-teste',
@@ -309,6 +313,24 @@ describe('Menu do usuário (Editar perfil / Sair)', () => {
     expect(menus()).toHaveLength(1);
     expect(screen.getAllByText('Editar perfil')).toHaveLength(1);
     expect(screen.getAllByText('Sair')).toHaveLength(1);
+  });
+
+  it('dentro do iframe não há Sair, como na casca mobile (item 72)', async () => {
+    // Ali a identidade vem do handshake a cada abertura; o botão só servia para
+    // revogar a sessão de TODOS os aparelhos — o chat do celular incluído.
+    vi.mocked(dentroDoIframe).mockReturnValue(true);
+    try {
+      localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
+      const user = userEvent.setup();
+      renderSidebar();
+
+      await user.click(await within(painel()!).findByText('Ana Souza'));
+
+      expect(screen.getAllByText('Editar perfil')).toHaveLength(1);
+      expect(screen.queryByText('Sair')).not.toBeInTheDocument();
+    } finally {
+      vi.mocked(dentroDoIframe).mockReturnValue(false);
+    }
   });
 
   it('abre UM menu só com o painel aberto por hover', async () => {

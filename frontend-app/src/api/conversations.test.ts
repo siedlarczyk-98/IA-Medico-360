@@ -6,7 +6,7 @@
  */
 import { CONVERSAS_POR_PAGINA, listConversations } from './conversations';
 
-vi.mock('../lib/auth', () => ({ getToken: () => 'token-de-teste' }));
+vi.mock('../lib/auth', () => ({ sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null, getToken: () => 'token-de-teste' }));
 
 const fetchMock = vi.fn();
 

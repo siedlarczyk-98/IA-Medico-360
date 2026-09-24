@@ -1,4 +1,7 @@
+import { reservarReentradaPelaWaid } from '@shared/embed/sessao';
+
 const TOKEN_KEY = 'medico360_token';
+const RETOMADA_KEY = 'medico360_retomada';
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -90,4 +93,90 @@ export function logout(): void {
   void encerrarSessaoNoServidor(token).finally(() => {
     window.location.href = '/login';
   });
+}
+
+/** O que o médico estava fazendo quando a sessão caiu, para devolver depois de entrar. */
+export interface Retomada {
+  /** Pergunta que não chegou ao servidor: volta para o campo, não é reenviada sozinha. */
+  pergunta?: string;
+  conversaId?: string;
+}
+
+let saindo = false;
+let donoDaSessao: string | null = null;
+
+/**
+ * A sessão acabou (401): entra de novo.
+ *
+ * Dentro da Waid, pelo handshake — silencioso, o médico só vê a tela de espera
+ * por um instante. Fora dela, ou se a reentrada pela Waid acabou de ser tentada
+ * (trava contra laço em `reservarReentradaPelaWaid`), pelo login.
+ *
+ * Antes disto o 401 no chat era beco sem saída: virava o balão "Sua sessão
+ * expirou. Entre novamente" sem botão nem redirecionamento. E o gatilho é comum:
+ * "Sair" em QUALQUER aparelho revoga todos (`token_version`), então sair nas
+ * calculadoras ou no computador deixava o chat do celular com um token ainda
+ * dentro do prazo, recusado em toda chamada, por até uma hora.
+ *
+ * O token é LIMPO antes de sair, e não é detalhe: fora do iframe, a
+ * `EmbedAuthPage` devolve para "/" quem tem token não vencido quando a Waid não
+ * responde. Com o token revogado ainda aqui, isso giraria entre as duas telas.
+ *
+ * Navegação completa (`location.replace`), e não do roteador: zera o cache do
+ * react-query, que guardava as conversas da sessão morta.
+ *
+ * Pode ser chamada mais de uma vez no mesmo instante (o envio e a lista levam
+ * 401 juntos): só a primeira navega, mas todas acrescentam à retomada.
+ */
+export function sessaoExpirou(retomar?: Retomada): void {
+  if (!saindo) donoDaSessao = getTokenPayload()?.sub ?? null;
+  if (retomar && donoDaSessao) guardarRetomada(donoDaSessao, retomar);
+  const { pathname } = window.location;
+  if (saindo || pathname === '/login' || pathname === '/embed-auth') return;
+  saindo = true;
+  clearToken();
+  window.location.replace(reservarReentradaPelaWaid() ? '/embed-auth' : '/login');
+}
+
+/** Para quem faz `fetch` com o token e não tem o que retomar: 401 é sessão que acabou. */
+export function conferirSessao(res: Response): void {
+  if (res.status === 401) sessaoExpirou();
+}
+
+function guardarRetomada(dono: string, retomar: Retomada): void {
+  try {
+    const anterior = JSON.parse(sessionStorage.getItem(RETOMADA_KEY) ?? 'null') as
+      (Retomada & { dono?: string }) | null;
+    const base = anterior?.dono === dono ? anterior : {};
+    const junto = { ...base, dono };
+    if (retomar.pergunta?.trim()) junto.pergunta = retomar.pergunta;
+    if (retomar.conversaId) junto.conversaId = retomar.conversaId;
+    sessionStorage.setItem(RETOMADA_KEY, JSON.stringify(junto));
+  } catch {
+    /* sem sessionStorage a reentrada funciona igual; só não devolve o que havia */
+  }
+}
+
+/**
+ * A retomada guardada, se for DESTE médico. Consome o valor — chamar em efeito
+ * ou handler, nunca no corpo de um render.
+ *
+ * A conferência do dono é o que impede a pergunta de um médico aparecer no campo
+ * de outro: a `sessionStorage` é da aba, e numa estação compartilhada quem entra
+ * pelo login depois da queda pode ser outra pessoa.
+ */
+export function consumirRetomada(): Retomada | null {
+  try {
+    const bruto = sessionStorage.getItem(RETOMADA_KEY);
+    sessionStorage.removeItem(RETOMADA_KEY);
+    if (!bruto) return null;
+    const { dono, pergunta, conversaId } = JSON.parse(bruto) as Retomada & { dono?: string };
+    if (!dono || dono !== getTokenPayload()?.sub) return null;
+    return {
+      ...(typeof pergunta === 'string' && pergunta ? { pergunta } : {}),
+      ...(typeof conversaId === 'string' && conversaId ? { conversaId } : {}),
+    };
+  } catch {
+    return null;
+  }
 }

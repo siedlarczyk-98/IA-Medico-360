@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -13,6 +13,7 @@ export async function getUserUsage(): Promise<UsageResponse> {
   const res = await fetch(`${BASE}/api/v1/users/usage`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  conferirSessao(res);
   if (!res.ok) throw new Error('Failed to fetch usage');
   return res.json();
 }

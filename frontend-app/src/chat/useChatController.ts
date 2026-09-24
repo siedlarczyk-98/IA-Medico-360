@@ -28,9 +28,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { getConversation } from '../api/conversations';
-import { mensagemDeErro, valeTentarDeNovo } from '../api/erros';
+import { ErroDeApi, mensagemDeErro, valeTentarDeNovo } from '../api/erros';
 import { queryOrquestrador, streamQuery, type Message } from '../api/orquestrador';
 import type { Attachment, Effort, OrchestratorMode } from '../components/InputBar';
+import { sessaoExpirou } from '../lib/auth';
 import {
   INTERVALO_DE_FLUSH_MS,
   chipModeFor,
@@ -254,6 +255,16 @@ export function useChatController() {
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
+      if (err instanceof ErroDeApi && err.status === 401) {
+        // A pergunta não chegou ao servidor: volta para o campo depois da
+        // reentrada, para o médico só tocar em enviar. Resposta a um pedido de
+        // esclarecimento não volta — solta no campo, viraria pergunta nova sem
+        // o contexto das perguntas que ela respondia.
+        sessaoExpirou({
+          pergunta: params.clarification_answers ? undefined : params.prompt,
+          conversaId: params.conversation_id,
+        });
+      }
       // A frase depende do QUE falhou: cota semanal, sessão expirada e queda de
       // rede pedem reações diferentes do médico. Ver `api/erros.ts`.
       setMessages(prev => [...prev, {
@@ -374,8 +385,15 @@ export function useChatController() {
       setActiveFolderName(detail.folder_name ?? undefined);
       setConversaAbertaTrigger(n => n + 1);
       setCarregandoConversa(false);
-    } catch {
-      if (pedido === selecaoRef.current) handleNew();
+    } catch (err) {
+      if (pedido !== selecaoRef.current) return;
+      if (err instanceof ErroDeApi && err.status === 401) {
+        // Sem `handleNew`: a tela iria para "Nova consulta" por um instante antes
+        // da reentrada. Era o 401 engolido em silêncio — a conversa sumia.
+        sessaoExpirou({ conversaId: id });
+        return;
+      }
+      handleNew();
     }
   }, [handleNew]);
 

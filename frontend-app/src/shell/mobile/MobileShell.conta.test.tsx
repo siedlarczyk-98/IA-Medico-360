@@ -16,6 +16,7 @@ import { updateProfile } from '../../api/auth';
 import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
 
 vi.mock('../../lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',

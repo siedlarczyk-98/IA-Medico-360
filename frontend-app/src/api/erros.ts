@@ -19,7 +19,9 @@ export class ErroDeApi extends Error {
 /** Queda de rede, DNS, CORS: o `fetch` nem chegou a ter resposta. */
 export const MENSAGEM_SEM_CONEXAO = 'Erro ao conectar com o servidor. Verifique sua conexão e tente de novo.';
 
-const MENSAGEM_SESSAO_EXPIRADA = 'Sua sessão expirou. Entre novamente para continuar.';
+// Aparece por um instante, enquanto `sessaoExpirou` leva o médico à reentrada —
+// que é automática. "Entre novamente" pedia uma ação que não havia como fazer.
+const MENSAGEM_SESSAO_EXPIRADA = 'Sua sessão expirou. Entrando de novo…';
 const MENSAGEM_MUITAS_REQUISICOES = 'Muitas perguntas em pouco tempo. Aguarde um minuto e tente de novo.';
 const MENSAGEM_SERVIDOR = 'O servidor não conseguiu responder agora. Tente novamente em instantes.';
 

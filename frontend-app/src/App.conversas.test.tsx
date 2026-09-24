@@ -13,8 +13,10 @@ import { renderComProvedores, streamEmLote, tokensEDone } from './test/utils';
 import { streamQuery } from './api/orquestrador';
 import { getConversation } from './api/conversations';
 import { ErroDeApi } from './api/erros';
+import { consumirRetomada, sessaoExpirou } from './lib/auth';
 
 vi.mock('./lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: vi.fn(() => null),
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',
@@ -142,7 +144,7 @@ describe('tentar novamente', () => {
   });
 
   it.each([
-    [401, 'Sua sessão expirou. Entre novamente para continuar.'],
+    [401, 'Sua sessão expirou. Entrando de novo…'],
     [429, 'Limite semanal de uso atingido.'],
   ])('%i NÃO oferece o botão: repetir bateria na mesma parede', async (status, mensagem) => {
     streamQueryMock.mockImplementation(() => { throw new ErroDeApi(status, mensagem); });
@@ -152,5 +154,57 @@ describe('tentar novamente', () => {
     await screen.findByText(new RegExp(mensagem.slice(0, 20)));
     await waitFor(() => expect(screen.getByRole('button', { name: /enviar/i })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /tentar novamente/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('sessão recusada no meio do uso (item 60)', () => {
+  // "Sair" em outro aparelho revoga todos. Antes, o 401 no chat era um balão sem
+  // saída; ao abrir uma conversa, virava "Nova consulta" vazia em silêncio.
+
+  it('401 ao enviar leva à reentrada levando a pergunta, que não chegou ao servidor', async () => {
+    streamQueryMock.mockImplementation(() => { throw new ErroDeApi(401, 'Sua sessão expirou. Entrando de novo…'); });
+    const user = userEvent.setup();
+    renderComProvedores(<App />);
+
+    await user.type(await screen.findByPlaceholderText(/digite sua pergunta/i), 'dose de amoxicilina');
+    await user.click(screen.getByRole('button', { name: /enviar/i }));
+
+    await waitFor(() => expect(sessaoExpirou).toHaveBeenCalledWith(
+      expect.objectContaining({ pergunta: 'dose de amoxicilina' }),
+    ));
+  });
+
+  it('401 ao abrir uma conversa leva à reentrada levando a conversa, sem esvaziar a tela antes', async () => {
+    getConversationMock.mockRejectedValue(new ErroDeApi(401, 'Sua sessão expirou. Entrando de novo…'));
+    const user = userEvent.setup();
+    renderComProvedores(<App />);
+
+    await user.click(await screen.findByText('abrir A'));
+
+    await waitFor(() => expect(sessaoExpirou).toHaveBeenCalledWith({ conversaId: 'conv-a' }));
+    expect(screen.getByTestId('conversa-ativa')).toHaveTextContent('conv-a');
+  });
+
+  it('erro que não é 401 ao abrir conversa continua voltando para uma consulta nova', async () => {
+    getConversationMock.mockRejectedValue(new ErroDeApi(404, 'Conversa não encontrada'));
+    const user = userEvent.setup();
+    renderComProvedores(<App />);
+
+    await user.click(await screen.findByText('abrir A'));
+
+    await waitFor(() => expect(screen.getByTestId('conversa-ativa')).toHaveTextContent('nenhuma'));
+    expect(sessaoExpirou).not.toHaveBeenCalled();
+  });
+
+  it('depois da reentrada, a conversa reabre e a pergunta volta para o campo', async () => {
+    vi.mocked(consumirRetomada).mockReturnValueOnce({ pergunta: 'dose de amoxicilina', conversaId: 'conv-a' });
+    getConversationMock.mockResolvedValue(conversa('conv-a', 'A') as never);
+    renderComProvedores(<App />);
+
+    await screen.findByText('resposta de A');
+    expect(getConversationMock).toHaveBeenCalledWith('conv-a');
+    expect(screen.getByPlaceholderText(/digite sua pergunta/i)).toHaveValue('dose de amoxicilina');
+    // Volta para o campo; reenviar sozinho poderia mandar a pergunta duas vezes.
+    expect(streamQueryMock).not.toHaveBeenCalled();
   });
 });

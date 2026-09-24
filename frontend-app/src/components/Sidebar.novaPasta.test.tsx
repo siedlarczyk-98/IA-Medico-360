@@ -16,6 +16,7 @@ import { Sidebar, SIDEBAR_PINNED_KEY } from './Sidebar';
 import { renderComProvedores } from '../test/utils';
 
 vi.mock('../lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   logout: vi.fn(),
   getTokenPayload: () => ({ sub: 'user-1', exp: 9999999999 }),
   getToken: () => 'token-de-teste',

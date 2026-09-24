@@ -15,6 +15,7 @@ import { reiniciarLayout } from './shell/layout';
 import { streamQuery, type StreamEvent } from './api/orquestrador';
 
 vi.mock('./lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',

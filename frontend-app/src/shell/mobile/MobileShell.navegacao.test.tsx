@@ -21,6 +21,7 @@ const agora = new Date().toISOString();
 const anteontem = new Date(Date.now() - 2 * 86400000).toISOString();
 
 vi.mock('../../lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',

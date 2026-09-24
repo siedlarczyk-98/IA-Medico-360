@@ -110,30 +110,53 @@ interface OpcoesSessaoViva {
 }
 
 /**
- * Troca o token por um novo. Silenciosa por contrato.
+ * `AbortSignal.timeout` com saída para quem não o tem.
  *
- * Falhar aqui NÃO pode derrubar ninguém: se a renovação não vai, o token atual
- * continua valendo até vencer, e aí o 401 normal cuida do assunto. Deslogar por
- * causa de uma renovação que falhou seria criar o problema que viemos evitar.
+ * Webview Android abaixo da versão 103 não tem `AbortSignal.timeout`: a chamada
+ * lança `TypeError` ANTES do `fetch`, o `catch` engole, e a renovação nunca
+ * acontece — o médico cai na expiração de 60 min toda vez, sem erro nenhum.
  */
-async function renovar({ apiBase, getToken, setToken }: OpcoesSessaoViva): Promise<void> {
+function sinalComTeto(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const controle = new AbortController();
+  setTimeout(() => controle.abort(), ms);
+  return controle.signal;
+}
+
+type ResultadoRenovacao = 'renovado' | 'recusado' | 'falhou';
+
+/**
+ * Troca o token por um novo.
+ *
+ * Falha de REDE aqui não pode derrubar ninguém: se a renovação não vai, o token
+ * atual continua valendo até vencer. Deslogar por causa de um wi-fi ruim seria
+ * criar o problema que viemos evitar.
+ *
+ * 401 é outra coisa: o servidor está dizendo que este token já não vale — sessão
+ * de 24 h encerrada, ou "Sair" em outro aparelho (o logout revoga TODOS). A
+ * primeira versão ignorava o 401 também, contando que "a próxima chamada leva à
+ * reentrada". No chat essa próxima chamada não levava a lugar nenhum, e o médico
+ * ficava com "sessão expirada" na tela e nenhuma saída. Ver `useSessaoViva`.
+ */
+async function renovar({ apiBase, getToken, setToken }: OpcoesSessaoViva): Promise<ResultadoRenovacao> {
   const token = getToken();
-  if (!token) return;
+  if (!token) return 'falhou';
   try {
     const resp = await fetch(`${apiBase}/api/v1/auth/session/renew`, {
       method: 'POST',
       credentials: 'include',
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10_000),
+      signal: sinalComTeto(10_000),
     });
-    // 401 aqui significa sessão de 24h encerrada ou logout em outro aparelho.
-    // Não limpamos nada: o 401 da próxima chamada leva à reentrada pelo
-    // caminho normal, com a mensagem certa.
-    if (!resp.ok) return;
+    if (resp.status === 401) return 'recusado';
+    if (!resp.ok) return 'falhou';
     const dados = (await resp.json()) as { access_token?: string };
-    if (dados.access_token) setToken(dados.access_token);
+    if (!dados.access_token) return 'falhou';
+    setToken(dados.access_token);
+    return 'renovado';
   } catch {
     /* rede ruim ou app voltando: o token atual segue valendo */
+    return 'falhou';
   }
 }
 
@@ -155,10 +178,21 @@ export function useSessaoViva(opcoes: OpcoesSessaoViva): void {
   ref.current = opcoes;
 
   useEffect(() => {
+    // O servidor recusou este token numa renovação feita pelo timer, com o
+    // médico longe da tela. Guardado para a próxima volta, pela mesma regra do
+    // token vencido: não se tira ninguém da tela sem ele estar olhando.
+    let recusadoPor: string | null = null;
+
     function verificar({ naVolta }: { naVolta: boolean }) {
       const o = ref.current;
-      const exp = expiracaoDoToken(o.getToken());
+      const token = o.getToken();
+      const exp = expiracaoDoToken(token);
       if (exp === null) return; // sem token não há o que renovar: é caso de login
+      if (naVolta && recusadoPor !== null && recusadoPor === token) {
+        recusadoPor = null;
+        o.aoExpirar?.();
+        return;
+      }
       const falta = exp - Date.now();
       if (falta <= 0) {
         // Só na VOLTA: é quando o médico vai tocar na tela. No timer, a aba de
@@ -167,7 +201,15 @@ export function useSessaoViva(opcoes: OpcoesSessaoViva): void {
         if (naVolta) o.aoExpirar?.();
         return;
       }
-      if (falta < MARGEM_MS) void renovar(o);
+      if (falta < MARGEM_MS) {
+        void renovar(o).then(resultado => {
+          if (resultado !== 'recusado') return;
+          // Token trocado no meio (outra aba, reentrada): a recusa era do antigo.
+          if (ref.current.getToken() !== token) return;
+          if (naVolta) ref.current.aoExpirar?.();
+          else recusadoPor = token;
+        });
+      }
     }
 
     function aoVoltar() {

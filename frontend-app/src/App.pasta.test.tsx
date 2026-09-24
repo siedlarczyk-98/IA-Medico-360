@@ -14,6 +14,7 @@ import { streamQuery } from './api/orquestrador';
 import { getConversation, listConversations } from './api/conversations';
 
 vi.mock('./lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',

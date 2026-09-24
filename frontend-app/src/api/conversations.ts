@@ -1,4 +1,5 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
+import { erroDeResposta } from './erros';
 import type { Message } from './orquestrador';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -63,6 +64,7 @@ export async function listConversations(): Promise<ConversationSummary[]> {
       `${BASE}/api/v1/conversations?page=${pagina}&page_size=${CONVERSAS_POR_PAGINA}`,
       { headers: authHeaders() },
     );
+    conferirSessao(res);
     if (!res.ok) throw new Error('Erro ao carregar histórico');
     const lote: ConversationSummary[] = await res.json();
 
@@ -81,6 +83,8 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 
 export async function getConversation(id: string): Promise<ConversationDetail> {
   const res = await fetch(`${BASE}/api/v1/conversations/${id}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Conversa não encontrada');
+  // O status segue no erro: é o controller quem trata o 401, porque só ele sabe
+  // qual conversa devolver ao médico depois da reentrada.
+  if (!res.ok) throw erroDeResposta(res.status, await res.text().catch(() => ''));
   return res.json();
 }

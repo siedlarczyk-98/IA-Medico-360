@@ -1,4 +1,5 @@
 import { getToken } from '../lib/auth';
+import { erroDeResposta } from './erros';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -35,6 +36,9 @@ export async function extractFile(file: File): Promise<ExtractResult> {
     body: formData,
   });
 
+  // 401 com o status: é o composer quem trata, porque só ele tem o texto que o
+  // médico estava escrevendo para devolver depois da reentrada.
+  if (res.status === 401) throw erroDeResposta(401, '');
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail ?? `Erro ${res.status} ao processar arquivo.`);

@@ -121,6 +121,91 @@ describe('falha na renovação não derruba ninguém', () => {
   });
 });
 
+describe('401 na renovação é sessão encerrada (item 60)', () => {
+  // "Sair" em qualquer aparelho revoga todos. A renovação era o único lugar que
+  // ficava sabendo disso antes do médico — e ignorava, contando com um 401
+  // seguinte que no chat não levava a lugar nenhum.
+
+  it('na VOLTA, leva à reentrada', async () => {
+    localStorage.setItem('medico360_token', tokenQueVenceEm(60 * 60 * 1000));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    const aoExpirar = vi.fn();
+    renderHook(() => useSessaoViva(aoExpirar));
+
+    localStorage.setItem('medico360_token', tokenQueVenceEm(3 * 60 * 1000));
+    esconderEMostrar();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+  });
+
+  it('pelo TIMER, espera o médico voltar à tela', async () => {
+    localStorage.setItem('medico360_token', tokenQueVenceEm(3 * 60 * 1000));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    const aoExpirar = vi.fn();
+    renderHook(() => useSessaoViva(aoExpirar));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(aoExpirar).not.toHaveBeenCalled();
+
+    esconderEMostrar();
+
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+  });
+
+  it('recusa de um token que já foi trocado não derruba o novo', async () => {
+    localStorage.setItem('medico360_token', tokenQueVenceEm(3 * 60 * 1000));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    const aoExpirar = vi.fn();
+    renderHook(() => useSessaoViva(aoExpirar));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // Reentrada em outra aba, ou o login: token novo, em folha.
+    localStorage.setItem('medico360_token', tokenQueVenceEm(60 * 60 * 1000));
+    esconderEMostrar();
+
+    expect(aoExpirar).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['erro do servidor', () => Promise.resolve({ ok: false, status: 503 })],
+    ['rede fora', () => Promise.reject(new Error('offline'))],
+  ])('%s NÃO leva à reentrada: o token atual segue valendo', async (_nome, resposta) => {
+    localStorage.setItem('medico360_token', tokenQueVenceEm(60 * 60 * 1000));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(resposta));
+    const aoExpirar = vi.fn();
+    renderHook(() => useSessaoViva(aoExpirar));
+
+    localStorage.setItem('medico360_token', tokenQueVenceEm(3 * 60 * 1000));
+    esconderEMostrar();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    esconderEMostrar();
+
+    expect(aoExpirar).not.toHaveBeenCalled();
+  });
+});
+
+describe('webview antigo', () => {
+  it('renova sem AbortSignal.timeout (Android WebView < 103)', async () => {
+    // Sem o método, a chamada lançava ANTES do fetch, o catch engolia, e a
+    // renovação nunca acontecia — o médico caía aos 60 min, toda vez.
+    const original = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout')!;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true });
+    try {
+      localStorage.setItem('medico360_token', tokenQueVenceEm(2 * 60 * 1000));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => ({ access_token: 'jwt-novo' }),
+      }));
+
+      renderHook(() => useSessaoViva());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(setTokenSpy).toHaveBeenCalledWith('jwt-novo');
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', original);
+    }
+  });
+});
+
 describe('limpeza', () => {
   it('para de ouvir e de contar ao desmontar', async () => {
     localStorage.setItem('medico360_token', tokenQueVenceEm(2 * 60 * 1000));

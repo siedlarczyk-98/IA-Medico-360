@@ -16,6 +16,7 @@ import { listConversations } from './api/conversations';
 import { APP_MODES } from './lib/appModes';
 
 vi.mock('./lib/auth', () => ({
+  sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
   isAuthenticated: () => true,
   isTokenExpired: () => false,
   getToken: () => 'token-de-teste',
