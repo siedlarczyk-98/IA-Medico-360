@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,6 +13,7 @@ from app.schemas.conversations import (
     AttachmentOut,
     ConversationDetail,
     ConversationMessage,
+    ConversationRename,
     ConversationSummary,
 )
 from app.services.response_metadata import read_response_metadata
@@ -37,6 +38,40 @@ async def list_conversations(
         .limit(page_size)
     )
     return result.scalars().all()
+
+
+@router.patch("/{conversation_id}", response_model=ConversationSummary)
+@limiter.limit("30/minute")
+async def rename_conversation(
+    request: Request,
+    conversation_id: UUID,
+    body: ConversationRename,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Renomeia a conversa. Só o dono, e só conversa ativa — como a leitura.
+
+    `updated_at` é regravado com o PRÓPRIO valor: a coluna tem `onupdate`, e
+    renomear não é atividade. Sem isto, a conversa renomeada pulava para o topo
+    de "Hoje" na lista, e o histórico por data deixava de dizer quando o médico
+    de fato conversou.
+    """
+    resultado = await db.execute(
+        update(Conversation)
+        .where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == current_user.id,
+            Conversation.status.is_(True),
+        )
+        .values(title=body.title, updated_at=Conversation.updated_at)
+        .returning(Conversation)
+    )
+    conv = resultado.scalar_one_or_none()
+    if not conv:
+        # 404 e não 403 para conversa de outro: não confirmar que o id existe.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversa não encontrada")
+    await db.commit()
+    return conv
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)

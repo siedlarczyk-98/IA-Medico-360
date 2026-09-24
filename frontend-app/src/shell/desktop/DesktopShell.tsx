@@ -17,6 +17,7 @@ import { Sidebar } from '../../components/Sidebar';
 import { Topbar } from '../../components/Topbar';
 import type { ChatController } from '../../chat/useChatController';
 import { useCurrentUser } from '../../lib/useCurrentUser';
+import { useTituloDaConversa } from '../../hooks/useTituloDaConversa';
 
 interface Props {
   chat: ChatController;
@@ -30,6 +31,7 @@ interface Props {
 
 export function DesktopShell({ chat, casca = 'desktop' }: Props) {
   const currentUser = useCurrentUser();
+  const titulo = useTituloDaConversa(chat.activeConvId, chat.topbarTitle);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Referência estável: inline, esta prop invalidaria o memo do Sidebar a cada
   // frame de streaming, re-renderizando toda a lista de conversas.
@@ -46,7 +48,7 @@ export function DesktopShell({ chat, casca = 'desktop' }: Props) {
       <Sidebar activeId={chat.activeConvId} onNew={chat.handleNew} onSelect={chat.handleSelectConversation} open={sidebarOpen} onToggle={toggleSidebar} usageTick={chat.usageTick} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Topbar title={chat.topbarTitle} onMenuToggle={toggleSidebar} />
+        <Topbar title={titulo} onMenuToggle={toggleSidebar} />
         {activeFolderName && messages.length > 0 && (
           <div style={{ padding: '6px 20px', background: 'var(--fill2)', borderBottom: '1px solid var(--line2)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pen2)' }}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">

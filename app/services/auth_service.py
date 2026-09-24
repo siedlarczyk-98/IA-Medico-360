@@ -484,24 +484,35 @@ _OTP_MAX_ATTEMPTS = 5
 
 async def verify_otp(db: AsyncSession, email: str, code: str) -> tuple[User, str]:
     now = _utcnow()
-    otp = await repo.get_active_otp(db, email, now=now)
-    if not otp:
+    # Pode haver mais de um código válido: dois toques em "enviar código" geram
+    # dois e-mails, e o médico digita o de qualquer um deles. Aceitar só o mais
+    # novo recusaria o outro metade das vezes; esperar um só dava 500. Ver
+    # `repo.get_active_otps`.
+    ativos = [
+        otp for otp in await repo.get_active_otps(db, email, now=now)
+        if otp.failed_attempts < _OTP_MAX_ATTEMPTS
+    ]
+    if not ativos:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
 
-    if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
+    resumo = _resumo_do_codigo(email, code)
+    # `compare_digest` em TODOS, sem parar no primeiro: comparação em tempo
+    # constante, e o tempo da resposta não diz qual dos códigos era.
+    acertou = [hmac.compare_digest(otp.code, resumo) for otp in ativos]
+
+    if not any(acertou):
+        # Cada palpite errado conta em todos os códigos ativos: com dois códigos
+        # valendo, o teto continua sendo 5 palpites, e não 5 por código.
+        for otp in ativos:
+            otp.failed_attempts += 1
+            if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
+                otp.used = True
+        await db.commit()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
+
+    # Entrou: nenhum código daquele pedido serve mais para nada.
+    for otp in ativos:
         otp.used = True
-        await db.commit()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
-
-    # `compare_digest`: comparação em tempo constante.
-    if not hmac.compare_digest(otp.code, _resumo_do_codigo(email, code)):
-        otp.failed_attempts += 1
-        if otp.failed_attempts >= _OTP_MAX_ATTEMPTS:
-            otp.used = True
-        await db.commit()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Código inválido ou expirado")
-
-    otp.used = True
 
     user = await repo.get_user_by_email(db, email, active_only=True)
     if not user:

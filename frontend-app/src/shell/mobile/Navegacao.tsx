@@ -45,13 +45,15 @@ export function GavetaNavegacao({ chat, dados, onIrParaConsulta, onFechar, onCon
           onIrParaConsulta={onIrParaConsulta}
           topo={
             <div className="mv-gaveta-topo">
+              {/* Sem a marca "Médico 360": dentro da Waid ela já está na barra do
+                  app, logo acima, e a linha só dela custava altura numa gaveta
+                  que vive de lista. "Nova consulta" sobe para o lugar dela. */}
               <div className="mv-gaveta-linha">
-                <b>Médico 360</b>
+                <button type="button" className="mv-btn mv-btn-go" onClick={() => { chat.handleNew(); onIrParaConsulta(); }}>
+                  <Icone n="plus" w={2.2} />Nova consulta
+                </button>
                 <button type="button" className="mv-ib" aria-label="Fechar" onClick={onFechar}><Icone n="x" /></button>
               </div>
-              <button type="button" className="mv-btn mv-btn-go mv-full" onClick={() => { chat.handleNew(); onIrParaConsulta(); }}>
-                <Icone n="plus" w={2.2} />Nova consulta
-              </button>
               <div className="mv-seg mv-seg-simples" role="tablist" aria-label="Seção">
                 {(['historico', 'pastas'] as const).map(a => (
                   <button key={a} type="button" role="tab" aria-selected={aba === a} className={aba === a ? 'on' : undefined} onClick={() => voltarPara(1, () => setAba(a))}>

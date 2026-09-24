@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listConversations, type ConversationSummary } from '../api/conversations';
+import { listConversations, renameConversation, type ConversationSummary } from '../api/conversations';
 import {
   bulkMoveConversations, createFolder, deleteFolder, listFolders, moveConversation,
   renameFolder, updateFolder, type Folder, type FolderKind,
@@ -174,6 +174,24 @@ export function useConversasEPastas({ activeId, onNew, onBulkMoved }: Opcoes) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
   });
 
+  // Otimista, como mover: o título novo aparece na hora, e volta se o servidor
+  // recusar. Só a LISTA muda — a ordem não, porque renomear não é atividade.
+  const renameConvMutation = useMutation({
+    mutationFn: ({ convId, title }: { convId: string; title: string }) => renameConversation(convId, title),
+    onMutate: async ({ convId, title }) => {
+      await queryClient.cancelQueries({ queryKey: ['conversations'] });
+      const previous = queryClient.getQueryData<ConversationSummary[]>(['conversations']);
+      queryClient.setQueryData<ConversationSummary[]>(['conversations'], (old = []) =>
+        old.map(c => c.id === convId ? { ...c, title } : c)
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['conversations'], ctx.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
+  });
+
   const bulkMoveMutation = useMutation({
     mutationFn: ({ ids, folderId }: { ids: string[]; folderId: string | null }) =>
       bulkMoveConversations(ids, folderId),
@@ -220,6 +238,10 @@ export function useConversasEPastas({ activeId, onNew, onBulkMoved }: Opcoes) {
     (convId: string, folderId: string | null) => moveConvMutation.mutate({ convId, folderId }),
     [moveConvMutation.mutate],
   );
+  const handleRenameConversation = useCallback(
+    (convId: string, title: string) => renameConvMutation.mutate({ convId, title }),
+    [renameConvMutation.mutate],
+  );
   const handleRenameFolder = useCallback(
     (id: string, name: string) => renameFolderMutation.mutate({ id, name }),
     [renameFolderMutation.mutate],
@@ -240,6 +262,7 @@ export function useConversasEPastas({ activeId, onNew, onBulkMoved }: Opcoes) {
     atualizarPasta,
     moverVarias,
     handleMoveConv,
+    handleRenameConversation,
     handleRenameFolder,
     handleDeleteFolder,
   };

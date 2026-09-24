@@ -274,8 +274,8 @@
 }
 @keyframes mv-entra-esq { from { transform: translateX(-100%); } to { transform: none; } }
 .mv-gaveta-topo { flex: none; display: flex; flex-direction: column; gap: var(--gap-3); padding: 4px var(--margem-tela) var(--gap-2); }
-.mv-gaveta-linha { display: flex; align-items: center; margin-right: -12px; }
-.mv-gaveta-linha b { flex: 1; font-size: var(--texto-titulo); font-weight: 700; }
+.mv-gaveta-linha { display: flex; align-items: center; gap: var(--gap-2); margin-right: -12px; }
+.mv-gaveta-linha .mv-btn { flex: 1; }
 .mv-gaveta-rodape {
   flex: none; display: flex; align-items: center; gap: 12px; min-height: 64px; width: 100%; text-align: left;
   padding: 8px 12px max(8px, var(--seguro-baixo)) var(--margem-tela);
@@ -347,7 +347,8 @@
 .mv-spin-claro { border-color: rgba(255, 255, 255, .25); border-top-color: var(--green); }
 
 /* ── Folhas de ação e formulários ─────────────────────────────────────── */
-.mv-as-ctx { font-size: var(--texto-apoio); color: var(--pen2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -8px; }
+/* Sem margem negativa: o corpo da folha rola (`overflow`) e cortava o topo das letras. */
+.mv-as-ctx { font-size: var(--texto-apoio); color: var(--pen2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mv-as-lista { display: flex; flex-direction: column; margin: 0 calc(-1 * var(--margem-tela)); }
 .mv-as-i { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 var(--margem-tela); font-size: var(--texto-corpo); font-weight: 500; width: 100%; text-align: left; }
 .mv-as-i svg { color: var(--pen); }

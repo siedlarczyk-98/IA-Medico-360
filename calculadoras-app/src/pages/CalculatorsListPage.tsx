@@ -62,9 +62,16 @@ export function CalculatorsListPage() {
     return result;
   }, [allCalculators, specialtyFilter, search]);
 
+  // Lido uma vez: o contexto (dentro ou fora da Waid) não muda durante a sessão.
+  const [hospedado] = useState(() => hospedadoNaWaid());
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--fill2)' }}>
-      {/* Topbar */}
+      {/* Barra de cima SÓ FORA da Waid. Dentro dela a barra do app já mostra a
+          marca e o avatar do médico, e o "Sair" não existe (ver abaixo): sobrava
+          o ícone com "Calculadoras Clínicas", repetido pelo título logo abaixo —
+          quase 60 px de nada no alto do celular (decisão de 2026-09-24). */}
+      {!hospedado && (
       <div style={{
         background: '#fff',
         borderBottom: '1px solid var(--line)',
@@ -122,7 +129,7 @@ export function CalculatorsListPage() {
               de conta nenhuma, e o logout revoga a sessão em TODOS os aparelhos
               — derrubava o chat aberto em outro lugar. Ver o docblock de
               `frontend-app/src/shell/mobile/Conta.tsx`. */}
-          {!hospedadoNaWaid() && (
+          {!hospedado && (
             <button
               type="button"
               onClick={logout}
@@ -140,9 +147,10 @@ export function CalculatorsListPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Conteúdo */}
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: hospedado ? '24px 20px 32px' : '32px 20px' }}>
         {/* A mesma logo animada do chat (`shared/design`), abrindo a lista. */}
         <MedicoLogoAnimada width={190} className="logo-abertura" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28 }}>
@@ -217,11 +225,15 @@ export function CalculatorsListPage() {
             Favoritas ({favoriteCount})
           </button>
 
-          <div style={{ position: 'relative' }}>
+          {/* Encolhe para caber ao lado de "Favoritas" no celular: fixa na largura
+              do texto, ia sozinha para uma linha, e os filtros ocupavam três. */}
+          <div style={{ position: 'relative', flex: '1 1 160px', minWidth: 0, maxWidth: 320 }}>
             <select
               value={specialtyFilter === 'favorites' ? 'all' : specialtyFilter}
               onChange={e => setSpecialtyFilter(e.target.value)}
               style={{
+                width: '100%',
+                textOverflow: 'ellipsis',
                 appearance: 'none',
                 WebkitAppearance: 'none',
                 padding: '8px 34px 8px 14px',

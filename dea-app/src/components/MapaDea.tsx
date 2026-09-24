@@ -74,6 +74,13 @@ type Props = {
   aoEscolherPonto?: (ponto: Coordenada) => void
   pontoEscolhido?: Coordenada | null
   aoSelecionar: (id: string) => void
+  /**
+   * Arrastar e pinçar ligados. Desligado, o mapa é uma PRÉVIA: o dedo que pousa
+   * nele rola a página, e tocar num marcador continua selecionando. Ver MapaPage.
+   */
+  interativo: boolean
+  /** Ocupa a tela toda: o Leaflet precisa remedir o contêiner quando isso muda. */
+  ampliado: boolean
 }
 
 export function MapaDea({
@@ -84,6 +91,8 @@ export function MapaDea({
   aoEscolherPonto,
   pontoEscolhido,
   aoSelecionar,
+  interativo,
+  ampliado,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapaRef = useRef<L.Map | null>(null)
@@ -105,8 +114,8 @@ export function MapaDea({
       center: [centro.lat, centro.lng],
       zoom: 15,
       zoomControl: true,
-      // O mapa vive dentro de uma página que rola no celular; sem isto, tentar
-      // rolar a página com o dedo sobre o mapa dá zoom sem querer.
+      // Só a RODA do mouse: no computador, rolar a página por cima do mapa não
+      // deve dar zoom. O dedo é outra coisa — ver `interativo`.
       scrollWheelZoom: false,
     })
     L.tileLayer(OSM_URL, { attribution: OSM_ATRIBUICAO, maxZoom: 19 }).addTo(mapa)
@@ -133,6 +142,28 @@ export function MapaDea({
   useEffect(() => {
     mapaRef.current?.panTo([centro.lat, centro.lng])
   }, [centro.lat, centro.lng])
+
+  // Prévia ou mapa de verdade. Com arrastar ligado o Leaflet põe
+  // `touch-action: none` no contêiner, e o dedo que começava em cima do mapa
+  // nunca rolava a página: no celular, 300 px no meio da tela prendiam a lista
+  // embaixo. Desligar os dois tira as classes e devolve a rolagem.
+  useEffect(() => {
+    const mapa = mapaRef.current
+    if (mapa === null) return
+    for (const gesto of [mapa.dragging, mapa.touchZoom, mapa.doubleClickZoom]) {
+      if (interativo) gesto.enable()
+      else gesto.disable()
+    }
+  }, [interativo])
+
+  useEffect(() => {
+    const mapa = mapaRef.current
+    if (mapa === null) return
+    // Depois do layout novo, senão o Leaflet mede o tamanho antigo e deixa faixa
+    // cinza sem tiles.
+    const quadro = requestAnimationFrame(() => mapa.invalidateSize())
+    return () => cancelAnimationFrame(quadro)
+  }, [ampliado])
 
   useEffect(() => {
     const mapa = mapaRef.current

@@ -19,7 +19,7 @@ import type { useConversasEPastas } from '../../hooks/useConversasEPastas';
 import { agruparConversas, tituloDe } from './agruparConversas';
 import { Icone } from './Icone';
 import { ItemConversa } from './ItemConversa';
-import { SheetAcoes, SheetMover } from './SheetsDeConversa';
+import { SheetAcoes, SheetMover, SheetRenomear } from './SheetsDeConversa';
 import { SheetPasta } from './SheetPasta';
 import { useCamada } from './useCamada';
 
@@ -28,6 +28,7 @@ export type Aba = 'historico' | 'pastas';
 type Folha =
   | { tipo: 'acoes'; conversa: ConversationSummary }
   | { tipo: 'mover'; ids: string[]; pastaAtual?: string | null }
+  | { tipo: 'renomear'; conversa: ConversationSummary }
   | { tipo: 'pasta'; pasta?: Folder };
 
 interface Props {
@@ -134,6 +135,13 @@ export function PainelNavegacao({ aba, chat, dados, onIrParaConsulta, topo, roda
   } else {
     corpo = (
       <>
+        {/* No TOPO, e não depois da lista: com muitas pastas o botão ficava lá
+            embaixo, fora da tela, e criar pasta exigia rolar tudo. */}
+        <div className="mv-pad-lados mv-pad-cima mv-pad-baixo">
+          <button type="button" className="mv-btn mv-btn-sec mv-full" onClick={() => folha.abrir({ tipo: 'pasta' })}>
+            <Icone n="plus" s={20} />Nova pasta
+          </button>
+        </div>
         {dados.folders.length === 0 && (
           <Vazio icone="folder" titulo="Nenhuma pasta" texto="Pastas guardam conversas de um paciente ou de um tema, com um contexto que a IA usa em todas elas." />
         )}
@@ -148,11 +156,6 @@ export function PainelNavegacao({ aba, chat, dados, onIrParaConsulta, topo, roda
             </button>
           );
         })}
-        <div className="mv-pad-lados mv-pad-cima">
-          <button type="button" className="mv-btn mv-btn-sec mv-full" onClick={() => folha.abrir({ tipo: 'pasta' })}>
-            <Icone n="plus" s={20} />Nova pasta
-          </button>
-        </div>
       </>
     );
   }
@@ -165,8 +168,20 @@ export function PainelNavegacao({ aba, chat, dados, onIrParaConsulta, topo, roda
       <SheetAcoes
         titulo={tituloDe(f.conversa)}
         onFechar={() => folha.fechar()}
+        onRenomear={() => folha.abrir({ tipo: 'renomear', conversa: f.conversa })}
         onMover={() => folha.abrir({ tipo: 'mover', ids: [f.conversa.id], pastaAtual: f.conversa.folder_id })}
         onSelecionar={() => folha.fechar(() => selecao.abrir(new Set([f.conversa.id])))}
+      />
+    );
+  } else if (f?.tipo === 'renomear') {
+    folhaAberta = (
+      <SheetRenomear
+        tituloAtual={f.conversa.title}
+        onFechar={() => folha.fechar()}
+        onSalvar={titulo => {
+          dados.handleRenameConversation(f.conversa.id, titulo);
+          folha.fechar();
+        }}
       />
     );
   } else if (f?.tipo === 'mover') {

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import type { ConversationSummary } from '../../api/conversations';
+import { MAX_TITULO_CONVERSA, type ConversationSummary } from '../../api/conversations';
 import type { Folder } from '../../api/folders';
 import { ctxItemStyle } from './styles';
 
@@ -9,6 +9,8 @@ interface ConvItemProps {
   folders: Folder[];
   onSelect: (id: string) => void;
   onMove: (convId: string, folderId: string | null) => void;
+  /** Sem ele, o menu não oferece "Renomear" (quem não passa não suporta). */
+  onRename?: (convId: string, title: string) => void;
   selected?: boolean;
   selectionMode?: boolean;
   onToggleSelect?: (convId: string) => void;
@@ -20,8 +22,13 @@ function semHover(): boolean {
   return typeof window !== 'undefined' && !!window.matchMedia?.('(hover: none)').matches;
 }
 
-function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
+function ConvItemBase({ conv, activeId, folders, onSelect, onMove, onRename, selected, selectionMode, onToggleSelect, onDragStart }: ConvItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // Renomear é na própria linha, como a pasta (`FolderRow`): Enter ou sair do
+  // campo salva, Esc desiste.
+  const [editando, setEditando] = useState(false);
+  const [titulo, setTitulo] = useState(conv.title ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [hovered, setHovered] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -56,18 +63,34 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
     drop.style.left = (rect.right - drop.offsetWidth) + 'px';
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (editando) inputRef.current?.select();
+  }, [editando]);
+
+  function comecarARenomear() {
+    setTitulo(conv.title ?? '');
+    setEditando(true);
+    setMenuOpen(false);
+  }
+
+  function salvarTitulo() {
+    const novo = titulo.replace(/\s+/g, ' ').trim();
+    if (novo && novo !== conv.title) onRename?.(conv.id, novo);
+    setEditando(false);
+  }
+
   const rowBg = selected ? 'var(--fill2)' : isActive ? 'var(--mint)' : hovered ? 'var(--fill)' : 'transparent';
 
   return (
     <div
-      draggable
+      draggable={!editando}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(conv.id); }}
       style={{ position: 'relative', borderRadius: 6, background: rowBg, transition: 'background 0.1s', cursor: 'grab' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        onClick={() => selectionMode ? onToggleSelect?.(conv.id) : onSelect(conv.id)}
+        onClick={() => { if (editando) return; if (selectionMode) onToggleSelect?.(conv.id); else onSelect(conv.id); }}
         style={{
           // Altura mínima de toque (44px no dedo, 32px no mouse — ver
           // `shared/design/tokens.css`). Antes, 7px de padding + fonte 12,5
@@ -104,10 +127,27 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
             {selected && <svg width="8" height="8" viewBox="0 0 10 10"><path d="M2 5 L4 7 L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>}
           </span>
         )}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.title ?? 'Sem título'}</span>
+        {editando ? (
+          <input
+            ref={inputRef}
+            value={titulo}
+            maxLength={MAX_TITULO_CONVERSA}
+            aria-label="Novo título da conversa"
+            onChange={e => setTitulo(e.target.value)}
+            onBlur={salvarTitulo}
+            onKeyDown={e => {
+              if (e.key === 'Enter') salvarTitulo();
+              if (e.key === 'Escape') setEditando(false);
+            }}
+            onClick={e => e.stopPropagation()}
+            style={{ fontSize: 'var(--texto-campo)', color: 'var(--ink)', background: '#fff', border: 'none', outline: '1px solid var(--green)', borderRadius: 3, padding: '2px 4px', minWidth: 0, width: '100%' }}
+          />
+        ) : (
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.title ?? 'Sem título'}</span>
+        )}
       </div>
 
-      {showBtn && (
+      {showBtn && !editando && (
         <div ref={menuRef} style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}>
           <button
             ref={btnRef}
@@ -160,6 +200,14 @@ function ConvItemBase({ conv, activeId, folders, onSelect, onMove, selected, sel
         >
           {!showFolderPicker ? (
             <div>
+              {onRename && (
+                <button onClick={e => { e.stopPropagation(); comecarARenomear(); }} style={ctxItemStyle}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 13h2.5L13 5.5 10.5 3 3 10.5V13z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                  </svg>
+                  Renomear
+                </button>
+              )}
               <button
                 onClick={e => { e.stopPropagation(); setShowFolderPicker(true); }}
                 style={ctxItemStyle}

@@ -249,3 +249,51 @@ describe('Em tela de toque', () => {
     expect(screen.queryByRole('button', { name: /opções de/i })).not.toBeInTheDocument();
   });
 });
+
+describe('Renomear (2026-09-24)', () => {
+  async function abrirRenomear(onRename = vi.fn()) {
+    const user = userEvent.setup();
+    renderItem({ onRename });
+    await abrirMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Renomear' }));
+    return { user, onRename, campo: screen.getByRole('textbox', { name: /novo título/i }) };
+  }
+
+  it('Enter salva o título novo, sem espaços sobrando', async () => {
+    const { user, onRename, campo } = await abrirRenomear();
+
+    await user.clear(campo);
+    await user.type(campo, '  Metformina —  Sr. José {Enter}');
+
+    expect(onRename).toHaveBeenCalledWith('c1', 'Metformina — Sr. José');
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('Esc desiste e não renomeia', async () => {
+    const { user, onRename, campo } = await abrirRenomear();
+
+    await user.clear(campo);
+    await user.type(campo, 'Outro título{Escape}');
+
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.getByText('Ajuste de metformina')).toBeInTheDocument();
+  });
+
+  it('título vazio ou igual não chama o servidor', async () => {
+    const { user, onRename, campo } = await abrirRenomear();
+
+    await user.clear(campo);
+    await user.type(campo, '   {Enter}');
+
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('sem onRename, o menu não oferece Renomear', async () => {
+    const user = userEvent.setup();
+    renderItem();
+    await abrirMenu(user);
+
+    expect(screen.queryByRole('button', { name: 'Renomear' })).toBeNull();
+  });
+});
+

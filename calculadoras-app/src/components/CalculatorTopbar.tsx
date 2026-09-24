@@ -20,10 +20,17 @@ export function CalculatorTopbar({ title, subtitle, onBack, progress }: Props) {
       top: 0,
       zIndex: 10,
     }}>
+      {/* Única saída da calculadora de volta para a lista, inclusive dentro da
+          Waid. Era um "←" de ~22 px de largura e sem nome para leitor de tela; agora
+          o alvo tem a largura mínima de toque. */}
       <button
         type="button"
         onClick={onBack}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen2)', fontSize: 18, lineHeight: 1, padding: '4px 6px' }}
+        aria-label="Voltar para a lista"
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pen2)', fontSize: 20, lineHeight: 1,
+          minWidth: 'var(--toque-min)', marginLeft: -10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
       >
         ←
       </button>

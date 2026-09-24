@@ -387,6 +387,84 @@ button { font-family: inherit; cursor: pointer; }
   margin-bottom: 12px;
 }
 
+/*
+ * Mapa em tela cheia (botão "Ampliar mapa"). Fora dela, no celular, o mapa é só
+ * prévia e não prende o dedo — ver MapaPage. Fixo sobre tudo, inclusive o
+ * cabeçalho das abas; a página por baixo não rola enquanto isso (MapaPage).
+ */
+.mapa-wrapper--cheio {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  margin: 0;
+  background: var(--fill);
+}
+
+.mapa-wrapper--cheio .mapa {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.mapa-botao {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--petrol);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(14, 37, 45, 0.18);
+  cursor: pointer;
+}
+
+/* Canto de CIMA: embaixo à direita fica a atribuição do OpenStreetMap, que a
+   licença exige visível. O +/− do Leaflet fica em cima à esquerda. */
+.mapa-ampliar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+
+.mapa-fechar {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 1;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.mapa-cheio-rodape {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  /* Acima da linha de atribuição do OSM. */
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(14, 37, 45, 0.22);
+}
+
+.mapa-cheio-rodape b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
 .mapa {
   height: 300px;
   border-radius: 14px;

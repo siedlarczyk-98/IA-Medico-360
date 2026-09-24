@@ -41,18 +41,27 @@ async def get_invite_by_token(db: AsyncSession, token: uuid.UUID) -> InviteToken
     return result.scalar_one_or_none()
 
 
-async def get_active_otp(db: AsyncSession, email: str, *, now: datetime) -> OtpCode | None:
-    # `FOR UPDATE`: quem verifica o código TRAVA a linha até o commit. Sem isso,
-    # cinco palpites errados em paralelo liam todos `failed_attempts = 0`, cada um
-    # gravava 1, e cinco tentativas contavam como uma — o teto de 5 deixava de ser
-    # teto para quem disparasse os palpites juntos.
+async def get_active_otps(db: AsyncSession, email: str, *, now: datetime) -> list[OtpCode]:
+    """Todos os códigos ainda válidos do e-mail — normalmente um, às vezes dois.
+
+    Dois acontecem de verdade: dois toques em "enviar código" passam juntos pela
+    invalidação (ainda não há o que invalidar) e cada um grava o seu. A primeira
+    versão esperava UM (`scalar_one_or_none`) e a verificação estourava em 500
+    (item 87 de `docs/pitacos-do-fable-2.md`).
+
+    `FOR UPDATE`: quem verifica o código TRAVA as linhas até o commit. Sem isso,
+    cinco palpites errados em paralelo liam todos `failed_attempts = 0`, cada um
+    gravava 1, e cinco tentativas contavam como uma — o teto de 5 deixava de ser
+    teto para quem disparasse os palpites juntos. `ORDER BY id` dá a mesma ordem
+    de trava a todos, para dois verificadores não se travarem em cruz.
+    """
     stmt = select(OtpCode).where(
         OtpCode.email == email,
         OtpCode.used == False,  # noqa: E712
         OtpCode.expires_at > now,
-    ).with_for_update()
+    ).order_by(OtpCode.id).with_for_update()
     result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    return list(result.scalars())
 
 
 async def invalidate_unused_otps(db: AsyncSession, email: str) -> None:

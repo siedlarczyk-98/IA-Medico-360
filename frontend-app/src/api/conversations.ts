@@ -88,3 +88,22 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
   if (!res.ok) throw erroDeResposta(res.status, await res.text().catch(() => ''));
   return res.json();
 }
+
+/** Maior título que a API aceita (`ConversationRename.title`, `max_length=120`). */
+export const MAX_TITULO_CONVERSA = 120;
+
+/**
+ * Renomeia a conversa. Não mexe na data dela: o histórico continua ordenado por
+ * quando o médico conversou, não por quando renomeou (ver a rota no backend).
+ */
+export async function renameConversation(id: string, title: string): Promise<ConversationSummary> {
+  const res = await fetch(`${BASE}/api/v1/conversations/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ title }),
+  });
+  conferirSessao(res);
+  if (!res.ok) throw new Error('Erro ao renomear conversa');
+  return res.json();
+}
+

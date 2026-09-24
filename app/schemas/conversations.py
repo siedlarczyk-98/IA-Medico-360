@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FolderOut(BaseModel):
@@ -28,6 +28,25 @@ class ConversationSummary(BaseModel):
     folder_id: UUID | None = None
     updated_at: datetime
     created_at: datetime
+
+
+class ConversationRename(BaseModel):
+    """Novo título da conversa, dado pelo médico.
+
+    120 caracteres: cabe numa linha da lista com folga no computador e já corta
+    no celular; a coluna aceita 500, mas título que precisa de parágrafo é
+    anotação, e para isso existe o contexto da pasta.
+    """
+
+    title: str = Field(max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def _sem_espacos_nas_pontas(cls, valor: str) -> str:
+        valor = " ".join(valor.split())
+        if not valor:
+            raise ValueError("O título não pode ficar vazio.")
+        return valor
 
 
 class CitedGuideline(BaseModel):

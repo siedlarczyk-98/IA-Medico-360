@@ -72,6 +72,7 @@ POLITICA_DE_CUSTO: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/calculators/{slug}/history"): NAO_GASTA,
     ("GET", "/api/v1/conversations"): NAO_GASTA,
     ("GET", "/api/v1/conversations/{conversation_id}"): NAO_GASTA,
+    ("PATCH", "/api/v1/conversations/{conversation_id}"): NAO_GASTA,
     ("GET", "/api/v1/dea/locais"): NAO_GASTA,
     ("GET", "/api/v1/folders"): NAO_GASTA,
     ("GET", "/api/v1/health"): NAO_GASTA,

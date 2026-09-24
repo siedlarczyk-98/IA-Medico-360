@@ -88,7 +88,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
   const {
     folders, groups, convsByFolder, pastaRecemCriadaId,
     criarPasta, atualizarPasta, moverVarias,
-    handleMoveConv, handleRenameFolder, handleDeleteFolder,
+    handleMoveConv, handleRenameConversation, handleRenameFolder, handleDeleteFolder,
   } = useConversasEPastas({ activeId, onNew, onBulkMoved: limparSelecao });
 
   const toggleSelect = useCallback((convId: string) => {
@@ -438,6 +438,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                 onSelect={handleSelectConv}
                 onMove={handleMoveConv}
                 onRename={handleRenameFolder}
+                onRenameConv={handleRenameConversation}
                 onDelete={handleDeleteFolder}
                 onEdit={setFolderModal}
                 onNewInFolder={handleNewInFolder}
@@ -478,6 +479,7 @@ function SidebarComponent({ activeId, onNew, onSelect, open, onToggle, usageTick
                   folders={folders}
                   onSelect={handleSelectConv}
                   onMove={handleMoveConv}
+                  onRename={handleRenameConversation}
                   selected={selectedConvIds.has(conv.id)}
                   selectionMode={selectionMode}
                   onToggleSelect={toggleSelect}

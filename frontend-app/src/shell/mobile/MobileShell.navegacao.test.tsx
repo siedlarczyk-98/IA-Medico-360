@@ -16,6 +16,7 @@ import { reiniciarLayout } from '../layout';
 import { streamQuery, type StreamEvent } from '../../api/orquestrador';
 import { getConversation } from '../../api/conversations';
 import { bulkMoveConversations, createFolder, moveConversation } from '../../api/folders';
+import { listConversations, renameConversation } from '../../api/conversations';
 
 const agora = new Date().toISOString();
 const anteontem = new Date(Date.now() - 2 * 86400000).toISOString();
@@ -40,6 +41,8 @@ vi.mock('../../api/auth', () => ({
 }));
 
 vi.mock('../../api/conversations', () => ({
+  MAX_TITULO_CONVERSA: 120,
+  renameConversation: vi.fn(async (id: string, title: string) => ({ id, title })),
   listConversations: vi.fn(async () => [
     { id: 'c1', title: 'DOAC em FA com ClCr 25', feature: 'ORQUESTRADOR', folder_id: 'p1', updated_at: agora, created_at: agora },
     { id: 'c2', title: 'Febre sem foco — lactente', feature: 'ORQUESTRADOR', folder_id: null, updated_at: agora, created_at: agora },
@@ -193,6 +196,28 @@ describe('fora da Waid: abas', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     // Continua no Histórico: mover não é navegar.
     expect(screen.getByRole('region', { name: 'Histórico' })).toBeInTheDocument();
+  });
+
+  it('renomear pela folha de ações: "…" → Renomear → título → Salvar', async () => {
+    const user = await abrirNoCelular();
+    await user.click(aba(/histórico/i));
+    await user.click(await screen.findByRole('button', { name: 'Ações: Febre sem foco — lactente' }));
+    await user.click(screen.getByRole('button', { name: 'Renomear' }));
+
+    const folha = screen.getByRole('dialog', { name: /renomear conversa/i });
+    const campo = within(folha).getByRole('textbox', { name: 'Título' });
+    await user.clear(campo);
+    await user.type(campo, 'Febre sem foco — Davi, 5 meses');
+    // O servidor grava: a lista que volta depois já traz o título novo.
+    const antes = await vi.mocked(listConversations)();
+    vi.mocked(listConversations).mockResolvedValueOnce(
+      antes.map(c => c.id === 'c2' ? { ...c, title: 'Febre sem foco — Davi, 5 meses' } : c),
+    );
+    await user.click(within(folha).getByRole('button', { name: 'Salvar' }));
+
+    expect(renameConversation).toHaveBeenCalledWith('c2', 'Febre sem foco — Davi, 5 meses');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByText('Febre sem foco — Davi, 5 meses')).toBeInTheDocument();
   });
 
   it('seleção: marcar duas e mover as duas de uma vez; depois sai da seleção', async () => {

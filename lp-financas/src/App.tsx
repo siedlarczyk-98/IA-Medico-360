@@ -10,6 +10,7 @@ import {
 
 import heroImage from '@/assets/investimentos-hero.jpg'
 import { InterestForm } from '@/components/med360/InterestForm'
+import { Button } from '@/components/ui/button'
 import MedicoLogoAnimada from '@shared/design/MedicoLogoAnimada'
 
 const steps = [
@@ -53,48 +54,55 @@ const platformFeatures = [
 
 export function App() {
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 lg:px-10">
-        <section className="relative overflow-hidden rounded-3xl border border-border bg-petrol-deep">
-          <img
-            src={heroImage}
-            alt="Médico com tablet em consultório"
-            width={1920}
-            height={912}
-            className="absolute inset-y-0 right-0 h-full w-full object-cover object-right opacity-70 sm:w-[68%]"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-petrol-deep via-petrol-deep/95 to-transparent" />
-          <div className="pointer-events-none absolute -right-10 top-1/2 hidden size-64 -translate-y-1/2 arc-360 opacity-80 md:block" />
-
-          <div className="relative max-w-2xl px-6 py-14 sm:px-10 sm:py-20">
+    <main className="min-h-screen bg-background text-foreground">
+      {/* Topo em tela cheia, o mesmo das LPs de contabilidade e de parceiros. Era um
+          cartão com borda dentro do contêiner, com título e botão de outro tamanho:
+          as três pareciam produtos diferentes (decisão de 2026-09-24). */}
+      <section className="relative overflow-hidden">
+        <img
+          src={heroImage}
+          alt="Médico com tablet em consultório"
+          width={1920}
+          height={912}
+          className="absolute inset-0 size-full object-cover object-right opacity-70"
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(95deg, var(--petrol-deep) 8%, color-mix(in oklab, var(--petrol-deep) 78%, transparent) 45%, transparent 85%)',
+          }}
+        />
+        <div className="relative mx-auto grid max-w-6xl gap-10 px-6 py-20 sm:py-28 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="max-w-xl">
             {/* Marca animada, na versão para fundo escuro (o hero é petróleo). */}
             <MedicoLogoAnimada variante="escuro" width={230} className="mb-6 block h-auto w-[180px] sm:w-[230px]" />
+            {/* O mesmo selo nas três LPs, só "Em breve": a marca já está no logo logo
+                acima e, dentro da Waid, na barra do app. */}
             <span className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-brand">
               Em breve
             </span>
-            <h1 className="mt-6 text-4xl font-semibold leading-[1.05] sm:text-5xl">
-              Sua vida financeira
-              <br />
-              <span className="text-brand">em 360 graus.</span>
+            <h1 className="mt-6 text-4xl leading-[1.05] font-semibold sm:text-6xl">
+              Sua vida financeira <span className="text-brand">em 360 graus.</span>
             </h1>
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-mint/90">
-              A carreira médica avança em fases — e o dinheiro precisa acompanhar. Estamos
-              construindo dentro do Médico 360 uma área para diagnosticar, planejar e gerir todo o
-              seu patrimônio, com consultoria de quem entende a sua rotina.
-            </p>
-            <a
-              href="#lista"
-              className="mt-8 inline-flex h-12 items-center rounded-xl bg-primary px-7 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              Quero acesso antecipado
-            </a>
-          </div>
-        </section>
 
-        <section className="mt-14">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Como vai funcionar
-          </h2>
+            <p className="mt-6 text-lg text-muted-foreground">
+              A carreira médica avança em fases — e o dinheiro precisa acompanhar. Estamos
+              construindo uma área para diagnosticar, planejar e gerir todo o seu patrimônio,
+              com consultoria de quem entende a sua rotina.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button size="lg" className="h-12 rounded-xl px-8 text-base" asChild>
+                <a href="#lista">Quero acesso antecipado</a>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="mx-auto max-w-6xl px-6 py-20">
+        <section>
+          <p className="text-sm font-medium uppercase tracking-widest text-brand">Como vai funcionar</p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {steps.map((step) => (
               <article key={step.title} className="panel flex flex-col gap-4 p-6">
@@ -182,6 +190,10 @@ export function App() {
           construímos primeiro na área financeira do Médico 360.
         </p>
       </div>
-    </div>
+
+      <footer className="border-t border-border px-6 py-10 text-center text-xs text-muted-foreground">
+        Médico 360 — produto em validação. Nenhuma contratação é feita nesta página.
+      </footer>
+    </main>
   )
 }

@@ -27,6 +27,10 @@ export function MapaPage() {
   const [modo, setModo] = useState<Modo>('navegar')
   const [ponto, setPonto] = useState<Coordenada | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  // Mapa em tela cheia. No celular, fora dela, o mapa é prévia e não prende o
+  // dedo — ver `interativo` abaixo e em MapaDea.
+  const [ampliado, setAmpliado] = useState(false)
+  const [toque] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
 
   /**
    * Busca os locais em volta.
@@ -98,6 +102,17 @@ export function MapaPage() {
     }
   }
 
+  // Com o mapa em tela cheia, a página por baixo não rola: sem isto o gesto
+  // que escapa do mapa (na borda, no rodapé) rolava a lista escondida atrás.
+  useEffect(() => {
+    if (!ampliado) return
+    const anterior = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = anterior
+    }
+  }, [ampliado])
+
   const selecionado = locais.find((l) => l.id === selecionadoId) ?? null
   const avisoLocalizacao = avisoDeLocalizacao(estado)
 
@@ -129,7 +144,7 @@ export function MapaPage() {
         </p>
       )}
 
-      <div className="mapa-wrapper">
+      <div className={ampliado ? 'mapa-wrapper mapa-wrapper--cheio' : 'mapa-wrapper'}>
         <MapaDea
           locais={modo === 'navegar' ? locais : []}
           // Ao escolher um local na lista, o mapa vai até ele — senão o cartão
@@ -144,9 +159,36 @@ export function MapaPage() {
           aoSelecionar={setSelecionadoId}
           aoEscolherPonto={modo === 'navegar' ? undefined : setPonto}
           pontoEscolhido={modo === 'navegar' ? null : ponto}
+          // Interativo: ampliado, no computador (o mouse não disputa com a
+          // rolagem) e ao escolher o ponto do cadastro, onde mexer no mapa é a
+          // tarefa. No resto, no celular, é prévia.
+          interativo={ampliado || !toque || modo !== 'navegar'}
+          ampliado={ampliado}
         />
         {modo === 'escolhendo-ponto' && (
           <p className="instrucao-mapa">Toque no mapa onde fica o DEA</p>
+        )}
+        {modo === 'navegar' && !ampliado && (
+          <button type="button" className="mapa-botao mapa-ampliar" onClick={() => setAmpliado(true)}>
+            Ampliar mapa
+          </button>
+        )}
+        {ampliado && (
+          <>
+            {/* O X é a saída: dentro do app da Waid o botão voltar do Android não
+                chega à página, então ele precisa ser grande e óbvio. */}
+            <button type="button" className="mapa-botao mapa-fechar" aria-label="Fechar mapa" onClick={() => setAmpliado(false)}>
+              ✕
+            </button>
+            {selecionado && (
+              <div className="mapa-cheio-rodape">
+                <b>{selecionado.nome}</b>
+                <button type="button" className="mapa-botao" onClick={() => setAmpliado(false)}>
+                  Ver detalhes
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

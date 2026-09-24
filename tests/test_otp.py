@@ -193,6 +193,51 @@ async def test_palpites_em_paralelo_contam_todos(fabrica_com_conexoes_reais):
     assert tentativas == 4, f"palpites simultâneos se sobrescreveram: contou {tentativas} de 4"
 
 
+# ── Dois códigos ativos: dois toques em "enviar código" (item 87) ───────────
+#
+# Os dois pedidos passam juntos pela invalidação (ainda não há o que invalidar) e
+# cada um grava o seu. A verificação esperava UM código e estourava em 500.
+
+async def _dois_codigos_ativos(db, user_factory):
+    await user_factory(email=EMAIL)
+    for codigo in ("111111", "222222"):
+        db.add(OtpCode(
+            email=EMAIL,
+            code=auth_service._resumo_do_codigo(EMAIL, codigo),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        ))
+    await db.commit()
+
+
+@pytest.mark.parametrize("digitado", ["111111", "222222"], ids=["o-primeiro", "o-segundo"])
+async def test_com_dois_codigos_ativos_qualquer_um_entra(client, db, user_factory, digitado):
+    await _dois_codigos_ativos(db, user_factory)
+
+    resp = await _verificar(client, digitado)
+
+    assert resp.status_code == 200, "dois e-mails chegaram; o código de qualquer um deles tem que servir"
+    assert resp.json()["access_token"]
+
+
+async def test_depois_de_entrar_nenhum_dos_dois_serve_mais(client, db, user_factory):
+    await _dois_codigos_ativos(db, user_factory)
+    assert (await _verificar(client, "111111")).status_code == 200
+
+    assert (await _verificar(client, "222222")).status_code == 400
+    assert (await _verificar(client, "111111")).status_code == 400
+
+
+async def test_com_dois_codigos_o_teto_continua_cinco_palpites(client, db, user_factory):
+    """Cada palpite errado conta nos dois: senão seriam 5 por código, 10 no total."""
+    await _dois_codigos_ativos(db, user_factory)
+    for _ in range(5):
+        assert (await _verificar(client, "000000")).status_code == 400
+
+    limiter.reset()  # o freio de 5/min por IP; o que se testa é o bloqueio DO CÓDIGO
+    assert (await _verificar(client, "111111")).status_code == 400
+    assert (await _verificar(client, "222222")).status_code == 400
+
+
 # ── 3. Enumeração por tempo ──────────────────────────────────────────────────
 
 async def test_a_resposta_nao_espera_o_envio_do_email(client, user_factory, monkeypatch):

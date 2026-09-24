@@ -78,8 +78,10 @@ export function App() {
           <div className="max-w-xl">
             {/* Marca animada, na versão para fundo escuro (o hero é petróleo). */}
             <MedicoLogoAnimada variante="escuro" width={230} className="mb-6 block h-auto w-[180px] sm:w-[230px]" />
-            <span className="inline-flex items-center gap-2 rounded-full border border-brand/35 bg-brand/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-brand">
-              <Stethoscope className="size-3.5" /> Em desenvolvimento no Médico 360
+            {/* O mesmo selo nas três LPs, só "Em breve": a marca já está no logo logo
+                acima e, dentro da Waid, na barra do app. */}
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-brand">
+              Em breve
             </span>
             <h1 className="mt-6 text-4xl leading-[1.05] font-semibold sm:text-6xl">
               Sua contabilidade otimizada e no <span className="text-brand">piloto automático</span>

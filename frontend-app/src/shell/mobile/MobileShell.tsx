@@ -29,6 +29,7 @@ import { ChatView } from '../../components/ChatView';
 import { ClarificationPrompt } from '../../components/ClarificationPrompt';
 import type { ChatController } from '../../chat/useChatController';
 import { useConversasEPastas } from '../../hooks/useConversasEPastas';
+import { useTituloDaConversa } from '../../hooks/useTituloDaConversa';
 import { esconderBalaoNaCascaMovel } from '../../lib/intercom';
 import { useCurrentUser } from '../../lib/useCurrentUser';
 import { BottomSheet } from './BottomSheet';
@@ -115,7 +116,8 @@ export default function MobileShell({ chat }: { chat: ChatController }) {
   }
 
   const { messages, streaming, activeFolderName, pendingFolderName } = chat;
-  const titulo = chat.vazio ? 'Nova consulta' : chat.topbarTitle;
+  const tituloDaConversa = useTituloDaConversa(chat.activeConvId, chat.topbarTitle);
+  const titulo = chat.vazio ? 'Nova consulta' : tituloDaConversa;
 
   return (
     <div ref={refDoTeclado} className="shell-movel" data-casca="mobile" data-hospedeiro={hospedeiro}>

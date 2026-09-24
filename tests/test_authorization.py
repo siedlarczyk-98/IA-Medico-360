@@ -64,6 +64,7 @@ ROUTE_POLICY: dict[tuple[str, str], str] = {
     # Conversas e pastas
     ("GET", "/api/v1/conversations"): AUTENTICADA,
     ("GET", "/api/v1/conversations/{conversation_id}"): AUTENTICADA,
+    ("PATCH", "/api/v1/conversations/{conversation_id}"): AUTENTICADA,
     ("GET", "/api/v1/folders"): AUTENTICADA,
     ("POST", "/api/v1/folders"): AUTENTICADA,
     ("PUT", "/api/v1/folders/{folder_id}"): AUTENTICADA,

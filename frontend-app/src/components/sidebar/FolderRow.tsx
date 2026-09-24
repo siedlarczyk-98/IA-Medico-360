@@ -12,6 +12,8 @@ interface FolderRowProps {
   onSelect: (id: string) => void;
   onMove: (convId: string, folderId: string | null) => void;
   onRename: (id: string, name: string) => void;
+  /** Renomear uma CONVERSA da pasta (não a pasta). */
+  onRenameConv?: (convId: string, title: string) => void;
   onDelete: (id: string) => void;
   /** Abre o modal da pasta para editar nome e evolução do paciente. */
   onEdit: (folder: Folder) => void;
@@ -28,7 +30,7 @@ interface FolderRowProps {
   onDropConv?: (folderId: string | null) => void;
 }
 
-function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onDelete, onEdit, onNewInFolder, defaultOpen = false, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
+function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, onMove, onRename, onRenameConv, onDelete, onEdit, onNewInFolder, defaultOpen = false, selectedConvIds, selectionMode, onToggleSelect, onDragStart, onDropConv }: FolderRowProps) {
   // Só o valor INICIAL: depois disso quem manda é o clique do usuário. Se fosse
   // efeito sincronizando com a prop, reabriria a pasta que ele acabou de fechar.
   const [open, setOpen] = useState(defaultOpen);
@@ -204,6 +206,7 @@ function FolderRowBase({ folder, conversations, activeId, allFolders, onSelect, 
                 folders={allFolders}
                 onSelect={onSelect}
                 onMove={onMove}
+                onRename={onRenameConv}
                 selected={selectedConvIds?.has(conv.id)}
                 selectionMode={selectionMode}
                 onToggleSelect={onToggleSelect}
