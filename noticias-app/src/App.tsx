@@ -297,6 +297,6 @@ function AbrirTemas({ aoEditarTemas }: { aoEditarTemas: () => void }) {
 const aviso: React.CSSProperties = {
   padding: 48,
   textAlign: 'center',
-  fontFamily: "var(--m360-font, 'Just Sans', -apple-system, 'Segoe UI', sans-serif)",
+  fontFamily: "'Plus Jakarta Sans', -apple-system, 'Segoe UI', sans-serif",
   color: '#014751',
 };

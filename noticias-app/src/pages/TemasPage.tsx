@@ -55,7 +55,7 @@ const COR = {
   avisoFundo: '#fdeccb',
 } as const;
 
-const FONTE = "var(--m360-font, 'Just Sans', -apple-system, 'Segoe UI', sans-serif)";
+const FONTE = "'Plus Jakarta Sans', -apple-system, 'Segoe UI', sans-serif";
 
 // Índice = `dia_semana` do backend, que segue o `weekday()` do Python: 0 é
 // segunda. Não reordenar sem mexer no outro lado.

@@ -40,7 +40,7 @@ const COLORS = {
   algodao: "#fdfff4",
 } as const;
 
-const FONT_STACK = "var(--m360-font, 'Just Sans', -apple-system, 'Segoe UI', sans-serif)";
+const FONT_STACK = "'Plus Jakarta Sans', -apple-system, 'Segoe UI', sans-serif";
 
 interface JournalMeta {
   slug: string;

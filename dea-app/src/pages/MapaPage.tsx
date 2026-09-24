@@ -107,12 +107,12 @@ export function MapaPage() {
         <h1>Mapa de DEA</h1>
       </div>
 
+      {/* Texto, sem link `tel:`, igual ao do metrônomo. Na homologação dentro do
+          app da Waid (2026-09-24) o link não abriu o discador — provavelmente a
+          webview do app não encaminha `tel:` —, e um link que não responde em
+          plena parada é pior que nenhum. Decisão do Ruben. */}
       <p className="aviso-emergencia" role="note">
-        Em parada cardiorrespiratória:{' '}
-        <strong>
-          ligue <a href="tel:192">192</a> (SAMU)
-        </strong>{' '}
-        e comece as
+        Em parada cardiorrespiratória: <strong>ligue 192 (SAMU)</strong> e comece as
         compressões. Os registros são colaborativos e podem estar desatualizados.
       </p>
 
