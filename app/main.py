@@ -5,7 +5,7 @@ Médico 360 — Aplicação principal FastAPI.
 import json
 import logging
 import sys
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +30,7 @@ from app.core import http_client
 from app.core.body_limit import LimiteDeCorpoMiddleware
 from app.core.config import get_settings, origens_confiaveis
 from app.core.error_tracking import setup_sentry
-from app.core.lider import como_lider
+from app.core.lider import Lideranca
 from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.security_headers import CabecalhosDeSegurancaMiddleware
 from app.core.telemetry import setup_phoenix
@@ -43,59 +43,67 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup e shutdown hooks."""
-    # `AsyncExitStack` porque a liderança é um context manager que precisa durar
-    # toda a vida da aplicação: a conexão aberta é o que sustenta o advisory lock.
-    async with AsyncExitStack() as pilha:
-        # Startup — logging primeiro, para o resto do boot já sair estruturado.
-        setup_logging(level=settings.log_level, json_output=settings.is_production)
-        logger.info("Médico 360 iniciando", extra={"env": settings.app_env})
-        if setup_sentry(
-            dsn=settings.sentry_dsn,
-            environment=settings.app_env,
-            release=settings.sentry_release or None,
-            traces_sample_rate=settings.sentry_traces_sample_rate,
-        ):
-            logger.info(
-                "Sentry ativo (scrubbing de PII habilitado, amostragem de traces em %.0f%%)",
-                settings.sentry_traces_sample_rate * 100,
-            )
-        setup_phoenix(
-            api_key=settings.phoenix_api_key,
-            project_name=settings.phoenix_project_name,
-            endpoint=settings.phoenix_endpoint,
+    # Startup — logging primeiro, para o resto do boot já sair estruturado.
+    setup_logging(level=settings.log_level, json_output=settings.is_production)
+    logger.info("Médico 360 iniciando", extra={"env": settings.app_env})
+    if setup_sentry(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        release=settings.sentry_release or None,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+    ):
+        logger.info(
+            "Sentry ativo (scrubbing de PII habilitado, amostragem de traces em %.0f%%)",
+            settings.sentry_traces_sample_rate * 100,
         )
-        await http_client.startup()
-        # Carrega o modelo de NER do DLP fora do caminho da 1ª requisição (~1s).
-        if not ner.warmup():
-            logger.warning("NER do DLP indisponível — nomes sem palavra-gatilho não serão mascarados")
-        # Popula o registry de formulas no boot: um formula_key ausente falha
-        # aqui, e nao na primeira execucao clinica em producao.
-        load_all_formulas()
-        # Expurgo de retenção (LGPD art. 16) roda dentro do processo, e não por cron
-        # externo: o agendamento no painel do Railway parou sem avisar e ficou 39
-        # dias sem ninguém saber. Ver app/services/expurgo_agendado.py.
-        #
-        # OS TRÊS SÓ SOBEM NO PROCESSO LÍDER. Cada worker do uvicorn roda este
-        # `lifespan` inteiro; sem a eleição, N workers = N cópias de cada agendador.
-        # O expurgo é idempotente, mas a vigilância alarmaria N vezes (o silêncio de
-        # 24h por tag é um dict em memória, por processo) e o pipeline de notícias
-        # chamaria o modelo N vezes. Ver `app/core/lider.py`.
-        lideranca = await pilha.enter_async_context(como_lider("agendadores"))
-        tarefa_expurgo = expurgo_agendado.iniciar() if lideranca else None
-        # Vigilancia: pergunta a cada 6h se as garantias silenciosas do
-        # sistema continuam valendo (cache gravando, custo estavel, expurgo
-        # rodando). O cache semantico ficou meses desligado porque o dado existia
-        # e ninguem consultava. Ver app/services/vigilancia_agendada.py.
-        tarefa_vigilancia = vigilancia_agendada.iniciar() if lideranca else None
-        # Pipeline de noticias no processo, e nao num Cron Job do painel: o modulo
-        # veio de um repo onde ele era exatamente isso, e este projeto ja perdeu 39
-        # dias de expurgo com um agendador que parou sem avisar.
-        tarefa_noticias = news_agendado.iniciar() if lideranca else None
+    setup_phoenix(
+        api_key=settings.phoenix_api_key,
+        project_name=settings.phoenix_project_name,
+        endpoint=settings.phoenix_endpoint,
+    )
+    await http_client.startup()
+    # Carrega o modelo de NER do DLP fora do caminho da 1ª requisição (~1s).
+    if not ner.warmup():
+        logger.warning("NER do DLP indisponível — nomes sem palavra-gatilho não serão mascarados")
+    # Popula o registry de formulas no boot: um formula_key ausente falha
+    # aqui, e nao na primeira execucao clinica em producao.
+    load_all_formulas()
+
+    # OS TRÊS AGENDADORES SÓ RODAM NO PROCESSO LÍDER. Cada worker do uvicorn roda
+    # este `lifespan` inteiro; sem a eleição, N workers = N cópias de cada
+    # agendador. O expurgo é idempotente, mas a vigilância alarmaria N vezes (o
+    # silêncio de 24h por tag é um dict em memória, por processo) e o pipeline de
+    # notícias chamaria o modelo N vezes. Ver `app/core/lider.py` — inclusive por
+    # que a liderança é disputada o tempo todo, e não só no boot.
+    #
+    # - Expurgo de retenção (LGPD art. 16) roda dentro do processo, e não por cron
+    #   externo: o agendamento no painel do Railway parou sem avisar e ficou 39
+    #   dias sem ninguém saber. Ver app/services/expurgo_agendado.py.
+    # - Vigilancia: pergunta a cada 6h se as garantias silenciosas do sistema
+    #   continuam valendo (cache gravando, custo estavel, expurgo rodando). Ver
+    #   app/services/vigilancia_agendada.py.
+    # - Pipeline de noticias no processo, e nao num Cron Job do painel, pelo mesmo
+    #   motivo do expurgo.
+    agendadores: dict[str, object] = {}
+
+    def subir_agendadores() -> None:
+        agendadores["expurgo"] = expurgo_agendado.iniciar()
+        agendadores["vigilancia"] = vigilancia_agendada.iniciar()
+        agendadores["noticias"] = news_agendado.iniciar()
+
+    async def derrubar_agendadores() -> None:
+        await news_agendado.parar(agendadores.pop("noticias", None))
+        await vigilancia_agendada.parar(agendadores.pop("vigilancia", None))
+        await expurgo_agendado.parar(agendadores.pop("expurgo", None))
+
+    lideranca = Lideranca("agendadores", ao_assumir=subir_agendadores, ao_perder=derrubar_agendadores)
+    await lideranca.iniciar()
+    try:
         yield
-        # Shutdown
-        await news_agendado.parar(tarefa_noticias)
-        await vigilancia_agendada.parar(tarefa_vigilancia)
-        await expurgo_agendado.parar(tarefa_expurgo)
+    finally:
+        # Shutdown — `finally` para o lock ser devolvido mesmo se algo acima do
+        # yield levantar: lock preso é o deploy seguinte esperando um intervalo.
+        await lideranca.parar()
         await http_client.shutdown()
         logger.info("Médico 360 encerrando")
 

@@ -11,11 +11,13 @@ e o cache semântico ficou meses desligado. Ver o cabeçalho de
 Trazer o agendamento para o código faz dele algo que aparece no diff, tem teste,
 e não pode sumir sem que o backend inteiro caia junto.
 
-O QUE ISSO CUSTA
-Com várias réplicas, todas rodam o pipeline. É inofensivo por construção: a
-coleta deduplica por (source, external_id), o tagger e o redator usam
+QUEM RODA
+Só o processo líder (`app/core/lider.py`): coleta e classificação chamam o
+modelo, e duas rodadas simultâneas custariam o dobro. Na sobreposição de um
+deploy, a rede de segurança continua valendo: a coleta deduplica por
+(source, external_id), o tagger e o redator usam
 `with_for_update(skip_locked=True)`, e o digest tem unicidade por
-(user_id, data_ref). Eleição de líder seria complexidade sem ganho nesta escala.
+(user_id, data_ref).
 """
 
 import asyncio

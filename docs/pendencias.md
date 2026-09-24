@@ -132,6 +132,12 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
 - [x] **Subir workers — FEITO em 2026-09-21.** `--workers ${WEB_CONCURRENCY:-2}` no
       Dockerfile; os agendadores passaram a subir só no processo líder
       (`app/core/lider.py`). Sobe para 2 workers no próximo deploy, sem env nova.
+      **Corrigido em 2026-09-24 (item 59):** a eleição decidia só no boot e todo
+      deploy deixava o backend sem agendadores. Agora é disputada a cada 60 s.
+      Até este código subir, Restart (não Redeploy) do backend depois de cada deploy.
+- [ ] **Homologar o item 59 em produção:** dois deploys seguidos SEM Restart, e nos
+      dois o log mostra "Agendador 'agendadores': este processo é o líder" em até
+      ~2 min depois que o container antigo sai.
 - [ ] **Depois de um dia com 2 workers**, decidir se vai para 4: rodar
       `python -m scripts.medir_conexoes_presas --minutos 30` num horário de movimento e
       conferir `pg_stat_activity`. Com 4 são ~164 conexões de um teto de 500.

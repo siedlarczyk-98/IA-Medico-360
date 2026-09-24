@@ -36,9 +36,11 @@ testes, ao CI e a code review. Como código, ele aparece no diff, tem teste, e s
 some se o backend sumir junto — caso em que a falta de expurgo é o menor dos
 problemas.
 
-**Custo aceito:** com várias réplicas, todas rodam o expurgo. É inofensivo — a
-operação é idempotente e barata, e eleição de líder seria complexidade sem ganho
-nesta escala.
+**Quem roda:** desde 2026-09-21, só o processo líder (`app/core/lider.py`), porque
+com 2 workers a vigilância alarmava em dobro. A primeira versão da eleição decidia
+só no boot e deixou produção sem agendadores a cada deploy (incidente de
+2026-09-24, item 59 de `docs/pitacos-do-fable-2.md`); agora a liderança é
+disputada a cada 60 s.
 
 **Pendente para você:** se ainda houver um *Cron Schedule* apontando para o
 expurgo em algum serviço do Railway, ele pode ser removido.

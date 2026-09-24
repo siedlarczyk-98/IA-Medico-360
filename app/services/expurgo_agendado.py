@@ -11,11 +11,11 @@ Aqui o agendamento é código: aparece no diff, tem teste, e não pode sumir sem
 que o backend inteiro caia junto — caso em que a falta de expurgo é o menor dos
 problemas.
 
-O QUE ISSO CUSTA
-Com várias réplicas, todas rodam o expurgo. É inofensivo: a operação é
-idempotente e barata (três UPDATE/DELETE por data), e disputa de escrita entre
-réplicas resolve no banco. Trocar isso por eleição de líder seria complexidade
-sem ganho nesta escala.
+QUEM RODA
+Só o processo líder (`app/core/lider.py`), que o `lifespan` elege entre os
+workers. Durante um deploy, o líder antigo e o novo podem se sobrepor por alguns
+minutos — inofensivo: a operação é idempotente e barata (três UPDATE/DELETE por
+data), e disputa de escrita resolve no banco.
 
 Se o backend ficar fora do ar por dias, o expurgo atrasa junto — e é
 justamente isso que o alarme abaixo reporta na volta.
