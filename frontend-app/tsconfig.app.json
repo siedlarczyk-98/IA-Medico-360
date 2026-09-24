@@ -33,5 +33,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "../shared"]
+  "include": ["src", "../shared"],
+  /* Testa o `noticias-app` (que não tem runner próprio) importando-o por caminho
+     relativo. O build do Railway copia só `frontend-app/` e `shared/`, então o
+     `tsc -b` do build não acha aquele módulo e quebra. O vitest roda o arquivo
+     sem passar pelo `tsc`, e o CI tem o repositório inteiro. */
+  "exclude": ["src/test/noticias-sessao.test.ts"]
 }
