@@ -9,9 +9,12 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Sidebar, SIDEBAR_PINNED_KEY } from './Sidebar';
 import { renderComProvedores } from '../test/utils';
-import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
+import { hospedadoNaWaid } from '@shared/embed/sessao';
 
-vi.mock('@shared/embed/dentro-do-iframe', () => ({ dentroDoIframe: vi.fn(() => false) }));
+vi.mock('@shared/embed/sessao', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@shared/embed/sessao')>()),
+  hospedadoNaWaid: vi.fn(() => false),
+}));
 
 vi.mock('../lib/auth', () => ({
   sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
@@ -315,10 +318,10 @@ describe('Menu do usuário (Editar perfil / Sair)', () => {
     expect(screen.getAllByText('Sair')).toHaveLength(1);
   });
 
-  it('dentro do iframe não há Sair, como na casca mobile (item 72)', async () => {
-    // Ali a identidade vem do handshake a cada abertura; o botão só servia para
-    // revogar a sessão de TODOS os aparelhos — o chat do celular incluído.
-    vi.mocked(dentroDoIframe).mockReturnValue(true);
+  it('dentro da Waid não há Sair, como na casca mobile (item 72)', async () => {
+    // Ali a identidade vem da conta da Waid; o botão só servia para revogar a
+    // sessão de TODOS os aparelhos — o chat do celular incluído.
+    vi.mocked(hospedadoNaWaid).mockReturnValue(true);
     try {
       localStorage.setItem(SIDEBAR_PINNED_KEY, '1');
       const user = userEvent.setup();
@@ -329,7 +332,7 @@ describe('Menu do usuário (Editar perfil / Sair)', () => {
       expect(screen.getAllByText('Editar perfil')).toHaveLength(1);
       expect(screen.queryByText('Sair')).not.toBeInTheDocument();
     } finally {
-      vi.mocked(dentroDoIframe).mockReturnValue(false);
+      vi.mocked(hospedadoNaWaid).mockReturnValue(false);
     }
   });
 

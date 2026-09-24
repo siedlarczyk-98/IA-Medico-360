@@ -13,7 +13,6 @@ import { definirViewport, VIEWPORT_CELULAR } from '../../test/viewport';
 import { reiniciarLayout } from '../layout';
 import { logout, setToken } from '../../lib/auth';
 import { updateProfile } from '../../api/auth';
-import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
 
 vi.mock('../../lib/auth', () => ({
   sessaoExpirou: vi.fn(), conferirSessao: vi.fn(), consumirRetomada: () => null,
@@ -52,8 +51,6 @@ vi.mock('../../api/folders', () => ({
 vi.mock('../../api/usage', () => ({
   getUserUsage: vi.fn(async () => ({ has_limit: true, usage_percentage: 68, week_reset_at: '2026-09-28T12:00:00Z' })),
 }));
-
-vi.mock('@shared/embed/dentro-do-iframe', () => ({ dentroDoIframe: vi.fn(() => false) }));
 
 async function abrirNoCelular({ dentroDaWaid = false } = {}) {
   if (dentroDaWaid) (window as { ReactNativeWebView?: unknown }).ReactNativeWebView = {};
@@ -95,14 +92,16 @@ describe('Conta fora da Waid (aba)', () => {
     expect(logout).toHaveBeenCalled();
   });
 
-  it('dentro do iframe (site da Waid) não há Sair: recarregar autentica de novo', async () => {
-    vi.mocked(dentroDoIframe).mockReturnValue(true);
-    const user = await abrirNoCelular();
-    await user.click(abaConta());
+  it('dentro da Waid não há Sair: reabrir a seção autentica de novo', async () => {
+    // O logout revoga todos os aparelhos; tocar Sair no app derrubava o chat
+    // aberto em outro lugar, e não trocava de conta nenhuma.
+    const user = await abrirNoCelular({ dentroDaWaid: true });
+    await user.click(screen.getByRole('button', { name: /histórico, pastas e conta/i }));
+    await user.click(await screen.findByRole('button', { name: /conta e perfil/i }));
 
-    await screen.findByText('Ana Beatriz Moura');
-    expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull();
-    vi.mocked(dentroDoIframe).mockReturnValue(false);
+    const conta = screen.getByRole('dialog', { name: 'Conta' });
+    expect(await within(conta).findByText('Conectado pela Waid')).toBeInTheDocument();
+    expect(within(conta).queryByRole('button', { name: 'Sair' })).toBeNull();
   });
 
   it('editar perfil: e-mail só leitura, especialidade travada explica por quê, salvar renova o token', async () => {

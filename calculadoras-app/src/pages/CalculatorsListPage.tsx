@@ -7,7 +7,7 @@ import { RequestCalculatorModal } from '../components/RequestCalculatorModal';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { logout } from '../lib/auth';
 import { getSpecialtyStyle } from '../lib/specialtyStyles';
-import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
+import { hospedadoNaWaid } from '@shared/embed/sessao';
 import MedicoLogoAnimada from '@shared/design/MedicoLogoAnimada';
 
 export function CalculatorsListPage() {
@@ -117,12 +117,12 @@ export function CalculatorsListPage() {
               </span>
             </div>
           )}
-          {/* Só FORA do iframe. Na área de membros a identidade vem da Waid a cada
-              abertura: "Sair" ali não muda nada (recarregar reautentica) e
-              sugere um estado que não existe. No aplicativo da Waid, que abre
-              sem iframe, o acesso é por código de e-mail — e aí o botão é a
-              única forma de trocar de conta. Ver `shared/embed/dentro-do-iframe`. */}
-          {!dentroDoIframe() && (
+          {/* Só FORA da Waid. Dentro dela (iframe do portal ou app nativo) a
+              identidade vem da conta da Waid a cada abertura: "Sair" não troca
+              de conta nenhuma, e o logout revoga a sessão em TODOS os aparelhos
+              — derrubava o chat aberto em outro lugar. Ver o docblock de
+              `frontend-app/src/shell/mobile/Conta.tsx`. */}
+          {!hospedadoNaWaid() && (
             <button
               type="button"
               onClick={logout}

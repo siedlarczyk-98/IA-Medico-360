@@ -6,17 +6,17 @@
  * rodapé da gaveta. O conteúdo é o mesmo.
  *
  * SAIR
- * Some dentro do iframe (site da Waid) e aparece fora dele — a regra de
- * `shared/embed/dentro-do-iframe.ts`: no iframe a identidade vem do handshake a
- * cada abertura, e "sair" não tem efeito real; fora dele (app nativo, URL
- * direta) a sessão pode ter vindo por código de e-mail, e sair é o único jeito
- * de trocar de conta num aparelho compartilhado. O protótipo tirava o Sair do
- * app nativo também; aqui prevaleceu o motivo documentado.
+ * Só fora da Waid (URL direta, login por código de e-mail). Dentro dela — iframe
+ * do portal OU app nativo — quem define o médico é a conta da Waid: reabrir a
+ * seção autentica de novo, então "sair" não troca de conta nenhuma. E custava
+ * caro: o logout revoga a sessão em TODOS os aparelhos, e tocar Sair aqui
+ * derrubava o chat aberto em outro lugar (item 60 de `docs/pitacos-do-fable-2.md`).
+ * Até 2026-09-24 o app nativo mostrava o botão, pelo argumento de trocar de conta
+ * num aparelho compartilhado; o Ruben decidiu que não vale, pelo motivo acima.
  */
 
 import { useState } from 'react';
 
-import { dentroDoIframe } from '@shared/embed/dentro-do-iframe';
 import { DOCUMENTOS } from '@shared/documentos';
 import { logout } from '../../lib/auth';
 import { abrirSuporte, suporteDisponivel } from '../../lib/intercom';
@@ -47,8 +47,7 @@ interface Props {
 export function ContaConteudo({ hospedado, usageTick, onEditarPerfil }: Props) {
   const usuario = useCurrentUser();
   const uso = useUserUsage(usageTick);
-  // Lido uma vez: o contexto de iframe não muda durante a sessão.
-  const [podeSair] = useState(() => !dentroDoIframe());
+  const podeSair = !hospedado;
 
   return (
     <div className="mv-conta">

@@ -23,7 +23,20 @@ const DISCLAIMER = '⚕️ Suporte à decisão clínica. A conduta é de respons
  */
 const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
   table: ({ children }) => (
-    <div className="rolagem" style={{ overflowX: 'auto', margin: 'var(--gap-2) 0', maxWidth: '100%' }}>
+    // SÓ o eixo horizontal. Esta div usava `.rolagem`, a classe das listas
+    // verticais: com `overflow-y: auto` e `overscroll-behavior: contain` nos dois
+    // eixos, o dedo que pousava na tabela e arrastava para cima não rolava a
+    // conversa no Android — o gesto ficava preso num contêiner sem nada para
+    // rolar na vertical. Não usa `.rolagem-lateral` porque ela esconde a barra, e
+    // numa tabela a barra é o aviso de que há mais colunas à direita.
+    <div style={{
+      overflowX: 'auto',
+      overflowY: 'hidden',
+      overscrollBehaviorX: 'contain',
+      WebkitOverflowScrolling: 'touch',
+      margin: 'var(--gap-2) 0',
+      maxWidth: '100%',
+    }}>
       {/* `wordBreak: normal` desfaz o `break-word` herdado do corpo da
           resposta. Com ele, o navegador espremia as colunas para caber na tela
           quebrando palavras ao meio — "Apixaba/na", "Dabigatr/ana" numa tabela

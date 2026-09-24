@@ -22,7 +22,7 @@ deploy, a rede de segurança continua valendo: a coleta deduplica por
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,10 +37,20 @@ from app.services import (
 
 logger = logging.getLogger(__name__)
 
-# De hora em hora o laço acorda e confere se já passou da hora configurada. Uma
-# checagem barata por hora é mais robusta que calcular o sono exato até o próximo
-# horário: reinício, deploy ou drift de relógio não fazem a rodada do dia sumir.
-INTERVALO_CHECAGEM_SEGUNDOS = 3600
+# O laço dorme até a VIRADA da próxima hora, e não 3600 s depois de terminar.
+# Dormir um intervalo fixo depois da rodada empurrava o relógio pela duração do
+# pipeline: uma rodada às 10:59:30 que levasse 90 s acordava às 12:01, e a hora 11
+# — a da coleta, ou a do resumo de uma faixa inteira — nunca era vista (item 62 de
+# `docs/pitacos-do-fable-2.md`). A folga evita acordar um instante ANTES da virada
+# por diferença entre o relógio do `sleep` e o de parede.
+FOLGA_APOS_VIRADA_SEGUNDOS = 30
+
+# Mesmo acordando na hora certa, uma hora pode escapar: rodada que falhou, líder
+# trocado num deploy, pipeline que passou da virada. O laço guarda a última hora
+# processada e recupera as que faltaram. Reprocessar é seguro — a coleta deduplica
+# e o digest é único por (usuário, dia) —, mas só até este limite: um resumo da
+# manhã entregue à noite já não é o que o médico pediu.
+MAX_HORAS_RECUPERADAS = 3
 
 # O boot já carrega o modelo de NER e as fórmulas; somar chamada de rede na mesma
 # janela atrasaria a primeira requisição de verdade.
@@ -67,28 +77,72 @@ async def rodar_pipeline(db: AsyncSession) -> dict:
     return {"coleta": coleta, "tagging": tagging, "redacao": redacao}
 
 
-async def _uma_rodada() -> None:
+async def _uma_rodada(hora: datetime) -> None:
+    """Tudo o que cabe a `hora` (UTC, cheia): a coleta, se for a hora dela, e os digests."""
     settings = get_settings()
-    agora = datetime.now(UTC)
 
     async with async_session_factory() as db:
-        if agora.hour == settings.news_run_hour:
+        if hora.hour == settings.news_run_hour:
             resultado = await rodar_pipeline(db)
             logger.info("Pipeline de notícias concluído", extra=resultado)
 
         # TODA HORA, e não mais só às `news_digest_hour`: quem decide se é a
         # hora de cada médico é a agenda dele (`news_digest_agenda`), lá dentro.
         # A rodada é barata quando não é hora de ninguém — uma consulta de
-        # usuários e nenhum envio.
-        resumo = await news_digest_service.enviar_digests(db)
+        # usuários e nenhum envio. A hora vai explícita: numa hora recuperada,
+        # o relógio já está na seguinte, e é a faixa da perdida que se quer servir.
+        resumo = await news_digest_service.enviar_digests(db, agora=hora)
         logger.info("Rodada de digest concluída", extra=resumo)
 
 
-async def _laco() -> None:
-    await asyncio.sleep(ATRASO_INICIAL_SEGUNDOS)
-    while True:
+def hora_cheia(momento: datetime) -> datetime:
+    return momento.replace(minute=0, second=0, microsecond=0)
+
+
+def horas_a_processar(ultima: datetime | None, agora: datetime) -> list[datetime]:
+    """
+    As horas cheias que ainda não foram servidas, da mais antiga à atual.
+
+    Sem `ultima` (primeira rodada do processo, ou liderança recém-assumida), só a
+    atual: este processo não sabe o que o anterior já serviu. Num deploy isso não
+    perde nada — o líder novo assume em menos de três minutos, dentro da mesma
+    hora ou logo na virada, e repetir a hora que o antigo já tinha servido é seguro.
+    """
+    atual = hora_cheia(agora)
+    if ultima is None:
+        return [atual]
+    horas = []
+    hora = ultima + timedelta(hours=1)
+    while hora <= atual:
+        horas.append(hora)
+        hora += timedelta(hours=1)
+    descartadas = horas[:-MAX_HORAS_RECUPERADAS]
+    if descartadas:
+        logger.warning(
+            "Notícias: %d hora(s) sem rodada ficaram para trás além do limite de "
+            "recuperação (%s a %s UTC); digests dessas faixas não serão enviados",
+            len(descartadas), descartadas[0].isoformat(), descartadas[-1].isoformat(),
+        )
+    return horas[-MAX_HORAS_RECUPERADAS:]
+
+
+def segundos_ate_proxima_hora(agora: datetime) -> float:
+    proxima = hora_cheia(agora) + timedelta(hours=1)
+    return (proxima - agora).total_seconds() + FOLGA_APOS_VIRADA_SEGUNDOS
+
+
+async def processar_pendentes(ultima: datetime | None, agora: datetime) -> datetime | None:
+    """
+    Roda cada hora pendente, em ordem. Devolve a última hora servida com sucesso.
+
+    Para na primeira falha, sem avançar: a hora que falhou é tentada de novo na
+    próxima volta, como hora recuperada.
+    """
+    for hora in horas_a_processar(ultima, agora):
+        if hora != hora_cheia(agora):
+            logger.warning("Notícias: recuperando a rodada das %s UTC, que tinha sido pulada", hora.isoformat())
         try:
-            await _uma_rodada()
+            await _uma_rodada(hora)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -96,7 +150,17 @@ async def _laco() -> None:
             # rede encerraria o agendamento em silêncio — exatamente o modo de
             # falha que este módulo existe para eliminar.
             logger.exception("Rodada de notícias falhou; nova tentativa no próximo ciclo: %s", exc)
-        await asyncio.sleep(INTERVALO_CHECAGEM_SEGUNDOS)
+            break
+        ultima = hora
+    return ultima
+
+
+async def _laco() -> None:
+    await asyncio.sleep(ATRASO_INICIAL_SEGUNDOS)
+    ultima: datetime | None = None
+    while True:
+        ultima = await processar_pendentes(ultima, datetime.now(UTC))
+        await asyncio.sleep(segundos_ate_proxima_hora(datetime.now(UTC)))
 
 
 def iniciar() -> asyncio.Task | None:

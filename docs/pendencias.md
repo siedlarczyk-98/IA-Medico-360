@@ -134,15 +134,14 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
       (`app/core/lider.py`). Sobe para 2 workers no próximo deploy, sem env nova.
       **Corrigido em 2026-09-24 (item 59):** a eleição decidia só no boot e todo
       deploy deixava o backend sem agendadores. Agora é disputada a cada 60 s.
-      Até este código subir, Restart (não Redeploy) do backend depois de cada deploy.
-- [ ] **Homologar o item 60 no celular** (passo 3 do roteiro em `docs/pitacos-do-fable-2.md`):
-      Sair no computador ou nas calculadoras, abrir o chat no celular em menos de 60 min e
-      mandar uma pergunta. Esperado: tela de espera por um instante, o chat volta na mesma
-      conversa e a pergunta volta para o campo, sem código por e-mail. Corrigido em
-      2026-09-24: todo 401 do chat leva a `sessaoExpirou` (`frontend-app/src/lib/auth.ts`).
-- [ ] **Homologar o item 59 em produção:** dois deploys seguidos SEM Restart, e nos
-      dois o log mostra "Agendador 'agendadores': este processo é o líder" em até
-      ~2 min depois que o container antigo sai.
+- [ ] **Homologar o item 60 no celular:** deixar o chat aberto no app da Waid, minimizar por
+      mais de 65 min e mandar uma pergunta ao voltar. Esperado: tela de espera por um
+      instante, mesma conversa, pergunta no campo, sem código por e-mail. (Revogar por
+      "Sair" não serve de teste: o Sair não existe mais dentro da Waid, decisão de 24/09.)
+- [x] **Item 59 homologado em produção em 2026-09-24.** Deploy das 12:57 sem Restart: os
+      dois workers novos logaram "outro processo já é o líder" (12:57:20 e 12:57:23) e um
+      deles assumiu às 12:58:23, com os três agendadores. O Restart depois de deploy não é
+      mais necessário.
 - [ ] **Depois de um dia com 2 workers**, decidir se vai para 4: rodar
       `python -m scripts.medir_conexoes_presas --minutos 30` num horário de movimento e
       conferir `pg_stat_activity`. Com 4 são ~164 conexões de um teto de 500.
