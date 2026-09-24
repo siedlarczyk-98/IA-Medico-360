@@ -138,6 +138,10 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
       mais de 65 min e mandar uma pergunta ao voltar. Esperado: tela de espera por um
       instante, mesma conversa, pergunta no campo, sem código por e-mail. (Revogar por
       "Sair" não serve de teste: o Sair não existe mais dentro da Waid, decisão de 24/09.)
+- [ ] **Homologar o item 63:** abrir o assistente de risco CV nas calculadoras, preencher
+      até o passo do PREVENT, deixar o app em segundo plano por mais de 65 min e voltar.
+      Esperado: depois da tela de espera, o mesmo passo com os campos preenchidos. Reabrir
+      a calculadora pela lista, sem queda de sessão, tem que mostrá-la VAZIA.
 - [x] **Item 59 homologado em produção em 2026-09-24.** Deploy das 12:57 sem Restart: os
       dois workers novos logaram "outro processo já é o líder" (12:57:20 e 12:57:23) e um
       deles assumiu às 12:58:23, com os três agendadores. O Restart depois de deploy não é

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useFormularioSalvo, usePreservarFormulario } from '@shared/embed/formulario';
+import { donoDaSessao } from '../../lib/auth';
 import { Card, CardHeader, Separator, SubHeading, Button, ToggleGroup, Label, InputField, CheckItem } from '../riscoCv/ui';
 import { IconTarget } from '../riscoCv/icons';
 import { usePreventCalculator } from '../../hooks/usePreventCalculator';
@@ -47,12 +49,23 @@ const INICIAL: Campos = {
   statinUse: false,
 };
 
+const CHAVE_FORMULARIO = 'prevent';
+interface EstadoGuardado {
+  campos: Campos;
+  unidade: UnidadeLipides;
+  ctExibido: string;
+  hdlExibido: string;
+}
+
 export function PreventForm() {
   const { mutate: execute, isPending, error, data, reset } = usePreventCalculator();
-  const [campos, setCampos] = useState<Campos>(INICIAL);
-  const [unidade, setUnidade] = useState<UnidadeLipides>('mgdl');
-  const [ctExibido, setCtExibido] = useState('');
-  const [hdlExibido, setHdlExibido] = useState('');
+  // Volta preenchido depois de uma reentrada — ver `shared/embed/formulario.ts`.
+  const salvo = useFormularioSalvo<Partial<EstadoGuardado>>(CHAVE_FORMULARIO, donoDaSessao());
+  const [campos, setCampos] = useState<Campos>({ ...INICIAL, ...salvo?.campos });
+  const [unidade, setUnidade] = useState<UnidadeLipides>(salvo?.unidade ?? 'mgdl');
+  const [ctExibido, setCtExibido] = useState(salvo?.ctExibido ?? '');
+  const [hdlExibido, setHdlExibido] = useState(salvo?.hdlExibido ?? '');
+  usePreservarFormulario(CHAVE_FORMULARIO, { campos, unidade, ctExibido, hdlExibido });
 
   // Qualquer edição invalida o resultado na tela: um número calculado com dados
   // que não são mais os exibidos é pior do que nenhum número.

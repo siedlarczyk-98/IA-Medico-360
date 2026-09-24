@@ -9,6 +9,14 @@ import { CalculatorTopbar } from '../components/CalculatorTopbar';
 import { formSpecRegistry } from '../calculators/formSpecs';
 import { validateRequired } from '../calculators/formHelpers';
 import { ErroHttp, ValidationError } from '../api/calculators';
+import { useFormularioSalvo, usePreservarFormulario } from '@shared/embed/formulario';
+import { donoDaSessao } from '../lib/auth';
+
+/** O que volta depois de uma reentrada — ver `shared/embed/formulario.ts`. */
+interface EstadoGuardado {
+  values: Record<string, unknown>;
+  aiFilledKeys: string[];
+}
 
 export function GenericCalculatorPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -16,8 +24,14 @@ export function GenericCalculatorPage() {
   const { data: calculator, isLoading, error, refetch, isFetching } = useCalculatorDetail(slug ?? '');
   const { mutate: execute, isPending: executing, data: result, reset } = useExecuteCalculator(slug ?? '');
 
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [aiFilledKeys, setAiFilledKeys] = useState<Set<string>>(new Set());
+  // Um formulário por calculadora: a chave leva o slug, senão os campos da
+  // CURB-65 voltariam dentro do Cockcroft-Gault.
+  const chaveFormulario = `generico:${slug ?? ''}`;
+  const salvo = useFormularioSalvo<Partial<EstadoGuardado>>(chaveFormulario, donoDaSessao());
+  const [values, setValues] = useState<Record<string, unknown>>(salvo?.values ?? {});
+  const [aiFilledKeys, setAiFilledKeys] = useState<Set<string>>(() => new Set(salvo?.aiFilledKeys ?? []));
+  // `Set` não sobrevive a JSON; vai como lista.
+  usePreservarFormulario(chaveFormulario, { values, aiFilledKeys: [...aiFilledKeys] });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
 

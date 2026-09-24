@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { useFormularioSalvo, usePreservarFormulario } from '@shared/embed/formulario';
+import { donoDaSessao } from '../../lib/auth';
 import { StepIndicator } from './StepIndicator';
 import { TriagemStep } from './steps/TriagemStep';
 import { DiabetesStep } from './steps/DiabetesStep';
@@ -10,13 +12,28 @@ import { INITIAL_STATE, type RiskLevel, type WizardState } from './riskTypes';
 
 const STEP_LABELS = ['Triagem', 'Diabetes', 'Alto Risco', 'PREVENT', 'Agravantes'];
 
+/** O que volta depois de uma reentrada — ver `shared/embed/formulario.ts`. */
+const CHAVE_FORMULARIO = 'risco-cv-sbc2025';
+interface EstadoGuardado {
+  step: number;
+  state: WizardState;
+  result: RiskLevel | null;
+  preAggravantRisk: RiskLevel;
+  completedSteps: number[];
+}
+
 /** Porta literal de `RiskCalculator.tsx` (app de referência) — orquestração 100% client-side. */
 export function RiskCalculator() {
-  const [step, setStep] = useState(0);
-  const [state, setState] = useState<WizardState>({ ...INITIAL_STATE });
-  const [result, setResult] = useState<RiskLevel | null>(null);
-  const [preAggravantRisk, setPreAggravantRisk] = useState<RiskLevel>('low');
-  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  // Quinze campos em cinco passos: é o formulário que mais custa redigitar quando
+  // a sessão cai no passo do PREVENT (o único que chama o servidor). O guardado é
+  // mesclado sobre o inicial porque pode ter vindo de uma versão anterior.
+  const salvo = useFormularioSalvo<Partial<EstadoGuardado>>(CHAVE_FORMULARIO, donoDaSessao());
+  const [step, setStep] = useState(salvo?.step ?? 0);
+  const [state, setState] = useState<WizardState>({ ...INITIAL_STATE, ...salvo?.state });
+  const [result, setResult] = useState<RiskLevel | null>(salvo?.result ?? null);
+  const [preAggravantRisk, setPreAggravantRisk] = useState<RiskLevel>(salvo?.preAggravantRisk ?? 'low');
+  const [completedSteps, setCompletedSteps] = useState<number[]>(salvo?.completedSteps ?? []);
+  usePreservarFormulario(CHAVE_FORMULARIO, { step, state, result, preAggravantRisk, completedSteps });
 
   const updateState = useCallback((updates: Partial<WizardState>) => {
     setState(prev => ({ ...prev, ...updates }));

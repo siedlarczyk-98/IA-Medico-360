@@ -1,3 +1,4 @@
+import { guardarFormulariosAbertos } from '@shared/embed/formulario';
 import { reservarReentradaPelaWaid } from '@shared/embed/sessao';
 
 const TOKEN_KEY = 'calc360_token';
@@ -101,14 +102,18 @@ let saindo = false;
  * `data`, e um token vencido virava "Calculadora não encontrada". As que já
  * estavam em cache seguiam abrindo, e o defeito parecia intermitente.
  *
- * Guarda onde o médico estava para devolvê-lo à mesma calculadora depois.
- * Navegação completa (`location.replace`), e não do roteador, de propósito:
+ * Guarda onde o médico estava para devolvê-lo à mesma calculadora depois, e o
+ * que ele tinha preenchido nela (`shared/embed/formulario.ts`) — antes, o
+ * assistente de risco com quinze campos voltava vazio. Navegação completa (`location.replace`), e não do roteador, de propósito:
  * zera o cache do react-query, que ainda guardava o usuário da sessão morta.
  */
 export function sessaoExpirou(): void {
   const { pathname, search } = window.location;
   if (saindo || pathname === '/login' || pathname === '/embed-auth') return;
   saindo = true;
+  // ANTES de limpar o token: o dono do formulário guardado é o `sub` dele, e é
+  // o que impede os dados do paciente de aparecerem para outro médico na volta.
+  guardarFormulariosAbertos(getTokenPayload()?.sub);
   clearToken();
   try {
     sessionStorage.setItem(DESTINO_KEY, pathname + search);
@@ -145,4 +150,9 @@ export function logout(): void {
   void encerrarSessaoNoServidor(token).finally(() => {
     window.location.href = '/login';
   });
+}
+
+/** O médico desta sessão, para restaurar só o formulário que era dele. */
+export function donoDaSessao(): string | undefined {
+  return getTokenPayload()?.sub;
 }

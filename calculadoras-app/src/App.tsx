@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
 import { useSessaoViva } from '@shared/embed/sessao';
@@ -44,6 +44,17 @@ function LoadingScreen() {
 function Reentrar() {
   useEffect(() => { sessaoExpirou(); }, []);
   return <TelaDeEspera mensagem="Renovando sua sessão…" />;
+}
+
+/**
+ * Uma tela NOVA por calculadora. Sem a `key`, ir de uma calculadora genérica
+ * direto para outra (link, voltar/avançar) reaproveitava o componente e os
+ * valores digitados continuavam lá: um campo com o mesmo nome — idade, creatinina
+ * — chegava preenchido com o dado do paciente anterior.
+ */
+function CalculadoraGenerica() {
+  const { slug } = useParams<{ slug: string }>();
+  return <GenericCalculatorPage key={slug} />;
 }
 
 function CookieAuthCheck({ children }: { children: React.ReactNode }) {
@@ -108,7 +119,7 @@ function App() {
         <Route path="/" element={<RequireAuth><CalculatorsListPage /></RequireAuth>} />
         <Route path="/calculadoras/risco-cv-sbc2025" element={<RequireAuth><RiscoCvSbc2025Page /></RequireAuth>} />
         <Route path="/calculadoras/prevent" element={<RequireAuth><PreventPage /></RequireAuth>} />
-        <Route path="/calculadoras/:slug" element={<RequireAuth><GenericCalculatorPage /></RequireAuth>} />
+        <Route path="/calculadoras/:slug" element={<RequireAuth><CalculadoraGenerica /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
