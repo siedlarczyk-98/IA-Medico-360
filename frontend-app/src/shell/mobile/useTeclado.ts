@@ -17,6 +17,15 @@
  * Escreve direto em variáveis CSS do elemento, sem estado React: o evento
  * dispara a cada quadro da animação do teclado, e um re-render por quadro
  * redesenharia o chat inteiro.
+ *
+ * COMO SE SABE QUE O TECLADO ABRIU
+ * Comparando a altura visível com a MAIOR altura já vista nesta largura — a da
+ * tela sem teclado. Era `innerHeight - visualViewport.height`, que funciona no
+ * iOS (só a área visível encolhe) mas não no Android: com `resizes-content` o
+ * layout encolhe junto, as duas medidas caem juntas e a diferença fica em zero.
+ * O teclado nunca era detectado, e a saudação ficava na tela ocupando metade do
+ * espaço acima dele (item 64 de `docs/pitacos-do-fable-2.md`, visto no app da
+ * Waid em 2026-09-24).
  */
 
 import { useCallback } from 'react';
@@ -31,13 +40,25 @@ export function useTeclado(): (el: HTMLElement | null) => (() => void) | undefin
     const vv = window.visualViewport;
     if (!vv || !el) return undefined;
 
+    // A altura da tela SEM teclado, por largura. Girar o aparelho muda as duas
+    // medidas; aí a referência recomeça da altura atual.
+    let largura = vv.width;
+    let alturaSemTeclado = Math.max(window.innerHeight, vv.height);
+
     function aplicar() {
       if (!vv || !el) return;
+      if (Math.abs(vv.width - largura) > 1) {
+        largura = vv.width;
+        alturaSemTeclado = vv.height;
+      }
+      alturaSemTeclado = Math.max(alturaSemTeclado, vv.height);
       el.style.setProperty('--altura-visivel', `${vv.height}px`);
       el.style.setProperty('--topo-visivel', `${vv.offsetTop}px`);
-      // Teclado aberto = a área visível perdeu boa parte da altura da janela.
-      // Serve para esconder o que é dispensável enquanto se digita.
-      el.dataset.teclado = window.innerHeight - vv.height > 120 ? 'aberto' : 'fechado';
+      // Teclado aberto = a área visível perdeu boa parte da altura sem teclado.
+      // 120 px fica acima da barra de endereço que aparece e some (~56 px) e bem
+      // abaixo de qualquer teclado. Serve para esconder o que é dispensável
+      // enquanto se digita.
+      el.dataset.teclado = alturaSemTeclado - vv.height > 120 ? 'aberto' : 'fechado';
     }
 
     aplicar();
