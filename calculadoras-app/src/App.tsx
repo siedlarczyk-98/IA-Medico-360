@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
-import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth';
+import { useSessaoViva } from '@shared/embed/sessao';
+import { TelaDeEspera } from '@shared/embed/TelaDeEspera';
+import { getToken, isTokenExpired, sessaoExpirou, setToken } from './lib/auth';
 import { getMe } from './api/auth';
 
 // Mesma convenção de `api/auth.ts`: vazio em dev (o proxy do Vite cuida do
@@ -35,6 +37,15 @@ function LoadingScreen() {
   );
 }
 
+/**
+ * Sessão acabou: entra de novo (pela Waid quando hospedado, senão login).
+ * Efeito e não chamada no render — `sessaoExpirou` navega e grava estado.
+ */
+function Reentrar() {
+  useEffect(() => { sessaoExpirou(); }, []);
+  return <TelaDeEspera mensagem="Renovando sua sessão…" />;
+}
+
 function CookieAuthCheck({ children }: { children: React.ReactNode }) {
   const { isSuccess, isError, isPending } = useQuery({
     queryKey: ['currentUser'],
@@ -43,7 +54,7 @@ function CookieAuthCheck({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60 * 1000,
   });
   if (isPending) return <LoadingScreen />;
-  if (isError && !isSuccess) return <Navigate to="/login" replace />;
+  if (isError && !isSuccess) return <Reentrar />;
   return <>{children}</>;
 }
 
@@ -74,11 +85,21 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
       {children}
     </OnboardingGate>
   );
-  if (isAuthenticated() && !isTokenExpired()) return conteudo;
+  const token = getToken();
+  if (token && !isTokenExpired()) return conteudo;
+  // Token guardado e VENCIDO não passa pelo `CookieAuthCheck`: ele consultava
+  // `['currentUser']`, que o cache ainda tinha da sessão morta, e deixava a
+  // tela abrir para toda chamada seguinte levar 401. O cookie também não é
+  // reserva aqui — o backend lê o header antes do cookie, e no app nativo o
+  // cookie da API é de terceiros.
+  if (token) return <Reentrar />;
   return <CookieAuthCheck>{conteudo}</CookieAuthCheck>;
 }
 
 function App() {
+  // Renova o token antes de vencer; se o app volta do segundo plano com ele já
+  // vencido, entra de novo. Ver `shared/embed/sessao.ts`.
+  useSessaoViva({ apiBase: API_BASE, getToken, setToken, aoExpirar: sessaoExpirou });
   return (
     <Suspense fallback={<LoadingScreen />}>
       <Routes>

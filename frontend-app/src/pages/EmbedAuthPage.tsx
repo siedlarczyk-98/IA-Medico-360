@@ -14,10 +14,10 @@
 import { useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, temIframe, useIdentidadeWaid } from '@shared/embed/identidade';
 import { mensagemDaIdentidade, TelaDeEspera } from '@shared/embed/TelaDeEspera';
 
-import { descartarSessaoDesteNavegador, setToken } from '../lib/auth';
+import { descartarSessaoDesteNavegador, getToken, isTokenExpired, setToken } from '../lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
@@ -45,12 +45,25 @@ export function EmbedAuthPage() {
   // redirecionamento no sucesso; isto só cobre um render extra.
   // Identidade não confirmada DENTRO do iframe: a sessão que já estava no
   // navegador não pode ser herdada. Ver `descartarSessaoDesteNavegador`.
+  //
+  // "Dentro do iframe" é `temIframe()`, e não "erro diferente de `sem_iframe`".
+  // Até 22/09 as duas coisas coincidiam, porque o app nativo sempre dava
+  // `sem_iframe`. Desde que a ponte da Waid passou a responder no app, ele cai
+  // em `timeout` quando a Waid demora — e a regra antiga apagava o token do
+  // login por e-mail num aparelho pessoal, que é exatamente o que ela deveria
+  // poupar.
   const tipoDoErro = fase === 'erro' ? erro?.tipo : undefined;
   useEffect(() => {
-    if (tipoDoErro && tipoDoErro !== 'sem_iframe') descartarSessaoDesteNavegador();
+    if (tipoDoErro && temIframe()) descartarSessaoDesteNavegador();
   }, [tipoDoErro]);
 
   if (fase === 'pronto') return <Navigate to="/" replace />;
+
+  // Fora do iframe (app nativo, URL direta) a Waid não respondeu, mas a sessão
+  // que já estava aqui ainda vale: é do dono do aparelho, segue com ela.
+  if (fase === 'erro' && !temIframe() && getToken() && !isTokenExpired()) {
+    return <Navigate to="/" replace />;
+  }
 
   // Esperando a Waid: a mesma tela nos três apps (`shared/embed/TelaDeEspera`).
   if (fase !== 'erro') return <TelaDeEspera mensagem={mensagemDaIdentidade(fase)} />;

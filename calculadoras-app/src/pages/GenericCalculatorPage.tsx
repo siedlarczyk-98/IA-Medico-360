@@ -8,12 +8,12 @@ import { AiPrefillSection } from '../components/AiPrefillSection';
 import { CalculatorTopbar } from '../components/CalculatorTopbar';
 import { formSpecRegistry } from '../calculators/formSpecs';
 import { validateRequired } from '../calculators/formHelpers';
-import { ValidationError } from '../api/calculators';
+import { ErroHttp, ValidationError } from '../api/calculators';
 
 export function GenericCalculatorPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { data: calculator, isLoading } = useCalculatorDetail(slug ?? '');
+  const { data: calculator, isLoading, error, refetch, isFetching } = useCalculatorDetail(slug ?? '');
   const { mutate: execute, isPending: executing, data: result, reset } = useExecuteCalculator(slug ?? '');
 
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -81,10 +81,51 @@ export function GenericCalculatorPage() {
     );
   }
 
-  if (!calculator) {
+  // "Não encontrada" só quando o servidor disse 404. Antes qualquer falha caía
+  // aqui — inclusive o 401 do token vencido, que é o que o médico via ao
+  // alternar entre a lista e uma calculadora depois de uma hora de app aberto.
+  const status = error instanceof ErroHttp ? error.status : null;
+  if (!calculator && status === 401) {
+    // `sessaoExpirou` já está levando para a reentrada.
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p style={{ color: 'var(--red)' }}>Calculadora não encontrada.</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--fill2)' }}>
+        <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)' }}>Renovando sua sessão…</p>
+      </div>
+    );
+  }
+
+  if (!calculator) {
+    const naoExiste = !error || status === 404;
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <p style={{ color: naoExiste ? 'var(--red)' : 'var(--ink)', margin: 0 }}>
+          {naoExiste ? 'Calculadora não encontrada.' : 'Não foi possível abrir a calculadora agora.'}
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!naoExiste && (
+            <button
+              type="button"
+              onClick={() => { void refetch(); }}
+              disabled={isFetching}
+              style={{
+                fontSize: 'var(--texto-apoio)', color: '#fff', background: 'var(--petrol)',
+                border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer',
+              }}
+            >
+              {isFetching ? 'Tentando…' : 'Tentar de novo'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            style={{
+              fontSize: 'var(--texto-apoio)', color: 'var(--petrol)', background: 'none',
+              border: '1px solid var(--line)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer',
+            }}
+          >
+            Voltar à lista
+          </button>
+        </div>
       </div>
     );
   }

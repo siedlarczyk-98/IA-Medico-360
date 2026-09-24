@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
@@ -53,6 +53,7 @@ export async function calculatePrevent(body: PreventCalculateRequest): Promise<P
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    conferirSessao(res);
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
   }

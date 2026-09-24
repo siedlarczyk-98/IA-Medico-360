@@ -11,13 +11,19 @@
  * porque falta cadastro seria hostil.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, temIframe, useIdentidadeWaid } from '@shared/embed/identidade';
 import { mensagemDaIdentidade, TelaDeEspera } from '@shared/embed/TelaDeEspera';
 
-import { descartarSessaoDesteNavegador, setToken } from '../lib/auth';
+import {
+  descartarSessaoDesteNavegador,
+  destinoAposEntrar,
+  getToken,
+  isTokenExpired,
+  setToken,
+} from '../lib/auth';
 
 // Mesma convenção de `api/auth.ts`: vazio em dev (o proxy do Vite cuida do
 // CORS), domínio do backend em produção.
@@ -35,24 +41,43 @@ const ORIGENS_WAID = montarOrigensWaid(WAID_ORIGIN);
 
 export function EmbedAuthPage() {
   const navigate = useNavigate();
+  // Estado, e não só o `navigate`: a fase `pronto` renderiza um `<Navigate>` que,
+  // apontando para "/", passava por cima do destino e jogava o médico na lista.
+  const [destino, setDestino] = useState('/');
 
   const { fase, erro } = useIdentidadeWaid({
     apiBase: API_BASE,
     waidOrigin: ORIGENS_WAID,
     aoAutenticar: resposta => {
       setToken(resposta.access_token);
-      navigate('/', { replace: true });
+      // Volta para a calculadora onde a sessão caiu, se foi o caso.
+      const para = destinoAposEntrar();
+      setDestino(para);
+      navigate(para, { replace: true });
     },
   });
 
   // Identidade não confirmada DENTRO do iframe: a sessão que já estava no
   // navegador não pode ser herdada. Ver `descartarSessaoDesteNavegador`.
+  //
+  // "Dentro do iframe" é `temIframe()`, e não "erro diferente de `sem_iframe`".
+  // Até 22/09 as duas coisas coincidiam, porque o app nativo sempre dava
+  // `sem_iframe`. Desde que a ponte da Waid passou a responder no app, ele cai
+  // em `timeout` quando a Waid demora — e a regra antiga apagava o token do
+  // login por e-mail num aparelho pessoal, que é exatamente o que ela deveria
+  // poupar.
   const tipoDoErro = fase === 'erro' ? erro?.tipo : undefined;
   useEffect(() => {
-    if (tipoDoErro && tipoDoErro !== 'sem_iframe') descartarSessaoDesteNavegador();
+    if (tipoDoErro && temIframe()) descartarSessaoDesteNavegador();
   }, [tipoDoErro]);
 
-  if (fase === 'pronto') return <Navigate to="/" replace />;
+  if (fase === 'pronto') return <Navigate to={destino} replace />;
+
+  // Fora do iframe (app nativo, URL direta) a Waid não respondeu, mas a sessão
+  // que já estava aqui ainda vale: é do dono do aparelho, segue com ela.
+  if (fase === 'erro' && !temIframe() && getToken() && !isTokenExpired()) {
+    return <Navigate to="/" replace />;
+  }
 
   // Esperando a Waid: a mesma tela nos três apps (`shared/embed/TelaDeEspera`).
   if (fase !== 'erro') return <TelaDeEspera mensagem={mensagemDaIdentidade(fase)} />;

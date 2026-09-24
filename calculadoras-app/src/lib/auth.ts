@@ -1,4 +1,7 @@
+import { reservarReentradaPelaWaid } from '@shared/embed/sessao';
+
 const TOKEN_KEY = 'calc360_token';
+const DESTINO_KEY = 'calc360_destino';
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -83,6 +86,57 @@ export function descartarSessaoDesteNavegador(): void {
   const token = getToken();
   clearToken();
   void encerrarSessaoNoServidor(token, { revogar: false });
+}
+
+let saindo = false;
+
+/**
+ * A sessão acabou (token vencido ou recusado com 401): entra de novo.
+ *
+ * Dentro da Waid, pelo handshake — silencioso, o médico só vê a tela de espera
+ * por um instante. Fora dela, ou se a reentrada pela Waid acabou de ser
+ * tentada (trava contra laço em `reservarReentradaPelaWaid`), pelo login.
+ *
+ * Antes disto o 401 não levava a lugar nenhum: a tela da calculadora lia só
+ * `data`, e um token vencido virava "Calculadora não encontrada". As que já
+ * estavam em cache seguiam abrindo, e o defeito parecia intermitente.
+ *
+ * Guarda onde o médico estava para devolvê-lo à mesma calculadora depois.
+ * Navegação completa (`location.replace`), e não do roteador, de propósito:
+ * zera o cache do react-query, que ainda guardava o usuário da sessão morta.
+ */
+export function sessaoExpirou(): void {
+  const { pathname, search } = window.location;
+  if (saindo || pathname === '/login' || pathname === '/embed-auth') return;
+  saindo = true;
+  clearToken();
+  try {
+    sessionStorage.setItem(DESTINO_KEY, pathname + search);
+  } catch {
+    /* sem sessionStorage volta para a lista, que também serve */
+  }
+  window.location.replace(reservarReentradaPelaWaid() ? '/embed-auth' : '/login');
+}
+
+/** Chamado por quem faz `fetch` com o token: 401 é sessão que acabou. */
+export function conferirSessao(res: Response): void {
+  if (res.status === 401) sessaoExpirou();
+}
+
+/**
+ * Para onde ir depois de entrar: a tela onde a sessão caiu, ou a lista.
+ * Consome o valor — chamar em handler, não no corpo de um render.
+ */
+export function destinoAposEntrar(): string {
+  try {
+    const destino = sessionStorage.getItem(DESTINO_KEY);
+    sessionStorage.removeItem(DESTINO_KEY);
+    // Só caminho interno: `//outro.site` também começa com barra.
+    if (destino && destino.startsWith('/') && !destino.startsWith('//')) return destino;
+  } catch {
+    /* segue para a lista */
+  }
+  return '/';
 }
 
 export function logout(): void {

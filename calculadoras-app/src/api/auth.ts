@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 // Em dev (sem VITE_API_URL) usa caminho relativo → proxy Vite cuida do CORS.
 // Em prod VITE_API_URL aponta para o domínio do backend.
@@ -51,6 +51,9 @@ export async function getMe(): Promise<UserResponse> {
     credentials: 'include',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error('Unauthorized');
+  if (!res.ok) {
+    conferirSessao(res);
+    throw new Error('Unauthorized');
+  }
   return res.json() as Promise<UserResponse>;
 }

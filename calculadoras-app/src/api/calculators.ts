@@ -1,4 +1,4 @@
-import { getToken } from '../lib/auth';
+import { conferirSessao, getToken } from '../lib/auth';
 
 const BASE = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
@@ -77,15 +77,32 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Erro com o status HTTP junto. Sem o status, quem chama não distingue "não
+ * existe" (404) de "sessão acabou" (401) — e a tela da calculadora mostrava
+ * "não encontrada" para as duas.
+ */
+export class ErroHttp extends Error {
+  status: number;
+  constructor(status: number, mensagem: string) {
+    super(mensagem);
+    this.status = status;
+  }
+}
+
+/** Monta o erro e, se for 401, já dispara a reentrada (`sessaoExpirou`). */
+async function erroDaResposta(res: Response): Promise<ErroHttp> {
+  conferirSessao(res);
+  const err = await res.json().catch(() => ({ detail: res.statusText }));
+  return new ErroHttp(res.status, typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}/api/v1${path}`, {
     credentials: 'include',
     headers: authHeaders(),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
-  }
+  if (!res.ok) throw await erroDaResposta(res);
   return res.json() as Promise<T>;
 }
 
@@ -110,10 +127,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     throw new ValidationError(fieldErrors);
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
-  }
+  if (!res.ok) throw await erroDaResposta(res);
   return res.json() as Promise<T>;
 }
 
@@ -140,10 +154,7 @@ async function withoutBody(method: 'PUT' | 'DELETE', path: string): Promise<void
     credentials: 'include',
     headers: authHeaders(),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
-  }
+  if (!res.ok) throw await erroDaResposta(res);
 }
 
 export function favoriteCalculator(slug: string): Promise<void> {
@@ -165,8 +176,5 @@ export async function requestCalculators(calculators: string[], notifyOnAvailabi
   });
 
   if (res.status === 409) throw new AlreadyRequestedError('Você já registrou esse pedido');
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === 'string' ? err.detail : 'Erro desconhecido');
-  }
+  if (!res.ok) throw await erroDaResposta(res);
 }

@@ -16,10 +16,18 @@ import HighlightsMagazine from './components/HighlightsMagazine';
 import { TemasPage } from './pages/TemasPage';
 import { buscarMeusTemas } from './api/news';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
-import { montarOrigensWaid, useIdentidadeWaid } from '@shared/embed/identidade';
+import { montarOrigensWaid, temIframe, useIdentidadeWaid } from '@shared/embed/identidade';
+import { useSessaoViva } from '@shared/embed/sessao';
 import { LoginOtp } from '@shared/embed/LoginOtp';
 import { mensagemDaIdentidade, TelaDeEspera } from '@shared/embed/TelaDeEspera';
-import { clearToken, descartarSessaoDesteNavegador, getToken, isTokenExpired, setToken } from './lib/auth';
+import {
+  clearToken,
+  descartarSessaoDesteNavegador,
+  getToken,
+  isTokenExpired,
+  sessaoExpirou,
+  setToken,
+} from './lib/auth';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const WAID_ORIGIN =
@@ -54,6 +62,10 @@ function temEntradaDireta(): boolean {
 
 export default function App() {
   const [estado, setEstado] = useState<Estado>({ fase: 'carregando' });
+
+  // Renova o token antes de vencer; se o app volta do segundo plano com ele já
+  // vencido, recarrega para refazer a entrada. Ver `shared/embed/sessao.ts`.
+  useSessaoViva({ apiBase: API_BASE, getToken, setToken, aoExpirar: sessaoExpirou });
 
   /** Com sessão em mãos, decide entre a escolha de temas e o feed. */
   const carregarConteudo = useCallback(async () => {
@@ -116,17 +128,22 @@ export default function App() {
         : 'Não conseguimos confirmar sua identidade com a plataforma.',
     });
 
-    if (!semIframe) {
+    if (temIframe()) {
       // DENTRO do iframe e sem identidade confirmada: a sessão que estava neste
       // navegador pode ser de quem usou a máquina antes. Não se herda.
+      //
+      // `temIframe()`, e não "erro diferente de `sem_iframe`": desde 22/09 a
+      // ponte da Waid responde no app nativo, que então cai em `timeout` quando
+      // a Waid demora — e a regra antiga apagava ali o login por e-mail de um
+      // aparelho pessoal.
       descartarSessaoDesteNavegador();
       pedirLogin();
       return;
     }
 
-    // Fora de iframe — o aplicativo da Waid, aparelho pessoal. Se o login por
-    // e-mail de antes ainda vale, é ele que entra; só pede código de novo quando
-    // a sessão venceu (no máximo uma vez por dia).
+    // Fora de iframe — o aplicativo da Waid (com ou sem ponte) ou a URL direta,
+    // aparelho pessoal. Se o login por e-mail de antes ainda vale, é ele que
+    // entra; só pede código de novo quando a sessão venceu.
     if (!getToken() || isTokenExpired()) {
       clearToken();
       pedirLogin();

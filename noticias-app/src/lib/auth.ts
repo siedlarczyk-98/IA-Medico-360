@@ -1,3 +1,5 @@
+import { hospedadoNaWaid, reservarReentradaPelaWaid } from '@shared/embed/sessao';
+
 const TOKEN_KEY = 'medico360_token';
 
 // Este arquivo tinha também um `EMAIL_KEY` e um `tokenPertenceA(email)`, que
@@ -101,6 +103,30 @@ export function descartarSessaoDesteNavegador(): void {
   const token = getToken();
   clearToken();
   void encerrarSessaoNoServidor(token, { revogar: false });
+}
+
+let saindo = false;
+
+/**
+ * A sessão acabou (token vencido ou recusado com 401): entra de novo.
+ *
+ * Aqui entrar de novo é RECARREGAR — o handshake com a Waid roda a cada
+ * carregamento, e fora da Waid o recarregamento sem token cai na tela de
+ * código. A URL fica como está, então um `/artigo/153` aberto volta aberto.
+ *
+ * Antes disto o 401 não levava a lugar nenhum: o modal do destaque mostrava
+ * "Token expirado" cru, e o médico só saía dali fechando e reabrindo a seção.
+ *
+ * Dentro da Waid há trava contra laço (`reservarReentradaPelaWaid`): se o
+ * token que acabou de chegar também leva 401, não recarrega de novo — o erro
+ * fica na tela, que é melhor do que piscar para sempre.
+ */
+export function sessaoExpirou(): void {
+  if (saindo) return;
+  clearToken();
+  if (hospedadoNaWaid() && !reservarReentradaPelaWaid()) return;
+  saindo = true;
+  window.location.reload();
 }
 
 export function logout(): void {

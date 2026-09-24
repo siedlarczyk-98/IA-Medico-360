@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { requestOTP, verifyOTP } from '../api/auth';
-import { setToken } from '../lib/auth';
+import { destinoAposEntrar, setToken } from '../lib/auth';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ export function LoginPage() {
     try {
       const res = await verifyOTP(email, code);
       setToken(res.access_token);
-      navigate('/', { replace: true });
+      navigate(destinoAposEntrar(), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Código inválido');
     } finally {

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { OnboardingGate } from '@shared/onboarding/OnboardingGate';
+import { hospedadoNaWaid } from '@shared/embed/sessao';
 import { getToken, isAuthenticated, isTokenExpired, setToken } from './lib/auth';
 import { useSessaoViva } from './lib/useSessaoViva';
 import { useChatController } from './chat/useChatController';
@@ -32,9 +33,20 @@ if (cascaMovelDisponivel() && typeof window !== 'undefined') {
   ocioso(() => { void carregarCascaMovel(); });
 }
 
+/**
+ * Para onde vai quem está sem sessão válida.
+ *
+ * Dentro da Waid (app nativo ou iframe) o handshake devolve a sessão sem o
+ * médico fazer nada — mandar para o login por e-mail ali era pedir código a
+ * quem só minimizou o app por uma hora. Fora da Waid não há quem responda.
+ */
+function rotaDeEntrada(): string {
+  return hospedadoNaWaid() ? '/embed-auth' : '/login';
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated() || isTokenExpired()) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={rotaDeEntrada()} replace />;
   }
   return <>{children}</>;
 }
@@ -49,9 +61,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
  * app inteiro — conversa e stream incluídos — até o código chegar.
  */
 function MainApp() {
-  // Renova o token ao voltar do segundo plano. Antes disto, minimizar o app por
-  // mais de uma hora derrubava o médico no login.
-  useSessaoViva();
+  // Renova o token ao voltar do segundo plano; se ele já venceu (o app ficou
+  // parado mais de uma hora), entra de novo — pela Waid, quando hospedado.
+  const navigate = useNavigate();
+  useSessaoViva(() => navigate(rotaDeEntrada(), { replace: true }));
   const chat = useChatController();
   const layout = useLayout();
   return (

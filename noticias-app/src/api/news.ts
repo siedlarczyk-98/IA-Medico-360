@@ -6,7 +6,7 @@
  * públicos do WordPress, inviável agora que o feed é personalizado: um
  * identificador forjável significaria ler e alterar os temas de outra pessoa.
  */
-import { getToken } from '../lib/auth';
+import { getToken, sessaoExpirou } from '../lib/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -121,6 +121,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${BASE}/api/v1${path}`, { ...init, headers });
+  // 401 é sessão que acabou: entra de novo em vez de mostrar "Token expirado".
+  if (res.status === 401) sessaoExpirou();
   if (!res.ok) {
     const detalhe = await res.json().catch(() => null);
     throw new Error(detalhe?.detail ?? `Erro ${res.status}`);
