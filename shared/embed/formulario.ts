@@ -50,12 +50,23 @@ const abertos = new Map<string, unknown>();
  *
  * A chave distingue formulários (`generico:curb65`, `prevent`). O estado precisa
  * sobreviver a `JSON.stringify` — `Set` e `Date` viram outra coisa; converta.
+ *
+ * `undefined` = não guarde. É para o formulário que ainda está CARREGANDO o que
+ * o médico já tinha: guardar o estado vazio daquele instante faria a volta
+ * mostrar tudo desmarcado, e um toque em salvar apagaria as escolhas dele. O 401
+ * cai justamente nessas primeiras chamadas.
  */
 export function usePreservarFormulario(chave: string, estado: unknown): void {
   useEffect(() => {
+    if (estado === undefined) return;
     abertos.set(chave, estado);
     return () => { abertos.delete(chave); };
   });
+}
+
+/** Há um formulário com esta chave aberto e registrado agora? */
+export function formularioAberto(chave: string): boolean {
+  return abertos.has(chave);
 }
 
 /**

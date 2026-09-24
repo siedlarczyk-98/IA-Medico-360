@@ -51,7 +51,15 @@ EXPOSE 8000
 #
 # Medir antes de aumentar: `python -m scripts.medir_conexoes_presas --minutos 30`
 # num horário de movimento.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+#
+# `exec`: o `sh -c` existe só para expandir `${WEB_CONCURRENCY}`. Sem o `exec`, o
+# `sh` ficava como PID 1 na frente do uvicorn — o log de produção de 2026-09-24
+# mostrava "Started parent process [3]". O PID 1 recebe o SIGTERM do deploy, e um
+# `sh` não o repassa: o uvicorn só morria no SIGKILL, e os 90 s de drenagem acima
+# não valiam nada. Com `exec` o uvicorn vira o PID 1 e recebe o sinal direto. Para
+# conferir depois do deploy: o log deve dizer "Started parent process [1]"
+# (item 80 de `docs/pitacos-do-fable-2.md`).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 \
      --proxy-headers --forwarded-allow-ips '*' \
      --timeout-keep-alive 75 --timeout-graceful-shutdown 90 \
      --workers ${WEB_CONCURRENCY:-2}"]

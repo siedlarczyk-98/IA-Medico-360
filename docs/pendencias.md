@@ -142,6 +142,10 @@ Nada da fase 5 foi visto num navegador; os testes rodam em jsdom.
       até o passo do PREVENT, deixar o app em segundo plano por mais de 65 min e voltar.
       Esperado: depois da tela de espera, o mesmo passo com os campos preenchidos. Reabrir
       a calculadora pela lista, sem queda de sessão, tem que mostrá-la VAZIA.
+- [ ] **Homologar o item 68:** nas notícias, abrir "editar temas", marcar e desmarcar alguns,
+      deixar o app em segundo plano por mais de 65 min e voltar. Esperado: a tela de temas
+      com as marcações da edição, não o feed. As marcações só são salvas no servidor quando
+      o médico toca em salvar.
 - [x] **Item 59 homologado em produção em 2026-09-24.** Deploy das 12:57 sem Restart: os
       dois workers novos logaram "outro processo já é o líder" (12:57:20 e 12:57:23) e um
       deles assumiu às 12:58:23, com os três agendadores. O Restart depois de deploy não é

@@ -41,7 +41,12 @@ export function mintTestToken(): string {
 
 export async function loginAsTestUser(page: Page): Promise<void> {
   const token = mintTestToken();
-  // localStorage só pode ser setado depois de navegar para a origem correta.
-  await page.goto('/');
-  await page.evaluate((t) => localStorage.setItem('calc360_token', t), token);
+  // O token entra ANTES de qualquer script da página, em toda navegação.
+  //
+  // Era `goto('/')` e depois `evaluate(setItem)`. Desde que o app passou a mandar
+  // quem abre sem sessão para a reentrada (`sessaoExpirou`, `location.replace`),
+  // a página aberta sem token se redirecionava para /login no meio do
+  // `evaluate`: "Execution context was destroyed", ou a navegação seguinte
+  // interrompida por ela. Passava ou não conforme quem ganhasse a corrida.
+  await page.addInitScript((t) => localStorage.setItem('calc360_token', t), token);
 }

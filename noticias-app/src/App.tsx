@@ -21,6 +21,7 @@ import { useSessaoViva } from '@shared/embed/sessao';
 import { LoginOtp } from '@shared/embed/LoginOtp';
 import { mensagemDaIdentidade, TelaDeEspera } from '@shared/embed/TelaDeEspera';
 import {
+  aoPrecisarDeLogin,
   clearToken,
   descartarSessaoDesteNavegador,
   getToken,
@@ -66,6 +67,17 @@ export default function App() {
   // Renova o token antes de vencer; se o app volta do segundo plano com ele já
   // vencido, recarrega para refazer a entrada. Ver `shared/embed/sessao.ts`.
   useSessaoViva({ apiBase: API_BASE, getToken, setToken, aoExpirar: sessaoExpirou });
+
+  // Quando a reentrada pela Waid acabou de falhar (trava contra laço em
+  // `sessaoExpirou`), a saída é a tela de código. Sem isto o app ficava mudo:
+  // sem token, sem login, cada toque recusado.
+  useEffect(() => {
+    aoPrecisarDeLogin(() => setEstado({
+      fase: 'login',
+      motivo: 'Não foi possível renovar sua sessão pela plataforma. Entre com o código enviado ao seu e-mail.',
+    }));
+    return () => aoPrecisarDeLogin(null);
+  }, []);
 
   /** Com sessão em mãos, decide entre a escolha de temas e o feed. */
   const carregarConteudo = useCallback(async () => {

@@ -1,3 +1,4 @@
+import { formularioAberto, guardarFormulariosAbertos } from '@shared/embed/formulario';
 import { hospedadoNaWaid, reservarReentradaPelaWaid } from '@shared/embed/sessao';
 
 const TOKEN_KEY = 'medico360_token';
@@ -106,6 +107,15 @@ export function descartarSessaoDesteNavegador(): void {
 }
 
 let saindo = false;
+let pedirLogin: (() => void) | null = null;
+
+/**
+ * O `App` diz como mostrar a tela de código. É uma FASE dele, e não uma rota —
+ * este módulo não tem como chegar lá sozinho.
+ */
+export function aoPrecisarDeLogin(mostrar: (() => void) | null): void {
+  pedirLogin = mostrar;
+}
 
 /**
  * A sessão acabou (token vencido ou recusado com 401): entra de novo.
@@ -117,15 +127,34 @@ let saindo = false;
  * Antes disto o 401 não levava a lugar nenhum: o modal do destaque mostrava
  * "Token expirado" cru, e o médico só saía dali fechando e reabrindo a seção.
  *
- * Dentro da Waid há trava contra laço (`reservarReentradaPelaWaid`): se o
- * token que acabou de chegar também leva 401, não recarrega de novo — o erro
- * fica na tela, que é melhor do que piscar para sempre.
+ * QUEM ESTAVA EDITANDO OS TEMAS NÃO PERDE A EDIÇÃO (item 68). O que estava
+ * marcado é guardado (`shared/embed/formulario.ts`) e a URL passa a ser
+ * `/preferencias`, que reabre a tela de temas depois do recarregamento. Sem
+ * isto, a volta caía no feed e as marcações sumiam.
+ *
+ * TRAVA CONTRA LAÇO, dentro da Waid (`reservarReentradaPelaWaid`): se o token
+ * que acabou de chegar também leva 401, não recarrega de novo — vai para a tela
+ * de código. Antes a trava só limpava o token e parava ali: o app ficava na
+ * mesma tela, sem sessão, com toda chamada recusada e nada respondendo por um
+ * minuto.
  */
 export function sessaoExpirou(): void {
   if (saindo) return;
+  const dono = getTokenPayload()?.sub;
   clearToken();
-  if (hospedadoNaWaid() && !reservarReentradaPelaWaid()) return;
+  if (hospedadoNaWaid() && !reservarReentradaPelaWaid()) {
+    if (pedirLogin) {
+      pedirLogin();
+      return;
+    }
+    // Sem o `App` montado não há fase para trocar; recarregar sem token é o que
+    // leva à tela de código.
+  }
   saindo = true;
+  guardarFormulariosAbertos(dono);
+  if (formularioAberto('temas') && window.location.pathname !== '/preferencias') {
+    window.history.replaceState(null, '', '/preferencias');
+  }
   window.location.reload();
 }
 

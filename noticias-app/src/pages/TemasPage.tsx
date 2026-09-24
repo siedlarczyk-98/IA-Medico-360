@@ -24,6 +24,8 @@
  * seria estatística inventada, apresentada a médicos.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useFormularioSalvo, usePreservarFormulario } from '@shared/embed/formulario';
+import { getTokenPayload } from '../lib/auth';
 import {
   adicionarPalavra,
   buscarMeusTemas,
@@ -80,7 +82,22 @@ function normalizar(texto: string): string {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+/**
+ * O que volta depois de uma reentrada no meio da edição (item 68) — ver
+ * `shared/embed/formulario.ts` e `sessaoExpirou` em `lib/auth.ts`.
+ */
+/** O padrão do backend (diário, de manhã). */
+const AGENDA_PADRAO: AgendaDigest = { frequencia: 'diario', dia_semana: 0, faixa: 'manha' };
+
+interface EdicaoGuardada {
+  marcados: string[];
+  email: boolean;
+  agenda: AgendaDigest;
+  rascunho: string;
+}
+
 export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
+  const salvo = useFormularioSalvo<Partial<EdicaoGuardada>>('temas', getTokenPayload()?.sub);
   const [sugeridos, setSugeridos] = useState<TemaSugerido[]>([]);
   const [disponiveis, setDisponiveis] = useState<Tema[]>([]);
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
@@ -89,7 +106,7 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
   const [nome, setNome] = useState<string | null>(null);
 
   const [palavras, setPalavras] = useState<PalavraChave[]>([]);
-  const [rascunho, setRascunho] = useState('');
+  const [rascunho, setRascunho] = useState(salvo?.rascunho ?? '');
   const [previa, setPrevia] = useState<{ destaques: number } | { erro: string } | null>(null);
   const [salvandoPalavra, setSalvandoPalavra] = useState(false);
 
@@ -98,11 +115,7 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
   const [email, setEmail] = useState(false);
   // A agenda nasce com o padrão do backend e é substituída no carregamento.
   // Nunca fica indefinida: a tela não tem um estado "sem horário".
-  const [agenda, setAgenda] = useState<AgendaDigest>({
-    frequencia: 'diario',
-    dia_semana: 0,
-    faixa: 'manha',
-  });
+  const [agenda, setAgenda] = useState<AgendaDigest>(AGENDA_PADRAO);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
@@ -124,9 +137,14 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
         setEspecialidade(temas.especialidade);
         setNome(temas.primeiro_nome);
         const base = temas.ja_escolheu ? temas.selecionados : temas.sugeridos;
-        setMarcados(new Set(base.map((t) => t.id)));
-        setEmail(prefs.email);
-        setAgenda(prefs.agenda);
+        // O que o médico tinha marcado antes da reentrada vence o que está salvo
+        // no servidor: é justamente a edição que ele ainda não tinha salvado.
+        setMarcados(new Set(salvo?.marcados ?? base.map((t) => t.id)));
+        setEmail(salvo?.email ?? prefs.email);
+        // `?? AGENDA_PADRAO`: backend antigo, no descompasso de um deploy, não
+        // manda a agenda — ver `PreferenciasNoticias`.
+        const doServidor = prefs.agenda ?? AGENDA_PADRAO;
+        setAgenda(salvo?.agenda ? { ...doServidor, ...salvo.agenda } : doServidor);
         setPalavras(chaves);
       } catch (e) {
         if (!cancelado) setErro(e instanceof Error ? e.message : 'Erro ao carregar');
@@ -139,7 +157,14 @@ export function TemasPage({ primeiraVez, aoConcluir, aoCancelar }: Props) {
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [salvo]);
+
+  // Só depois de carregar: antes disso as marcações estão vazias, e guardá-las
+  // faria a volta mostrar tudo desmarcado — um toque em salvar apagaria os temas.
+  usePreservarFormulario(
+    'temas',
+    carregando ? undefined : { marcados: [...marcados], email, agenda, rascunho },
+  );
 
   // Preview enquanto digita. É o que impede a palavra-chave de ser um ato de
   // fé: um termo que não casa com nada aparece como zero na hora.

@@ -162,7 +162,11 @@ export interface AgendaDigest {
 
 export interface PreferenciasNoticias {
   email: boolean;
-  agenda: AgendaDigest;
+  /** Opcional de propósito: um backend anterior à agenda por usuário não manda o
+   *  campo. No deploy os frontends costumam entrar no ar ANTES do backend (que
+   *  baixa o spaCy no build), e ler `agenda.frequencia` de `undefined` deixava a
+   *  tela de temas em branco durante o descompasso (item 79). */
+  agenda?: AgendaDigest;
 }
 
 export function buscarPreferencias(): Promise<PreferenciasNoticias> {

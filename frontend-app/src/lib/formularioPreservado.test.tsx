@@ -13,6 +13,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 
 import {
+  formularioAberto,
   guardarFormulariosAbertos,
   useFormularioSalvo,
   usePreservarFormulario,
@@ -111,4 +112,28 @@ it('só guarda o que está aberto, cada um na sua chave', () => {
   aberto.unmount();
 
   expect(Object.keys(sessionStorage)).toEqual(['m360_formulario:generico:curb65']);
+});
+
+it('formulário ainda carregando (estado `undefined`) não é guardado', () => {
+  // As notícias carregam os temas do servidor ao abrir, e o 401 cai justamente
+  // nessas chamadas. Guardar o "nada marcado" daquele instante faria a volta
+  // mostrar tudo desmarcado — e um toque em salvar apagaria os temas.
+  function Carregando() {
+    usePreservarFormulario('temas', undefined);
+    return null;
+  }
+  const { unmount } = render(<Carregando />);
+
+  expect(formularioAberto('temas')).toBe(false);
+  guardarFormulariosAbertos('medico-1');
+  unmount();
+
+  expect(sessionStorage.length).toBe(0);
+});
+
+it('formularioAberto diz se a tela está montada e registrada', () => {
+  const { unmount } = render(<Formulario dono="medico-1" chave="temas" />);
+  expect(formularioAberto('temas')).toBe(true);
+  unmount();
+  expect(formularioAberto('temas')).toBe(false);
 });

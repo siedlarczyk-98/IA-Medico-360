@@ -18,20 +18,6 @@ from app.models.models import ModelPricing
 from app.services.orquestrador_modes import FALLBACK_MODELS, MODE_MODEL_MAP
 from scripts import seed_models
 
-# Modelos que o código usa e cujo preço AINDA não foi exportado de produção para o
-# JSON. O preço não existe em lugar nenhum do repositório, e inventá-lo seria pior
-# que a lacuna: custo errado fura o teto semanal em silêncio. Esvaziar esta lista
-# é a pendência — cada modelo sai daqui quando entrar no JSON (o segundo teste
-# cobra isso).
-PRECO_PENDENTE_DE_EXPORTACAO = {
-    "claude-sonnet-5",
-    "gemini-2.5-flash",
-    "gpt-4o",
-    "gpt-5.4-nano",
-    "sabia-4-thinking",
-    "sonar-pro",
-}
-
 MODELO = {
     "model_id": "modelo-de-teste", "provider": "Teste", "provider_type": "anthropic",
     "display_name": "Modelo de Teste", "input_per_million": "3.00",
@@ -50,27 +36,16 @@ def _no_seed() -> set[str]:
 
 
 def test_todo_modelo_usado_pelo_codigo_esta_no_seed():
-    faltando = _usados_pelo_codigo() - _no_seed() - PRECO_PENDENTE_DE_EXPORTACAO
+    # Sem lista de isenção desde 2026-09-24, quando os preços de produção foram
+    # exportados. Havia uma — e ela isentava justamente os seis modelos em uso,
+    # então a invariante passava sem provar nada (item 76).
+    faltando = _usados_pelo_codigo() - _no_seed()
 
     assert not faltando, (
         f"Modelo usado em MODE_MODEL_MAP/FALLBACK_MODELS e ausente de "
         f"scripts/dados/model_pricing.json: {sorted(faltando)}. Sem preço cadastrado o "
         "modo responde 'Modelo não disponível' num banco novo."
     )
-
-
-def test_pendencia_resolvida_sai_da_lista():
-    ja_exportados = PRECO_PENDENTE_DE_EXPORTACAO & _no_seed()
-
-    assert not ja_exportados, (
-        f"{sorted(ja_exportados)} já está no JSON — tire de PRECO_PENDENTE_DE_EXPORTACAO."
-    )
-
-
-def test_a_lista_de_pendentes_nao_esconde_modelo_que_ninguem_usa():
-    sobrando = PRECO_PENDENTE_DE_EXPORTACAO - _usados_pelo_codigo()
-
-    assert not sobrando, f"pendente que o código nem usa mais: {sorted(sobrando)}"
 
 
 def _arquivo(tmp_path, modelos):
