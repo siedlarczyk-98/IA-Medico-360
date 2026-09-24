@@ -175,6 +175,52 @@ describe('troca do token', () => {
     expect(result.current.erro?.tipo).toBe('indisponivel');
   });
 
+  it('recusa do servidor mostra a frase dele e NÃO pede outro token (item 65)', async () => {
+    // Conta desativada: antes virava "a verificação está indisponível", e o
+    // médico esperava por algo que não ia mudar.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        detail: {
+          codigo: 'conta_inativa',
+          mensagem: 'Sua conta no Médico 360 está desativada. Fale com o suporte.',
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = montar();
+
+    despachar({ type: 'waid:identity', token: 'abc' });
+    await aguardar();
+    const pedidosAteAqui = postMessage.mock.calls.length;
+    act(() => void vi.advanceTimersByTime(10_000));
+
+    expect(result.current.fase).toBe('erro');
+    expect(result.current.erro).toEqual({
+      tipo: 'recusado',
+      mensagem: 'Sua conta no Médico 360 está desativada. Fale com o suporte.',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(postMessage.mock.calls.length).toBe(pedidosAteAqui);
+  });
+
+  it('403 sem código (origem não autorizada, configuração nossa) segue genérico', async () => {
+    // A frase do servidor só aparece quando ele marca que é para o médico ler.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: 'Origem não autorizada para embed' }),
+    }));
+    const { result } = montar();
+
+    despachar({ type: 'waid:identity', token: 'abc' });
+    await aguardar();
+
+    expect(result.current.erro?.tipo).toBe('indisponivel');
+    expect(result.current.erro?.mensagem).not.toMatch(/origem/i);
+  });
+
   it('trata falha de rede como indisponibilidade', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     const { result } = montar();

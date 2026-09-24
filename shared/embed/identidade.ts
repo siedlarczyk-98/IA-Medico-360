@@ -69,8 +69,11 @@ export interface MotivoErro {
    * `sem_iframe`    — a página não está incorporada; ninguém pode responder
    * `timeout`       — está incorporada, mas a Waid não respondeu
    * `indisponivel`  — a troca do token falhou por problema de configuração/rede
+   * `recusado`      — a Waid confirmou quem é, e o NOSSO lado recusou (conta
+   *                   desativada, identidade vinculada a outra pessoa). A
+   *                   `mensagem` vem do servidor e diz o que fazer.
    */
-  tipo: 'sem_iframe' | 'timeout' | 'indisponivel' | 'desconhecido';
+  tipo: 'sem_iframe' | 'timeout' | 'indisponivel' | 'recusado' | 'desconhecido';
   mensagem: string;
 }
 
@@ -108,6 +111,22 @@ export interface IdentidadeSimples {
 interface Estado {
   fase: FaseIdentidade;
   erro: MotivoErro | null;
+}
+
+type ResultadoTroca = 'ok' | 'renovar' | 'desistir' | { recusado: string };
+
+/**
+ * Recusa com frase para o médico: o 403 que traz `{codigo, mensagem}`.
+ *
+ * Sem isto, conta desativada e identidade divergente viravam "a verificação
+ * está indisponível no momento" — o médico esperava, tentava de novo, e nada
+ * mudava. O código é a marca de que a frase é para ser lida; o 403 de origem
+ * não autorizada (configuração nossa) não tem código e segue genérico.
+ */
+function recusaComMensagem(corpo: unknown): string | null {
+  const detail = (corpo as { detail?: { codigo?: unknown; mensagem?: unknown } })?.detail;
+  if (typeof detail?.codigo !== 'string' || typeof detail.mensagem !== 'string') return null;
+  return detail.mensagem;
 }
 
 /** Erro que o backend devolve quando o token queimou — dá para pedir outro. */
@@ -204,7 +223,7 @@ function podeReceberIdentidade(): boolean {
  */
 function useHandshakeWaid(
   waidOrigin: string | string[],
-  trocar: (token: string) => Promise<'ok' | 'renovar' | 'desistir'>,
+  trocar: (token: string) => Promise<ResultadoTroca>,
 ): Estado {
   // Normaliza para lista uma vez só. `useState` com inicializador, e não um
   // `const` no corpo: um array novo a cada render trocaria a identidade da
@@ -258,7 +277,7 @@ function useHandshakeWaid(
       concluido.current = true;
       setEstado({ fase: 'trocando', erro: null });
 
-      let resultado: 'ok' | 'renovar' | 'desistir';
+      let resultado: ResultadoTroca;
       try {
         resultado = await trocarRef.current(token);
       } catch {
@@ -268,6 +287,10 @@ function useHandshakeWaid(
 
       if (resultado === 'ok') {
         setEstado({ fase: 'pronto', erro: null });
+        return;
+      }
+      if (typeof resultado === 'object') {
+        setEstado({ fase: 'erro', erro: { tipo: 'recusado', mensagem: resultado.recusado } });
         return;
       }
       if (resultado === 'renovar' && tentativas.current < MAX_TENTATIVAS) {
@@ -359,7 +382,7 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
   aoAutenticarRef.current = aoAutenticar;
 
   const trocar = useCallback(
-    async (token: string): Promise<'ok' | 'renovar' | 'desistir'> => {
+    async (token: string): Promise<ResultadoTroca> => {
       const resp = await fetch(`${apiBase}/api/v1/auth/embed/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -376,6 +399,10 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
         // Token queimado é ocorrência normal (recarregar a página basta).
         // Pedir outro resolve; mostrar erro seria assustar à toa.
         if (tokenPrecisaSerRenovado(corpo)) return 'renovar';
+      }
+      if (resp.status === 403) {
+        const mensagem = recusaComMensagem(await resp.json().catch(() => null));
+        if (mensagem) return { recusado: mensagem };
       }
       return 'desistir';
     },

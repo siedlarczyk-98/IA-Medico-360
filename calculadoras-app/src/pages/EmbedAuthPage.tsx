@@ -102,23 +102,29 @@ export function EmbedAuthPage() {
         <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--ink)', margin: '0 0 8px', fontWeight: 600 }}>
           {erro?.mensagem}
         </p>
-        <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', margin: '0 0 20px', lineHeight: 1.5 }}>
-          {erro?.tipo === 'sem_iframe'
-            // Caso conhecido: os aplicativos da Waid abrem a seção sem iframe,
-            // e ali a plataforma não tem como nos dizer quem é o médico.
-            ? 'No aplicativo, entre pelo seu e-mail. Pelo navegador, o acesso é automático.'
-            : 'Você pode entrar pelo seu e-mail enquanto isso.'}
-        </p>
-        <button
-          onClick={() => navigate('/login')}
-          style={{
-            fontSize: 'var(--texto-apoio)', color: 'var(--petrol)', background: 'none',
-            border: '1px solid var(--line)', borderRadius: 8,
-            padding: '8px 16px', cursor: 'pointer',
-          }}
-        >
-          Entrar por e-mail
-        </button>
+        {/* Recusa (conta desativada, identidade de outra pessoa): a frase do
+            servidor já diz o que fazer, e o login por e-mail não é saída. */}
+        {erro?.tipo !== 'recusado' && (
+          <p style={{ fontSize: 'var(--texto-apoio)', color: 'var(--pen2)', margin: '0 0 20px', lineHeight: 1.5 }}>
+            {erro?.tipo === 'sem_iframe'
+              // Caso conhecido: os aplicativos da Waid abrem a seção sem iframe,
+              // e ali a plataforma não tem como nos dizer quem é o médico.
+              ? 'No aplicativo, entre pelo seu e-mail. Pelo navegador, o acesso é automático.'
+              : 'Você pode entrar pelo seu e-mail enquanto isso.'}
+          </p>
+        )}
+        {erro?.tipo !== 'recusado' && (
+          <button
+            onClick={() => navigate('/login')}
+            style={{
+              fontSize: 'var(--texto-apoio)', color: 'var(--petrol)', background: 'none',
+              border: '1px solid var(--line)', borderRadius: 8,
+              padding: '8px 16px', cursor: 'pointer',
+            }}
+          >
+            Entrar por e-mail
+          </button>
+        )}
       </div>
     </div>
   );

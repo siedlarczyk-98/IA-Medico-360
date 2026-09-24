@@ -245,15 +245,33 @@ async def embed_token(
     if origin not in allowed_origins:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Origem não autorizada para embed")
 
-    if body.token:
-        user, via = await _entrar_por_token_waid(db, body.token), "token"
-    else:
-        if not settings.embed_email_fallback_enabled:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Este app precisa ser atualizado: a identificação por e-mail foi descontinuada.",
-            )
-        user, via = await _entrar_por_email(db, body.email), "email"
+    try:
+        if body.token:
+            user, via = await _entrar_por_token_waid(db, body.token), "token"
+        else:
+            if not settings.embed_email_fallback_enabled:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Este app precisa ser atualizado: a identificação por e-mail foi descontinuada.",
+                )
+            user, via = await _entrar_por_email(db, body.email), "email"
+    except auth_service.ContaInativa as exc:
+        # Não alarma: desativar é decisão de alguém, e a recusa é o resultado
+        # esperado dela. O WARNING é para o suporte achar o caso quando o médico
+        # ligar dizendo que não consegue entrar.
+        logger.warning("Embed recusado: conta desativada (user=%s)", exc.user_id)
+        # 403 e não 401: no 401 o cliente pede outro token à Waid e tenta de novo,
+        # e o chat leva à reentrada — o resultado seria o mesmo, em ciclo.
+        # `{codigo, mensagem}`, o mesmo formato do 401 de token queimado: é o
+        # código que diz à tela que ESTA frase é para o médico ler — ao contrário
+        # do 403 de origem não autorizada, que é configuração nossa.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            {
+                "codigo": "conta_inativa",
+                "mensagem": "Sua conta no Médico 360 está desativada. Fale com o suporte.",
+            },
+        ) from exc
 
     await _auditar_embed(db, request, user, via)
     token = auth_service.create_access_token(user)
@@ -361,7 +379,10 @@ async def _entrar_por_token_waid(db: AsyncSession, token_waid: str) -> User:
         # novo — aqui o resultado seria o mesmo, em laço.
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Não foi possível confirmar sua identidade. Fale com o suporte.",
+            {
+                "codigo": "identidade_divergente",
+                "mensagem": "Não foi possível confirmar sua identidade. Fale com o suporte.",
+            },
         ) from exc
 
     anterior = await auth_service.sincronizar_email_da_waid(db, user, identidade)

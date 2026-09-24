@@ -57,6 +57,25 @@ class IdentidadeDivergente(Exception):
         self.email = email
 
 
+class ContaInativa(Exception):
+    """A identidade é de uma conta desativada (`users.status = false`).
+
+    Nada no código desativa conta — a exclusão pela LGPD apaga a linha. Então isto
+    é decisão de alguém, à mão, e a resposta é recusar com clareza: 403, com uma
+    frase que diz o que fazer.
+
+    Antes, os dois caminhos do embed erravam em sentidos opostos. Por
+    `waid_uuid`, a conta desativada RECEBIA token — e depois levava 401 em toda
+    chamada, o que desde a reentrada automática do chat vira um ciclo de telas de
+    espera. Por e-mail, a busca só enxergava contas ativas, tentava criar outra
+    com o mesmo e-mail, e a unicidade estourava em 500.
+    """
+
+    def __init__(self, *, user_id):
+        super().__init__(f"conta inativa {user_id}")
+        self.user_id = user_id
+
+
 def create_access_token(user: "User", *, auth_time: int | None = None) -> str:
     """Emite o JWT de sessão.
 
@@ -175,8 +194,12 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
     """Retorna (user, created). created=True se o usuário foi criado agora."""
     from sqlalchemy.exc import IntegrityError
 
-    user = await repo.get_user_by_email(db, email, active_only=True)
+    # Sem `active_only`: filtrar aqui escondia a conta desativada, e o INSERT
+    # abaixo estourava na unicidade do e-mail. Ver `ContaInativa`.
+    user = await repo.get_user_by_email(db, email)
     if user:
+        if not user.status:
+            raise ContaInativa(user_id=user.id)
         return user, False
     try:
         user = User(email=email, role="beta_user", status=True, onboarding_complete=False)
@@ -186,8 +209,10 @@ async def get_or_create_embed_user(email: str, db: AsyncSession) -> tuple["User"
         return user, True
     except IntegrityError:
         await db.rollback()
-        user = await repo.get_user_by_email(db, email, active_only=True)
+        user = await repo.get_user_by_email(db, email)
         assert user is not None, "IntegrityError implica que o usuário já existe"
+        if not user.status:
+            raise ContaInativa(user_id=user.id)
         return user, False
 
 
@@ -209,10 +234,16 @@ async def get_or_create_por_identidade_waid(
 
     user = await db.scalar(select(User).where(User.waid_uuid == identidade.uuid))
     if user is not None:
+        if not user.status:
+            raise ContaInativa(user_id=user.id)
         return user, False
 
-    user = await repo.get_user_by_email(db, identidade.email, active_only=True)
+    # Sem `active_only`, pelo mesmo motivo do caminho legado: a conta desativada
+    # com este e-mail tem que ser ACHADA para ser recusada, e não recriada.
+    user = await repo.get_user_by_email(db, identidade.email)
     if user is not None:
+        if not user.status:
+            raise ContaInativa(user_id=user.id)
         # A guarda é o que faz este backfill ser ÚNICO, como o docstring acima, o
         # log abaixo e a migration 008 já afirmavam. Sem ela a vinculação era
         # sobrescrita toda vez que a busca por uuid falhava e a por e-mail

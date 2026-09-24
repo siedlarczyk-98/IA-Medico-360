@@ -422,3 +422,65 @@ async def test_caminho_por_email_ainda_funciona_se_religado(client, db, monkeypa
         select(AuditLog).where(AuditLog.action == "auth.embed")
     ))
     assert any(r.metadata_["via"] == "email" for r in registros)
+
+
+# ── Conta desativada (item 65 de docs/pitacos-do-fable-2.md) ────────────────
+#
+# Os dois caminhos erravam em sentidos opostos: por uuid, a conta desativada
+# RECEBIA token (e levava 401 em tudo depois — um ciclo de reentradas no chat);
+# por e-mail, a busca só enxergava contas ativas, tentava criar outra com o
+# mesmo e-mail, e a unicidade estourava em 500.
+
+async def test_conta_desativada_achada_pelo_uuid_e_recusada(db, user_factory):
+    user = await user_factory(email="antigo@empresa.com", status=False)
+    user.waid_uuid = IDENTIDADE.uuid
+    await db.flush()
+
+    with pytest.raises(auth_service.ContaInativa):
+        await auth_service.get_or_create_por_identidade_waid(db, IDENTIDADE)
+
+
+async def test_conta_desativada_com_o_mesmo_email_e_recusada_e_nao_recriada(db, user_factory):
+    user = await user_factory(email=IDENTIDADE.email, status=False)
+
+    with pytest.raises(auth_service.ContaInativa):
+        await auth_service.get_or_create_por_identidade_waid(db, IDENTIDADE)
+
+    contas = list(await db.scalars(select(UserModel).where(UserModel.email == IDENTIDADE.email)))
+    assert [c.id for c in contas] == [user.id]
+    assert user.waid_uuid is None, "conta desativada não ganha vínculo novo"
+
+
+async def test_caminho_legado_por_email_recusa_conta_desativada(db, user_factory):
+    await user_factory(email="legado@empresa.com", status=False)
+
+    with pytest.raises(auth_service.ContaInativa):
+        await auth_service.get_or_create_embed_user("legado@empresa.com", db)
+
+
+@pytest.mark.parametrize("vinculada_pelo_uuid", [True, False], ids=["por-uuid", "por-email"])
+async def test_endpoint_recusa_conta_desativada_com_403_e_sem_sessao(
+    client, db, user_factory, monkeypatch, vinculada_pelo_uuid
+):
+    user = await user_factory(email=IDENTIDADE.email, status=False)
+    if vinculada_pelo_uuid:
+        user.waid_uuid = IDENTIDADE.uuid
+        await db.commit()
+
+    async def troca(_token):
+        return IDENTIDADE
+
+    monkeypatch.setattr(curseduca_service, "trocar_token_de_identidade", troca)
+
+    resp = await client.post(
+        "/api/v1/auth/embed/token",
+        json={"token": "9f2c1a"},
+        headers={"Origin": ORIGEM},
+    )
+
+    # 403 e não 401: no 401 o cliente pede outro token e tenta de novo, em ciclo.
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["codigo"] == "conta_inativa"
+    assert "desativada" in resp.json()["detail"]["mensagem"]
+    assert "access_token" not in resp.json()
+    assert "set-cookie" not in resp.headers

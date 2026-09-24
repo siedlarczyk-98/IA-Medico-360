@@ -120,12 +120,15 @@ export default function App() {
   useEffect(() => {
     if (identidade.fase !== 'erro') return;
     const semIframe = identidade.erro?.tipo === 'sem_iframe';
+    // Recusa do servidor (conta desativada, identidade de outra pessoa): a frase
+    // dele diz o que fazer, e é ela que o médico precisa ler.
+    const recusa = identidade.erro?.tipo === 'recusado' ? identidade.erro.mensagem : null;
 
     const pedirLogin = () => setEstado({
       fase: 'login',
-      motivo: semIframe
+      motivo: recusa ?? (semIframe
         ? 'No aplicativo, entre pelo seu e-mail. Pelo navegador, o acesso é automático.'
-        : 'Não conseguimos confirmar sua identidade com a plataforma.',
+        : 'Não conseguimos confirmar sua identidade com a plataforma.'),
     });
 
     if (temIframe()) {
