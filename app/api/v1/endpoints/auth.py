@@ -43,6 +43,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Limites POR IP das rotas de entrada. Antes do login não há token, e o
+# limitador conta por endereço (`core/limiter.py`). Num evento, dezenas de
+# médicos no mesmo Wi-Fi — ou atrás do CGNAT da operadora — saem pelo MESMO IP:
+# com 10/min no embed, o 11º médico a abrir o app no mesmo minuto levava 429, e
+# o plano B (código por e-mail, 3 a cada 15 min) travava no 4º.
+#
+# A defesa contra abuso não mora nestes números:
+#   - embed: o token da Waid é de uso único, vale 5 min e é conferido
+#     server-to-server; e há throttle por uuid (20/15 min);
+#   - OTP: throttle por e-mail (3/15 min no pedido, 10/15 min na verificação),
+#     5 tentativas por código, e o pedido não revela se a conta existe.
+# O teto por IP fica para o que sobra: impedir que um endereço só nos faça
+# chamar a Waid ou o SendGrid em laço.
+LIMITE_EMBED_POR_IP = "120/minute"
+LIMITE_IDENTIDADE_POR_IP = "60/minute"
+LIMITE_OTP_PEDIDO_POR_IP = "30/15minutes"
+LIMITE_OTP_VERIFICACAO_POR_IP = "30/minute"
+
 
 def _set_session_cookie(response: Response, token: str) -> None:
     """Seta o cookie SSO compartilhado entre apps do mesmo domínio raiz, além do token no body.
@@ -216,7 +234,7 @@ async def _auditar_embed(
 
 
 @router.post("/embed/token", response_model=TokenResponse)
-@limiter.limit("10/minute")
+@limiter.limit(LIMITE_EMBED_POR_IP)
 async def embed_token(
     request: Request,
     response: Response,
@@ -285,7 +303,7 @@ class IdentidadeEmbedResponse(BaseModel):
 
 
 @router.post("/embed/identidade", response_model=IdentidadeEmbedResponse)
-@limiter.limit("10/minute")
+@limiter.limit(LIMITE_IDENTIDADE_POR_IP)
 async def identidade_embed(request: Request, body: EmbedTokenRequest):
     """Quem é o aluno, sem criar sessão nem usuário.
 
@@ -431,14 +449,14 @@ async def _throttle_by_email(scope: str, email: str, limit: int, window_seconds:
 
 
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
-@limiter.limit("3/15minutes")
+@limiter.limit(LIMITE_OTP_PEDIDO_POR_IP)
 async def request_otp(request: Request, body: OTPRequest, db: AsyncSession = Depends(get_db)):
     await _throttle_by_email("otp_request", body.email, limit=3, window_seconds=900)
     await auth_service.request_otp(db, body.email)
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit(LIMITE_OTP_VERIFICACAO_POR_IP)
 async def verify_otp(request: Request, response: Response, body: OTPVerify, db: AsyncSession = Depends(get_db)):
     await _throttle_by_email("otp_verify", body.email, limit=10, window_seconds=900)
     user, token = await auth_service.verify_otp(db, body.email, body.code)

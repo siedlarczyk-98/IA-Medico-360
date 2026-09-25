@@ -276,11 +276,11 @@ function Formulario({
   const primeiroNome = (perfil.name ?? '').trim().split(' ')[0];
 
   return (
-    <div style={s.fundo}>
+    <div className="m360-ob-fundo" style={s.fundo}>
       {/* Hover e foco não existem em style inline. */}
       <style>{s.CSS_GLOBAL}</style>
 
-      <form style={s.cartao} onSubmit={enviar}>
+      <form className="m360-ob-cartao" style={s.cartao} onSubmit={enviar}>
         <h1 style={s.titulo}>
           {primeiroNome ? `Falta pouco, ${primeiroNome}` : 'Falta pouco'}
         </h1>

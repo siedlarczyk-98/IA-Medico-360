@@ -232,6 +232,78 @@ describe('troca do token', () => {
   });
 });
 
+describe('limite de requisições (429) — o evento no mesmo Wi-Fi', () => {
+  const LIMITE = { ok: false, status: 429, json: async () => ({ detail: 'Muitas requisições' }) };
+  const SUCESSO = {
+    ok: true,
+    status: 200,
+    json: async () => ({ access_token: 'jwt-novo', onboarding_complete: true }),
+  };
+
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  it('espera e repete com o MESMO token, sem cair no login por código', async () => {
+    // Desistir aqui mandava o médico para o código por e-mail, que tem limite
+    // menor ainda. O limitador recusa antes da rota: o token não foi gasto.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(LIMITE)
+      .mockResolvedValueOnce(LIMITE)
+      .mockResolvedValueOnce(SUCESSO);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, aoAutenticar } = montar();
+
+    despachar({ type: 'waid:identity', token: 'abc' });
+    await aguardar();
+    expect(result.current.fase).toBe('trocando');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000 + 5000);
+    });
+
+    expect(result.current.fase).toBe('pronto');
+    expect(aoAutenticar).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const corpos = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).token);
+    expect(corpos).toEqual(['abc', 'abc', 'abc']);
+  });
+
+  it('não repete para sempre: esgotadas as esperas, desiste', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(LIMITE);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = montar();
+
+    despachar({ type: 'waid:identity', token: 'abc' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000 + 5000 + 10_000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.fase).toBe('erro');
+    expect(result.current.erro?.tipo).toBe('indisponivel');
+  });
+
+  it('o timeout de 30 s do handshake não corta a espera', async () => {
+    // O teto do handshake é para a Waid que não responde; aqui ela já respondeu.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(LIMITE)
+      .mockResolvedValueOnce(LIMITE)
+      .mockResolvedValueOnce(LIMITE)
+      .mockResolvedValueOnce(SUCESSO);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = montar();
+
+    act(() => void vi.advanceTimersByTime(20_000));
+    despachar({ type: 'waid:identity', token: 'abc' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000 + 5000 + 10_000);
+    });
+
+    expect(result.current.fase).toBe('pronto');
+  });
+});
+
 describe('timeout', () => {
   it('desiste com mensagem legível se a Waid nunca responde', () => {
     // O cenário real: "Enviar identidade por token" não foi ligado no admin da

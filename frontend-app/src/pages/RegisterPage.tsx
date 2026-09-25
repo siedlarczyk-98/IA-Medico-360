@@ -120,7 +120,7 @@ export function RegisterPage() {
                   style={{
                     width: '100%', padding: '10px 12px',
                     border: '1px solid var(--line)', borderRadius: 8,
-                    fontSize: 14, color: 'var(--ink)', outline: 'none',
+                    fontSize: 'var(--texto-campo)', color: 'var(--ink)', outline: 'none',
                     background: '#fff', boxSizing: 'border-box',
                     transition: 'border-color 0.15s',
                   }}

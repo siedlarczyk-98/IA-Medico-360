@@ -99,10 +99,10 @@ export function LoginOtp({ apiBase, titulo, aoAutenticar, aviso }: Props) {
     : codigo.trim().length === 6;
 
   return (
-    <div style={s.fundo}>
+    <div className="m360-ob-fundo" style={s.fundo}>
       <style>{s.CSS_GLOBAL}</style>
 
-      <form style={s.cartao} onSubmit={naEtapaEmail ? pedirCodigo : conferirCodigo}>
+      <form className="m360-ob-cartao" style={s.cartao} onSubmit={naEtapaEmail ? pedirCodigo : conferirCodigo}>
         <h1 style={s.titulo}>{titulo}</h1>
         <p style={s.subtitulo}>
           {naEtapaEmail

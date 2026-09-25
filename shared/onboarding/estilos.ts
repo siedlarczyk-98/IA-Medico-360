@@ -84,12 +84,15 @@ export const rotulo: CSSProperties = {
   marginBottom: 8,
 };
 
+// 16px e não menos: abaixo disso o iPhone dá zoom ao focar o campo, e esta é
+// a PRIMEIRA tela que o médico novo vê — no evento, no próprio celular. Literal,
+// e não `var(--texto-campo)`, pelo motivo do topo do arquivo.
 export const campo: CSSProperties = {
   width: '100%',
   padding: '12px 14px',
   border: `1px solid ${CORES.line}`,
   borderRadius: 10,
-  fontSize: 14.5,
+  fontSize: 16,
   color: CORES.ink,
   outline: 'none',
   background: '#fff',
@@ -188,4 +191,13 @@ export const CSS_GLOBAL = `
 .m360-ob-campo:focus { border-color: ${CORES.petrol}; box-shadow: 0 0 0 3px ${CORES.mint}55; }
 .m360-ob-botao:not(:disabled):hover { background: ${CORES.ink}; }
 .m360-ob-check { accent-color: ${CORES.petrol}; width: 17px; height: 17px; margin-top: 1px; flex-shrink: 0; }
+
+/* Telefone. No iPhone SE (320px), 20px de margem mais 30px de respiro deixavam
+   ~220px para o conteúdo. E o cartão sobe para o topo em vez de centralizar:
+   centralizado, ele pula quando o teclado abre e encolhe a área visível.
+   !important porque o resto do estilo é inline, que venceria a classe. */
+@media (max-width: 480px) {
+  .m360-ob-fundo { padding: 16px 12px !important; align-items: flex-start !important; }
+  .m360-ob-cartao { padding: 24px 18px 20px !important; border-radius: 16px !important; }
+}
 `;

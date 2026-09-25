@@ -16,6 +16,7 @@ A imagem precisa ser a `pgvector`: a migration 001 cria um índice `ivfflat`.
 SQLite não serve — os modelos usam JSONB e UUID do dialeto PostgreSQL.
 """
 
+import asyncio
 import os
 import uuid
 import warnings
@@ -182,39 +183,56 @@ async def truncar_tudo(engine) -> None:
         for t in Base.metadata.sorted_tables
     )
 
+    # O TRUNCATE pede trava exclusiva em TODAS as tabelas e, sem limite, espera
+    # para sempre por quem segura qualquer uma delas. O job de backend do CI
+    # pendurou 6 h em cinco runs de set/2026, todos no primeiro uso deste
+    # TRUNCATE (~52% da suíte). Localmente não reproduz — depende de tempo.
+    #
+    # A primeira correção encerrava só as conexões "idle in transaction" e não
+    # bastou: em 25/09 o CI encerrou uma e o TRUNCATE ainda esperou até o
+    # `lock_timeout`, em TODOS os usos seguintes da suíte. Quem segurava a trava
+    # estava em outro estado. Por isso a regra agora é pela trava, não pelo
+    # estado: enquanto o TRUNCATE espera, um vigia pergunta ao Postgres quem o
+    # bloqueia (`pg_blocking_pids`) e encerra. Entre testes (a suíte é serial)
+    # ninguém legítimo segura trava de tabela, então todo bloqueador é
+    # vazamento — e o aviso, no resumo do pytest, diz quem era, para corrigir a
+    # origem. O `lock_timeout` fica como rede: um bloqueador que renasce vira
+    # erro claro em segundos, nunca mais horas.
+    encerradas: list[str] = []
     async with engine.begin() as conn:
-        # O TRUNCATE pede trava exclusiva em TODAS as tabelas e, sem limite,
-        # espera para sempre por quem segura qualquer uma delas. O job de
-        # backend do CI pendurou 6 h em cinco runs de set/2026, todos parados
-        # no mesmo ponto (~52% da suíte, onde está o primeiro uso deste
-        # TRUNCATE). A causa mais provável: uma conexão esquecida "idle in
-        # transaction" por um teste anterior (tarefa de fundo que morreu com
-        # o event loop do teste no meio de uma transação), segurando trava que
-        # nunca soltaria. Localmente não reproduz — depende de tempo.
-        #
-        # Entre testes (a suíte é serial) nenhuma transação legítima fica
-        # aberta, então quem está parado em transação é vazamento: encerra, e
-        # AVISA quem era — o aviso aparece no resumo do pytest e aponta a
-        # origem para corrigir de vez. E o `lock_timeout` troca qualquer
-        # espera restante por um erro claro em segundos, nunca mais horas.
-        presas = (await conn.execute(text(
-            "SELECT pid, left(regexp_replace(query, '\\s+', ' ', 'g'), 160), "
-            "       now() - state_change "
-            "  FROM pg_stat_activity "
-            " WHERE datname = current_database() AND pid <> pg_backend_pid() "
-            "   AND state LIKE 'idle in transaction%'"
-        ))).all()
-        for pid, _consulta, _idade in presas:
-            await conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
-        if presas:
-            warnings.warn(
-                "fabrica_com_conexoes_reais: encerradas conexões presas em transação "
-                "antes do TRUNCATE (vazamento de algum teste anterior): "
-                + "; ".join(f"pid {p} parado há {i}: {q}" for p, q, i in presas),
-                stacklevel=1,
-            )
+        pid_truncate = (await conn.execute(text("SELECT pg_backend_pid()"))).scalar()
         await conn.execute(text("SET LOCAL lock_timeout = '15s'"))
-        await conn.execute(text(f"TRUNCATE {tabelas} RESTART IDENTITY CASCADE"))
+        truncate = asyncio.ensure_future(
+            conn.execute(text(f"TRUNCATE {tabelas} RESTART IDENTITY CASCADE"))
+        )
+        # AUTOCOMMIT: cada consulta do vigia vê o `pg_stat_activity` do momento,
+        # não a foto tirada no início de uma transação.
+        async with engine.connect() as vigia:
+            vigia = await vigia.execution_options(isolation_level="AUTOCOMMIT")
+            while not truncate.done():
+                await asyncio.wait({truncate}, timeout=0.2)
+                if truncate.done():
+                    break
+                bloqueadores = (await vigia.execute(text(
+                    "SELECT pid, state, backend_type, now() - state_change, "
+                    "       left(regexp_replace(query, '\\s+', ' ', 'g'), 160) "
+                    "  FROM pg_stat_activity WHERE pid = ANY(pg_blocking_pids(:pid))"
+                ), {"pid": pid_truncate})).all()
+                for pid, estado, tipo, idade, consulta in bloqueadores:
+                    await vigia.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+                    encerradas.append(f"pid {pid} ({tipo}, {estado} há {idade}): {consulta}")
+        try:
+            await truncate
+        except Exception as erro:
+            if encerradas:
+                erro.add_note("Bloqueadores já encerrados: " + "; ".join(encerradas))
+            raise
+    if encerradas:
+        warnings.warn(
+            "fabrica_com_conexoes_reais: encerradas conexões que travavam o TRUNCATE "
+            "(vazamento de algum teste anterior): " + "; ".join(encerradas),
+            stacklevel=1,
+        )
 
 
 @pytest_asyncio.fixture

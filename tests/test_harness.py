@@ -180,6 +180,35 @@ async def test_truncate_nao_pendura_com_conexao_vazada_em_transacao(engine):
     await vazada.invalidate()
 
 
+async def test_truncate_nao_pendura_com_conexao_vazada_ainda_executando(engine):
+    """
+    O bloqueador não precisa estar "idle in transaction" para ser encerrado.
+
+    Em 25/09 o CI encerrou a conexão presa em transação e o TRUNCATE ainda
+    esperou até o `lock_timeout`, em todos os usos seguintes: quem segurava a
+    trava estava em outro estado. Aqui ela está "active" — no meio de uma
+    consulta longa, com a trava de leitura em `users` pega antes.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+
+    from tests.conftest import truncar_tudo
+
+    vazada = await engine.connect()
+    await vazada.begin()
+    await vazada.execute(text("SELECT count(*) FROM users"))
+    executando = asyncio.ensure_future(vazada.execute(text("SELECT pg_sleep(60)")))
+    await asyncio.sleep(0.3)
+
+    with pytest.warns(UserWarning, match=r"active.*pg_sleep"):
+        await asyncio.wait_for(truncar_tudo(engine), timeout=20)
+
+    with pytest.raises(Exception):
+        await executando
+    await vazada.invalidate()
+
+
 # ── Guarda de rede ───────────────────────────────────────────────────────
 
 async def test_chamada_externa_e_bloqueada(bloqueia_rede_externa):

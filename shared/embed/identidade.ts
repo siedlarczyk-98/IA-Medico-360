@@ -36,6 +36,37 @@ const TIMEOUT_MS = 30_000;
 const MAX_TENTATIVAS = 3;
 
 /**
+ * Esperas antes de repetir a troca quando o servidor responde 429.
+ *
+ * Num evento, dezenas de médicos abrem o app ao mesmo tempo atrás do mesmo IP,
+ * e o limite por IP de `/auth/embed/token` pode estourar por segundos. Desistir
+ * ali mandava o médico para o login por código — que tem limite menor ainda.
+ * Repetir com o MESMO token é seguro: o limitador recusa antes de a rota rodar,
+ * então o token de uso único da Waid não foi gasto.
+ *
+ * Esperas fixas, e não o `Retry-After`: o cabeçalho não chega ao JavaScript
+ * (o CORS não o expõe e o limitador não o emite). O sorteio em cima de cada
+ * espera evita que os aparelhos barrados juntos voltem juntos.
+ */
+const ESPERAS_NO_LIMITE_MS = [2000, 5000, 10_000];
+
+function esperarNoLimite(ms: number): Promise<void> {
+  const sorteio = Math.random() * 1000;
+  return new Promise(resolve => setTimeout(resolve, ms + sorteio));
+}
+
+/** Faz a chamada e, a cada 429, espera e repete — até esgotar as esperas. */
+async function comEsperaNoLimite(chamar: () => Promise<Response>): Promise<Response> {
+  let resp = await chamar();
+  for (const espera of ESPERAS_NO_LIMITE_MS) {
+    if (resp.status !== 429) break;
+    await esperarNoLimite(espera);
+    resp = await chamar();
+  }
+  return resp;
+}
+
+/**
  * Origem que os aplicativos nativos da Waid usam ao entregar a identidade.
  *
  * Medido em 22/09/2026 no app 1.58.9: a ponte responde a partir de
@@ -383,12 +414,14 @@ export function useIdentidadeWaid({ apiBase, waidOrigin, aoAutenticar }: Opcoes)
 
   const trocar = useCallback(
     async (token: string): Promise<ResultadoTroca> => {
-      const resp = await fetch(`${apiBase}/api/v1/auth/embed/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ token }),
-      });
+      const resp = await comEsperaNoLimite(() =>
+        fetch(`${apiBase}/api/v1/auth/embed/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token }),
+        }),
+      );
 
       if (resp.ok) {
         aoAutenticarRef.current(await resp.json());
@@ -432,11 +465,13 @@ export function useIdentidadeSimplesWaid(
 
   const trocar = useCallback(
     async (token: string): Promise<'ok' | 'renovar' | 'desistir'> => {
-      const resp = await fetch(`${apiBase}/api/v1/auth/embed/identidade`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      });
+      const resp = await comEsperaNoLimite(() =>
+        fetch(`${apiBase}/api/v1/auth/embed/identidade`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        }),
+      );
 
       if (resp.ok) {
         const dados = await resp.json();

@@ -104,7 +104,7 @@ export function LoginPage() {
                   padding: '10px 12px',
                   border: '1px solid var(--line)',
                   borderRadius: 8,
-                  fontSize: 14,
+                  fontSize: 'var(--texto-campo)',
                   color: 'var(--ink)',
                   outline: 'none',
                   transition: 'border-color 0.15s',
