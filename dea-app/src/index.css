@@ -37,7 +37,10 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Sem o destaque azulado que o Android pinta por cima de todo toque: no
+   Iniciar ele se somava à troca de cor do botão e a tela "tremia". */
 button { font-family: inherit; cursor: pointer; }
+button, a { -webkit-tap-highlight-color: transparent; }
 
 .app {
   min-height: 100dvh;
@@ -205,8 +208,14 @@ button { font-family: inherit; cursor: pointer; }
   font-weight: 700;
   /* Alvo de toque confortável: a pessoa pode estar com pressa. */
   min-height: 52px;
-  transition: background 0.15s, box-shadow 0.15s;
 }
+
+/*
+ * Iniciar ↔ Parar troca de cor NA HORA, sem transição. Com 150 ms o petrol
+ * deslizava para o vermelho passando por azulado, cinza e roxo — no vídeo da
+ * homologação (Android, dentro da Waid, 2026-09-25) era o "tremelique" ao
+ * ativar o metrônomo. Aqui a troca de estado é informação, não enfeite.
+ */
 
 /* Primário em petrol, como o resto do produto (o verde é acento, não botão). */
 .botao--iniciar {
@@ -214,8 +223,20 @@ button { font-family: inherit; cursor: pointer; }
   color: #fff;
 }
 
-.botao--iniciar:hover {
-  box-shadow: 0 6px 18px rgba(1, 71, 81, 0.18);
+/* Hover só onde existe mouse: no toque o :hover fica preso depois do dedo sair
+   e a sombra aparecia junto com a troca de cor. */
+@media (hover: hover) {
+  .botao--iniciar:hover {
+    box-shadow: 0 6px 18px rgba(1, 71, 81, 0.18);
+  }
+
+  .botao--parar:hover {
+    box-shadow: 0 6px 18px rgba(200, 67, 75, 0.2);
+  }
+
+  .botao--secundario:hover {
+    background: var(--fill2);
+  }
 }
 
 .botao--parar {
@@ -223,19 +244,11 @@ button { font-family: inherit; cursor: pointer; }
   color: #fff;
 }
 
-.botao--parar:hover {
-  box-shadow: 0 6px 18px rgba(200, 67, 75, 0.2);
-}
-
 .botao--secundario {
   flex: 0 0 32%;
   background: #fff;
   color: var(--pen);
   border-color: var(--line);
-}
-
-.botao--secundario:hover {
-  background: var(--fill2);
 }
 
 /* ── Campos ────────────────────────────────────────────────── */
