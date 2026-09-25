@@ -1,5 +1,5 @@
 import L from 'leaflet'
-import { useEffect, useRef } from 'react'
+import { type Ref, useEffect, useImperativeHandle, useRef } from 'react'
 
 import type { Local } from '../api/dea'
 import type { Coordenada } from '../hooks/useLocalizacao'
@@ -81,7 +81,20 @@ type Props = {
   interativo: boolean
   /** Ocupa a tela toda: o Leaflet precisa remedir o contêiner quando isso muda. */
   ampliado: boolean
+  ref?: Ref<MapaDeaControle>
 }
+
+/**
+ * Comandos que a página dá ao mapa. `centro` só move o mapa quando MUDA, e o
+ * botão "minha localização" precisa voltar a um ponto que não mudou — o usuário
+ * é que arrastou o mapa para longe dele.
+ */
+export type MapaDeaControle = {
+  centralizar: (ponto: Coordenada) => void
+}
+
+/** Perto o bastante para ver em que lado da rua está o DEA. */
+const ZOOM_AO_CENTRALIZAR = 17
 
 export function MapaDea({
   locais,
@@ -93,6 +106,7 @@ export function MapaDea({
   aoSelecionar,
   interativo,
   ampliado,
+  ref,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapaRef = useRef<L.Map | null>(null)
@@ -142,6 +156,15 @@ export function MapaDea({
   useEffect(() => {
     mapaRef.current?.panTo([centro.lat, centro.lng])
   }, [centro.lat, centro.lng])
+
+  useImperativeHandle(ref, () => ({
+    centralizar(ponto) {
+      const mapa = mapaRef.current
+      if (mapa === null) return
+      // Só aproxima: quem já estava mais perto não é afastado.
+      mapa.setView([ponto.lat, ponto.lng], Math.max(mapa.getZoom(), ZOOM_AO_CENTRALIZAR))
+    },
+  }), [])
 
   // Prévia ou mapa de verdade. Com arrastar ligado o Leaflet põe
   // `touch-action: none` no contêiner, e o dedo que começava em cima do mapa

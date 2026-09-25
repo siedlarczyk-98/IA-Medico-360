@@ -8,6 +8,11 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # A suíte leva ~2 min. Sem teto, um teste pendurado queimava as 6 h padrão
+    # do GitHub antes de alguém ver (set/2026: cinco runs cancelados assim,
+    # todos parados no mesmo ponto da suíte, onde roda o TRUNCATE de
+    # `fabrica_com_conexoes_reais` — ver `truncar_tudo` no conftest).
+    timeout-minutes: 20
 
     # Imagem pgvector, não postgres puro: a migration 001 cria índice ivfflat.
     # SQLite não é alternativa — os modelos usam JSONB e UUID do dialeto PG.
@@ -205,6 +210,7 @@ jobs:
   # nos steps abaixo, então o job é bloqueante como os outros três.
   e2e-calculadoras:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:pg16

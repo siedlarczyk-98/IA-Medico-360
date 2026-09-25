@@ -198,6 +198,8 @@ describe('casca mobile — campo de pergunta', () => {
   it('nova consulta pelo cabeçalho limpa a conversa', async () => {
     streamQueryMock.mockImplementation(() => streamComEsperaAntesDoDone(tokensTextDoneEDone(['Resposta.'])).gerador());
     const user = await abrirNoCelular();
+    // Na tela vazia o botão não existe: abriria a mesma tela.
+    expect(screen.queryByRole('button', { name: 'Nova consulta' })).toBeNull();
     await user.type(campo(), 'pergunta');
     await user.click(screen.getByRole('button', { name: 'Enviar' }));
     await screen.findByTestId('assistant-message');

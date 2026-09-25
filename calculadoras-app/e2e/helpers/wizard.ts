@@ -66,8 +66,16 @@ export async function avancar(page: Page, rotulo: string | RegExp = /^Próximo/)
   await page.getByRole('button', { name: rotulo }).click();
 }
 
+/**
+ * O "Voltar" do passo a passo. Nome EXATO: o topo da calculadora tem o seu
+ * próprio, "Voltar para a lista", e um /Voltar/ pegava os dois.
+ */
+export function botaoVoltarDoPasso(page: Page) {
+  return page.getByRole('button', { name: 'Voltar', exact: true });
+}
+
 export async function voltar(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /Voltar/ }).click();
+  await botaoVoltarDoPasso(page).click();
 }
 
 /** Espera o dashboard final e confere a categoria de risco. */

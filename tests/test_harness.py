@@ -153,6 +153,33 @@ async def test_conexoes_reais_esgotam_o_pool_em_vez_de_pendurar(fabrica_com_cone
                 await c.execute(text("SELECT 1"))
 
 
+async def test_truncate_nao_pendura_com_conexao_vazada_em_transacao(engine):
+    """
+    Uma conexão esquecida no meio de uma transação não pendura mais a suíte.
+
+    Era o que travava o job de backend do CI por 6 h: o TRUNCATE da limpeza
+    esperava para sempre pela trava que essa conexão segurava. Agora ela é
+    encerrada, com aviso dizendo o que estava parado, e a limpeza termina.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+
+    from tests.conftest import truncar_tudo
+
+    vazada = await engine.connect()
+    await vazada.begin()
+    # Trava de leitura em `users` — basta para o TRUNCATE (exclusivo) esperar.
+    await vazada.execute(text("SELECT count(*) FROM users"))
+
+    with pytest.warns(UserWarning, match="SELECT count"):
+        await asyncio.wait_for(truncar_tudo(engine), timeout=20)
+
+    with pytest.raises(Exception):
+        await vazada.execute(text("SELECT 1"))
+    await vazada.invalidate()
+
+
 # ── Guarda de rede ───────────────────────────────────────────────────────
 
 async def test_chamada_externa_e_bloqueada(bloqueia_rede_externa):

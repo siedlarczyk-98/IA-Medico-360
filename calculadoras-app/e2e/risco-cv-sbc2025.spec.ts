@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { loginAsTestUser } from './helpers/auth';
 import {
   abrirCalculadora,
+  botaoVoltarDoPasso,
   esperarPasso,
   esperarResultado,
   marcar,
@@ -255,7 +256,7 @@ test.describe('Passo 4 — PREVENT', () => {
 test.describe('Navegação', () => {
   test('"Voltar" não existe no primeiro passo e retrocede a partir do segundo', async ({ page }) => {
     await abrirCalculadora(page);
-    await expect(page.getByRole('button', { name: /Voltar/ })).toHaveCount(0);
+    await expect(botaoVoltarDoPasso(page)).toHaveCount(0);
     await marcar(page, 'Nenhuma das condições acima');
     await avancar(page);
     await esperarPasso(page, 'diabetes');

@@ -1,8 +1,17 @@
+import { useEffect, useRef, useState } from 'react';
+
+import { MAX_TITULO_CONVERSA } from '../api/conversations';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   title: string;
   onMenuToggle: () => void;
+  /**
+   * Renomeia a conversa aberta. Sem ele (tela de nova consulta), o lápis some:
+   * não há o que renomear. Antes o lápis estava sempre lá e era só desenho —
+   * clicar nele não fazia nada (homologação, 2026-09-25).
+   */
+  onRenomear?: (titulo: string) => void;
 }
 
 /**
@@ -10,8 +19,28 @@ interface Props {
  * retirada do Agregador da interface: com um modo só, o switcher era um botão
  * que não levava a lugar nenhum. Ver git para o que havia aqui.
  */
-export function Topbar({ title, onMenuToggle }: Props) {
+export function Topbar({ title, onMenuToggle, onRenomear }: Props) {
   const isMobile = useIsMobile();
+  // Mesmo gesto da lista (`ConvItem`): Enter ou sair do campo salva, Esc desiste.
+  const [editando, setEditando] = useState(false);
+  const [rascunho, setRascunho] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editando) inputRef.current?.select();
+  }, [editando]);
+
+  function comecar() {
+    setRascunho(title);
+    setEditando(true);
+  }
+
+  function salvar() {
+    if (!editando) return;
+    const novo = rascunho.replace(/\s+/g, ' ').trim();
+    if (novo && novo !== title) onRenomear?.(novo);
+    setEditando(false);
+  }
 
   return (
     <header style={{
@@ -37,13 +66,45 @@ export function Topbar({ title, onMenuToggle }: Props) {
         </button>
       )}
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {title}
-        </span>
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--pen3)', opacity: 0.6, flexShrink: 0 }}>
-          <path d="M11 3 L4 10 L3 13 L6 12 L13 5 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-        </svg>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        {editando ? (
+          <input
+            ref={inputRef}
+            value={rascunho}
+            maxLength={MAX_TITULO_CONVERSA}
+            aria-label="Novo título da conversa"
+            onChange={e => setRascunho(e.target.value)}
+            onBlur={salvar}
+            onKeyDown={e => {
+              if (e.key === 'Enter') salvar();
+              if (e.key === 'Escape') setEditando(false);
+            }}
+            style={{ flex: 1, maxWidth: 480, minWidth: 0, fontSize: 'var(--texto-campo)', fontWeight: 600, color: 'var(--ink)', background: '#fff', border: 'none', outline: '1px solid var(--green)', borderRadius: 4, padding: '4px 6px' }}
+          />
+        ) : (
+          <>
+            <span style={{ fontSize: 'var(--texto-apoio)', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </span>
+            {onRenomear && (
+              <button
+                type="button"
+                onClick={comecar}
+                aria-label="Renomear conversa"
+                title="Renomear conversa"
+                className="topbar-renomear"
+                style={{
+                  width: 'var(--toque-min)', height: 'var(--toque-min)', flexShrink: 0, border: 'none', borderRadius: 6,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M11 3 L4 10 L3 13 L6 12 L13 5 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
+                </svg>
+              </button>
+            )}
+          </>
+        )}
       </div>
     </header>
   );

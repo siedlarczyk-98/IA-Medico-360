@@ -1,5 +1,5 @@
 /**
- * Uma linha de 52 px: ☰ · título · nova consulta.
+ * Uma linha de 52 px: ☰ · título · nova consulta (só dentro de uma conversa).
  *
  * Dentro da Waid não há logo: o hospedeiro já mostra a marca logo acima, e
  * repeti-la gastaria a linha mais valiosa da tela. Fora dela (URL direta), a
@@ -14,7 +14,11 @@ interface Props {
   mostrarMarca: boolean;
   /** Sem ☰ fora da Waid: lá a navegação é pela barra de abas. */
   onMenu?: () => void;
-  onNova: () => void;
+  /**
+   * Sem ele, o botão some — é o caso da própria tela de nova consulta, onde
+   * tocá-lo abria a mesma tela vazia. Decisão do Ruben (2026-09-25).
+   */
+  onNova?: () => void;
 }
 
 export function CabecalhoMovel({ titulo, subtitulo, mostrarMarca, onMenu, onNova }: Props) {
@@ -33,9 +37,13 @@ export function CabecalhoMovel({ titulo, subtitulo, mostrarMarca, onMenu, onNova
           {subtitulo && <span>{subtitulo}</span>}
         </div>
       )}
-      <button type="button" className="mv-ib" aria-label="Nova consulta" onClick={onNova}>
-        <Icone n="compose" />
-      </button>
+      {/* "+" e não o quadrado com lápis (o "nova conversa" do ChatGPT): na
+          homologação ele foi lido como "editar o título". */}
+      {onNova && (
+        <button type="button" className="mv-ib" aria-label="Nova consulta" onClick={onNova}>
+          <Icone n="plus" />
+        </button>
+      )}
     </header>
   );
 }

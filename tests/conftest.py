@@ -18,6 +18,7 @@ SQLite não serve — os modelos usam JSONB e UUID do dialeto PostgreSQL.
 
 import os
 import uuid
+import warnings
 from decimal import Decimal
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +175,48 @@ def fabrica_de_sessao(db_conn) -> async_sessionmaker:
     return fabrica_sobre(db_conn)
 
 
+async def truncar_tudo(engine) -> None:
+    """TRUNCATE de todas as tabelas — a limpeza de `fabrica_com_conexoes_reais`."""
+    tabelas = ", ".join(
+        f'"{t.schema}"."{t.name}"' if t.schema else f'"{t.name}"'
+        for t in Base.metadata.sorted_tables
+    )
+
+    async with engine.begin() as conn:
+        # O TRUNCATE pede trava exclusiva em TODAS as tabelas e, sem limite,
+        # espera para sempre por quem segura qualquer uma delas. O job de
+        # backend do CI pendurou 6 h em cinco runs de set/2026, todos parados
+        # no mesmo ponto (~52% da suíte, onde está o primeiro uso deste
+        # TRUNCATE). A causa mais provável: uma conexão esquecida "idle in
+        # transaction" por um teste anterior (tarefa de fundo que morreu com
+        # o event loop do teste no meio de uma transação), segurando trava que
+        # nunca soltaria. Localmente não reproduz — depende de tempo.
+        #
+        # Entre testes (a suíte é serial) nenhuma transação legítima fica
+        # aberta, então quem está parado em transação é vazamento: encerra, e
+        # AVISA quem era — o aviso aparece no resumo do pytest e aponta a
+        # origem para corrigir de vez. E o `lock_timeout` troca qualquer
+        # espera restante por um erro claro em segundos, nunca mais horas.
+        presas = (await conn.execute(text(
+            "SELECT pid, left(regexp_replace(query, '\\s+', ' ', 'g'), 160), "
+            "       now() - state_change "
+            "  FROM pg_stat_activity "
+            " WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "   AND state LIKE 'idle in transaction%'"
+        ))).all()
+        for pid, _consulta, _idade in presas:
+            await conn.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+        if presas:
+            warnings.warn(
+                "fabrica_com_conexoes_reais: encerradas conexões presas em transação "
+                "antes do TRUNCATE (vazamento de algum teste anterior): "
+                + "; ".join(f"pid {p} parado há {i}: {q}" for p, q, i in presas),
+                stacklevel=1,
+            )
+        await conn.execute(text("SET LOCAL lock_timeout = '15s'"))
+        await conn.execute(text(f"TRUNCATE {tabelas} RESTART IDENTITY CASCADE"))
+
+
 @pytest_asyncio.fixture
 async def fabrica_com_conexoes_reais(engine):
     """
@@ -192,19 +235,10 @@ async def fabrica_com_conexoes_reais(engine):
     `pool_size=2, max_overflow=0, pool_timeout=2`: o teste de esgotamento de
     pool falha em 2s em vez de pendurar a suíte.
     """
-    tabelas = ", ".join(
-        f'"{t.schema}"."{t.name}"' if t.schema else f'"{t.name}"'
-        for t in Base.metadata.sorted_tables
-    )
-
-    async def _truncar():
-        async with engine.begin() as conn:
-            await conn.execute(text(f"TRUNCATE {tabelas} RESTART IDENTITY CASCADE"))
-
     # Antes TAMBÉM: aqui o commit é real, então uma execução anterior morta no
     # meio (Ctrl+C, processo encerrado) deixa linhas que o rollback do harness
     # normal nunca alcança — e elas contaminariam a suíte inteira.
-    await _truncar()
+    await truncar_tudo(engine)
     eng = create_async_engine(
         TEST_DATABASE_URL, pool_size=2, max_overflow=0, pool_timeout=2
     )
@@ -212,7 +246,7 @@ async def fabrica_com_conexoes_reais(engine):
         yield async_sessionmaker(bind=eng, expire_on_commit=False)
     finally:
         await eng.dispose()
-        await _truncar()
+        await truncar_tudo(engine)
 
 
 @pytest_asyncio.fixture

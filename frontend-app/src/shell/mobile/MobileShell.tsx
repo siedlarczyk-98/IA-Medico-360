@@ -128,7 +128,7 @@ export default function MobileShell({ chat }: { chat: ChatController }) {
             titulo={titulo}
             mostrarMarca={!hospedado && chat.vazio}
             onMenu={hospedado ? () => gaveta.abrir(true) : undefined}
-            onNova={() => chat.handleNew()}
+            onNova={chat.vazio ? undefined : () => chat.handleNew()}
           />
 
           {activeFolderName && messages.length > 0 && (

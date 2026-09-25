@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   ErroApi,
@@ -10,7 +10,7 @@ import {
   verificarDispositivo,
 } from '../api/dea'
 import { FormularioCadastro } from '../components/FormularioCadastro'
-import { MapaDea } from '../components/MapaDea'
+import { MapaDea, type MapaDeaControle } from '../components/MapaDea'
 import { type Coordenada, useLocalizacao } from '../hooks/useLocalizacao'
 import { avisoDeLocalizacao } from '../lib/localizacao'
 
@@ -31,6 +31,10 @@ export function MapaPage() {
   // dedo — ver `interativo` abaixo e em MapaDea.
   const [ampliado, setAmpliado] = useState(false)
   const [toque] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false)
+  const mapa = useRef<MapaDeaControle>(null)
+  // Tocou em "minha localização" sem ter posição: pede de novo ao GPS e
+  // centraliza quando ela chegar (efeito mais abaixo).
+  const centralizarQuandoChegar = useRef(false)
 
   /**
    * Busca os locais em volta.
@@ -113,8 +117,29 @@ export function MapaPage() {
     }
   }, [ampliado])
 
+  /**
+   * Botão "minha localização". Com posição, volta a ela — o GPS NÃO é pedido de
+   * novo: enquanto busca, `posicao` cai no centro padrão e o mapa pularia para a
+   * Praça da Sé. Sem posição, é o "tentar de novo" do aviso, dentro do mapa.
+   */
+  function irParaMinhaLocalizacao() {
+    if (temPosicaoReal) {
+      mapa.current?.centralizar(posicao)
+      return
+    }
+    centralizarQuandoChegar.current = true
+    solicitar()
+  }
+
+  useEffect(() => {
+    if (!temPosicaoReal || !centralizarQuandoChegar.current) return
+    centralizarQuandoChegar.current = false
+    mapa.current?.centralizar(posicao)
+  }, [temPosicaoReal, posicao])
+
   const selecionado = locais.find((l) => l.id === selecionadoId) ?? null
   const avisoLocalizacao = avisoDeLocalizacao(estado)
+  const rodapeAmpliado = ampliado && (modo !== 'navegar' || selecionado !== null)
 
   return (
     <div className="mapa-page">
@@ -146,6 +171,7 @@ export function MapaPage() {
 
       <div className={ampliado ? 'mapa-wrapper mapa-wrapper--cheio' : 'mapa-wrapper'}>
         <MapaDea
+          ref={mapa}
           locais={modo === 'navegar' ? locais : []}
           // Ao escolher um local na lista, o mapa vai até ele — senão o cartão
           // selecionado e o marcador ficam falando de lugares diferentes.
@@ -165,14 +191,29 @@ export function MapaPage() {
           interativo={ampliado || !toque || modo !== 'navegar'}
           ampliado={ampliado}
         />
-        {modo === 'escolhendo-ponto' && (
+        {modo === 'escolhendo-ponto' && !ampliado && (
           <p className="instrucao-mapa">Toque no mapa onde fica o DEA</p>
         )}
-        {modo === 'navegar' && !ampliado && (
+        {/* No cadastro também: acertar o pin na porta certa pede mapa grande. */}
+        {!ampliado && (
           <button type="button" className="mapa-botao mapa-ampliar" onClick={() => setAmpliado(true)}>
             Ampliar mapa
           </button>
         )}
+        <button
+          type="button"
+          className={rodapeAmpliado ? 'mapa-botao mapa-localizar mapa-localizar--acima' : 'mapa-botao mapa-localizar'}
+          aria-label="Ir para a minha localização"
+          title="Minha localização"
+          aria-busy={localizando}
+          onClick={irParaMinhaLocalizacao}
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+            <circle cx="12" cy="12" r="3" fill="currentColor" />
+            <path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
         {ampliado && (
           <>
             {/* O X é a saída: dentro do app da Waid o botão voltar do Android não
@@ -180,11 +221,32 @@ export function MapaPage() {
             <button type="button" className="mapa-botao mapa-fechar" aria-label="Fechar mapa" onClick={() => setAmpliado(false)}>
               ✕
             </button>
-            {selecionado && (
+            {modo === 'navegar' && selecionado && (
               <div className="mapa-cheio-rodape">
                 <b>{selecionado.nome}</b>
                 <button type="button" className="mapa-botao" onClick={() => setAmpliado(false)}>
                   Ver detalhes
+                </button>
+              </div>
+            )}
+            {/* No cadastro, o rodapé diz o que fazer e já confirma — sem ele era
+                preciso fechar o mapa para achar o "Confirmar posição". */}
+            {modo !== 'navegar' && (
+              <div className="mapa-cheio-rodape">
+                <span className="mapa-cheio-rodape__texto">
+                  {modo === 'escolhendo-ponto'
+                    ? 'Toque no mapa onde fica o DEA'
+                    : 'Arraste o pin até o local exato'}
+                </span>
+                <button
+                  type="button"
+                  className="mapa-botao mapa-botao--primario"
+                  onClick={() => {
+                    setAmpliado(false)
+                    if (modo === 'escolhendo-ponto') setModo('preenchendo')
+                  }}
+                >
+                  {modo === 'escolhendo-ponto' ? 'Confirmar posição' : 'Usar esta posição'}
                 </button>
               </div>
             )}

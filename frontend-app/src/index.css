@@ -67,3 +67,15 @@ textarea { font-family: inherit; }
 
 /* Logo animada da tela vazia do desktop (ver `components/MedicoLogoAnimada`). */
 .logo-abertura { display: block; height: auto; max-width: 70%; margin-bottom: 20px; }
+
+/* Lápis ao lado do título da conversa (Topbar). Cor e fundo aqui, não inline,
+   para o hover valer. */
+.topbar-renomear {
+  background: transparent;
+  color: var(--pen3);
+}
+.topbar-renomear:hover,
+.topbar-renomear:focus-visible {
+  background: var(--fill);
+  color: var(--ink);
+}

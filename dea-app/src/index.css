@@ -135,6 +135,7 @@ button { font-family: inherit; cursor: pointer; }
 /* ── Pulso ─────────────────────────────────────────────────── */
 
 .pulso {
+  position: relative;
   width: 186px;
   height: 186px;
   margin: 0 auto;
@@ -147,23 +148,49 @@ button { font-family: inherit; cursor: pointer; }
   border: 4px solid var(--line);
   /* Transição curta: a batida precisa parecer instantânea. */
   transition:
-    transform 60ms ease-out,
     border-color 60ms ease-out,
     background-color 60ms ease-out;
+}
+
+/*
+ * A batida é um ANEL que acende em volta do círculo — o círculo e o número não
+ * se mexem. Antes o círculo inteiro crescia 6% a cada batida (até 2x por
+ * segundo), e no Android isso aparecia como um tremelique: o número era
+ * redesenhado em outro tamanho a cada compressão (homologação, 2026-09-25).
+ * Só opacidade anima aqui, que a GPU faz sem redesenhar nada.
+ */
+.pulso::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 4px solid var(--green);
+  opacity: 0;
+  pointer-events: none;
+  /* Apaga devagar: o anel "respira" em vez de piscar. */
+  transition: opacity 220ms ease-out;
 }
 
 /* Compressão usa o verde de acento; ventilação o petrol. Mesma lógica do
    resto do produto: petrol é a cor "de peso", verde é o sinal ativo. */
 .pulso--compressao {
-  transform: scale(1.06);
   border-color: var(--green);
   background: #f2fdf7;
 }
 
 .pulso--ventilacao {
-  transform: scale(1.03);
   border-color: var(--petrol);
   background: var(--fill);
+}
+
+.pulso--compressao::after,
+.pulso--ventilacao::after {
+  opacity: 1;
+  transition-duration: 40ms;
+}
+
+.pulso--ventilacao::after {
+  border-color: var(--petrol);
 }
 
 .pulso__bpm {
@@ -465,6 +492,50 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink);
 }
 
+/* "Minha localização": embaixo à direita, logo acima da atribuição do OSM. */
+.mapa-localizar {
+  position: absolute;
+  right: 10px;
+  bottom: 30px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  /* O DEA não carrega os tokens de shared/design: 44 px é o toque mínimo. */
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.mapa-localizar[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.mapa-wrapper--cheio .mapa-localizar {
+  right: 12px;
+  bottom: calc(30px + env(safe-area-inset-bottom));
+}
+
+/* Com o rodapé do mapa cheio aberto, sobe para não ficar embaixo dele. */
+.mapa-wrapper--cheio .mapa-localizar--acima {
+  bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+.mapa-botao--primario {
+  flex-shrink: 0;
+  border-color: var(--petrol);
+  background: var(--petrol);
+  color: #fff;
+}
+
+.mapa-cheio-rodape__texto {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .mapa {
   height: 300px;
   border-radius: 14px;
@@ -484,7 +555,8 @@ button { font-family: inherit; cursor: pointer; }
 .instrucao-mapa {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  /* Acima da atribuição do OSM, que a licença exige visível. */
+  bottom: 32px;
   transform: translateX(-50%);
   background: var(--petrol);
   color: #fff;
@@ -885,12 +957,13 @@ button { font-family: inherit; cursor: pointer; }
  */
 @media (prefers-reduced-motion: reduce) {
   .pulso,
+  .pulso::after,
   .progresso__barra {
     transition: none;
   }
 
-  .pulso--compressao,
-  .pulso--ventilacao {
-    transform: none;
+  /* Sem o anel: sobra a troca de cor da borda, que não é movimento. */
+  .pulso::after {
+    display: none;
   }
 }
