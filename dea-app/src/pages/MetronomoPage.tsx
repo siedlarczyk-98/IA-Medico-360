@@ -9,7 +9,6 @@ import {
   Metronomo,
   formatarTempo,
   type EstadoMetronomo,
-  type TipoBatida,
 } from '../lib/metronomo'
 
 const ESTADO_ZERADO: EstadoMetronomo = {
@@ -32,7 +31,6 @@ export function MetronomoPage() {
   const [bpm, setBpm] = useState(BPM_PADRAO)
   const [rodando, setRodando] = useState(false)
   const [estado, setEstado] = useState<EstadoMetronomo>(ESTADO_ZERADO)
-  const [pulso, setPulso] = useState<TipoBatida | null>(null)
   const [avisoTroca, setAvisoTroca] = useState(false)
   // O sistema cortou o audio com o metronomo ligado (ligacao, tela bloqueada).
   const [semSom, setSemSom] = useState(false)
@@ -40,14 +38,11 @@ export function MetronomoPage() {
   const metronomoRef = useRef<Metronomo | null>(null)
   const { solicitar: pedirWakeLock, liberar: liberarWakeLock } = useWakeLock()
 
-  // O pulso visual dura mais que o clique sonoro para ser perceptivel; guardado
-  // em ref para nao empilhar timeouts a 120 bpm.
-  const timeoutPulsoRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const aoBater = useCallback((tipo: TipoBatida) => {
-    setPulso(tipo)
-    if (timeoutPulsoRef.current !== null) clearTimeout(timeoutPulsoRef.current)
-    timeoutPulsoRef.current = setTimeout(() => setPulso(null), 90)
-  }, [])
+  // Sem pulso visual por batida. O círculo crescia a cada compressão, depois
+  // virou um anel que acendia e apagava — e nos dois casos, no Android dentro da
+  // Waid, a tela "tremia" (homologação, 2026-09-25). Piscar ~2x por segundo é
+  // exatamente o que incomoda. O ritmo é do SOM; a tela mostra a FASE, com cor
+  // fixa que só muda quando a fase muda (ver `classeDaFase`).
 
   const aoFecharCiclo = useCallback(() => {
     setAvisoTroca(true)
@@ -67,13 +62,12 @@ export function MetronomoPage() {
       metronomoRef.current = new Metronomo({
         bpm,
         modo302: MODO_302,
-        aoBater,
         aoFecharCiclo,
         aoMudarAudio: setSemSom,
       })
     }
     return metronomoRef.current
-  }, [bpm, aoBater, aoFecharCiclo])
+  }, [bpm, aoFecharCiclo])
 
   // Ao voltar para o app (fim da ligacao, tela desbloqueada), tenta devolver o
   // som sozinho. No iOS isso so funciona com gesto do usuario — por isso o botao
@@ -91,8 +85,8 @@ export function MetronomoPage() {
   // no meio do atendimento). So atualiza se ja existir: criar aqui ligaria o
   // AudioContext antes de qualquer gesto do usuario, e o navegador o bloquearia.
   useEffect(() => {
-    metronomoRef.current?.atualizar({ bpm, modo302: MODO_302, aoBater, aoFecharCiclo })
-  }, [bpm, aoBater, aoFecharCiclo])
+    metronomoRef.current?.atualizar({ bpm, modo302: MODO_302, aoFecharCiclo })
+  }, [bpm, aoFecharCiclo])
 
   // Espelha o estado do motor na UI. 100ms e suficiente para o cronometro e bem
   // mais barato que redesenhar a cada batida.
@@ -112,7 +106,6 @@ export function MetronomoPage() {
     return () => {
       void metronomoRef.current?.destruir()
       metronomoRef.current = null
-      if (timeoutPulsoRef.current !== null) clearTimeout(timeoutPulsoRef.current)
     }
   }, [])
 
@@ -153,13 +146,9 @@ export function MetronomoPage() {
       </p>
 
       <div
-        className={[
-          'pulso',
-          pulso === 'compressao' ? 'pulso--compressao' : '',
-          pulso === 'ventilacao' ? 'pulso--ventilacao' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+        className={
+          !rodando ? 'pulso' : estado.emVentilacao ? 'pulso pulso--ventilacao' : 'pulso pulso--compressao'
+        }
         aria-hidden="true"
       >
         <span className="pulso__bpm">{bpm}</span>
