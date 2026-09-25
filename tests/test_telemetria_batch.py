@@ -7,9 +7,10 @@ roda num único event loop: cada resposta congelava todas as outras por um round
 trip, e um Phoenix lento congelava tudo. Confirmado ativo em produção em
 2026-09-21 (`PHOENIX_API_KEY` definida).
 
-O teste espiona a chamada em vez de inspecionar o provider: o que importa é o
-argumento que a aplicação passa, e montar um provider real tentaria sair para
-a rede.
+Os testes de argumento espionam a chamada: o que importa ali é o que a aplicação
+passa. O último usa o `register()` de verdade, porque o que ele guarda é a
+compatibilidade entre as versões instaladas — montar o provider não sai para a
+rede enquanto nenhum span é criado.
 """
 
 import sys
@@ -62,3 +63,58 @@ def test_sem_chave_nao_registra_nada(monkeypatch):
 
     assert chamadas == []
     assert telemetry.get_tracer() is None
+
+
+def test_falha_no_register_alarma_e_nao_derruba_o_boot(monkeypatch):
+    """Em 25/09/2026 o Phoenix foi achado desligado em produção: o `register()`
+    levantava AttributeError (OpenTelemetry 1.45 incompatível), o erro virava uma
+    linha de aviso no meio do boot, e a API subia sem telemetria sem ninguém saber."""
+    _instala_register_espiao(monkeypatch)
+
+    def register_quebrado(**_kwargs):
+        raise AttributeError("'HTTPSpanExporter' object has no attribute '_headers'")
+
+    sys.modules["phoenix.otel"].register = register_quebrado
+    monkeypatch.setattr(telemetry, "_tracer", None)
+
+    alarmes: list[dict] = []
+    from app.core import alarme
+
+    monkeypatch.setattr(alarme, "alarmar", lambda **kw: alarmes.append(kw) or True)
+
+    telemetry.setup_phoenix("chave-de-teste", "projeto-teste", "https://phoenix.invalid")
+
+    assert telemetry.get_tracer() is None
+    assert [a["tag"] for a in alarmes] == ["phoenix_desligado"]
+    assert "_headers" in alarmes[0]["contexto"]["erro"]
+
+
+def test_o_register_real_funciona_com_as_versoes_instaladas(monkeypatch):
+    """Sem espião: o `register()` do phoenix-otel contra o OpenTelemetry que o
+    `requirements.txt` instala. É este teste que pega, no CI e antes do deploy,
+    uma versão do OpenTelemetry que o phoenix-otel não suporta — foi o que
+    desligou o Phoenix em produção em 25/09/2026.
+
+    Não sai para a rede: montar o exportador não conecta, e nenhum span é criado.
+
+    Duas condições, medidas: sem elas o teste passa com a versão quebrada.
+    - SEM `verbose=False`: o atributo que sumiu na 1.45 só é lido quando o
+      `register()` imprime o banner de configuração — o padrão, e é como
+      `setup_phoenix` chama.
+    - Endpoint COM CAMINHO, no formato do Arize (`.../s/<espaço>`): é o que cai no
+      exportador HTTP. Um host sem caminho escolhe outro exportador e não quebra.
+    """
+    from phoenix.otel import register
+
+    monkeypatch.setenv("PHOENIX_API_KEY", "chave-de-teste")
+    monkeypatch.setenv("PHOENIX_COLLECTOR_ENDPOINT", "https://phoenix.invalid/s/espaco-de-teste")
+
+    provider = register(
+        project_name="projeto-teste",
+        batch=True,
+        set_global_tracer_provider=False,
+    )
+    try:
+        assert provider.get_tracer("teste") is not None
+    finally:
+        provider.shutdown()

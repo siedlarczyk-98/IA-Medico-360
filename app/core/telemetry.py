@@ -53,6 +53,18 @@ def setup_phoenix(api_key: str, project_name: str, endpoint: str) -> None:
         logger.warning("arize-phoenix-otel não instalado. Execute: pip install arize-phoenix-otel")
     except Exception as exc:
         logger.warning("Falha ao inicializar Phoenix: %s", exc)
+        # Com a chave configurada, a telemetria DEVERIA estar ligada: falhar
+        # aqui é uma garantia que deixou de valer, não um detalhe de boot. Só o
+        # aviso no log não bastou — em 25/09/2026 o Phoenix foi achado desligado
+        # em produção (OpenTelemetry 1.45 incompatível) sem que ninguém tivesse
+        # notado, porque a linha ficava no meio do boot e a API subia normal.
+        from app.core.alarme import alarmar
+
+        alarmar(
+            tag="phoenix_desligado",
+            mensagem="Phoenix não inicializou: a API está sem telemetria de LLM",
+            contexto={"erro": str(exc), "excecao": type(exc).__name__},
+        )
 
 
 def get_tracer() -> trace.Tracer | None:

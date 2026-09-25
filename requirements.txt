@@ -47,3 +47,11 @@ sentry-sdk[fastapi]==2.20.0
 
 # Observabilidade (Arize Phoenix / OpenTelemetry)
 arize-phoenix-otel==0.17.1
+# O phoenix-otel só fixa o próprio pacote; o OpenTelemetry vinha na versão mais
+# nova a cada build. A 1.45.0 removeu o `HTTPSpanExporter._headers` que o
+# `register()` do phoenix-otel 0.17.1 lê: o Phoenix falhava no boot e a API subia
+# sem telemetria nenhuma (25/09/2026). Só subir estes junto com uma versão do
+# phoenix-otel que suporte a nova — e conferir a linha "Phoenix ativado" no log.
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0

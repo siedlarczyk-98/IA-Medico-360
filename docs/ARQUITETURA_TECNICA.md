@@ -1327,6 +1327,14 @@ antes.
 errava.* Regras de `ON DELETE` e tabelas legadas só se confirmam no banco (consulta no
 §10.3). A exclusão de conta com conta real em produção ainda não foi homologada.
 
+**12a. Phoenix desligado em produção — CORRIGIDO em 25/09, falta subir.** O
+`requirements.txt` só fixava o `arize-phoenix-otel==0.17.1`; o build instalava o
+OpenTelemetry mais novo, e a 1.45.0 quebra o `register()` dele
+(`'HTTPSpanExporter' object has no attribute '_headers'`). A API subia sem telemetria,
+com o erro como uma linha de aviso no boot. Agora o OpenTelemetry está fixado em 1.44.0,
+a falha alarma no Sentry (`phoenix_desligado`), e um teste com o `register()` real pega a
+incompatibilidade no CI. Depois de subir: conferir "Phoenix ativado" no log do boot.
+
 **12. Segredo exposto.** *Pendências.* A `PHOENIX_API_KEY` foi colada numa conversa e não
 foi rotacionada.
 
