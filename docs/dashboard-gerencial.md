@@ -121,3 +121,20 @@ as views, o que permite contar usuários distintos e montar coortes.
 Criar numa migration nova (`CREATE VIEW gerencial.<nome> AS …`). O
 `ALTER DEFAULT PRIVILEGES` da 016 já dá leitura ao role. Incluir a view nos dados do
 teste e confirmar que a marca `SEGREDO` não aparece nela.
+
+## SQL dos cards
+
+Os 15 cards (KPIs de 7 dias, tendências semanais, custo por modelo, qualidade e módulos)
+estão em `docs/dashboard-gerencial.sql`, um bloco `-- name:` por pergunta. Todos foram
+validados em produção com o role `gerencial_leitura` em 2026-09-28.
+
+## Onde está o painel
+
+- Instância: `metabase-pro.paciente360.com.br`, banco "Médico 360 - Railway" (id 331),
+  conectado com o login `metabase`.
+- Coleção "Médico 360 — Gerencial" (id 1783), perguntas 13861 a 13875.
+- Dashboard "Médico 360 — Painel Gerencial":
+  <https://metabase-pro.paciente360.com.br/dashboard/1651>.
+
+Ao mudar um card no Metabase, atualizar o bloco correspondente no `.sql`: o arquivo é a
+fonte para recriar o painel.
