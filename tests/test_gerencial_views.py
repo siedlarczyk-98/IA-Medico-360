@@ -4,10 +4,10 @@ Schema `gerencial` — o que o Metabase da diretoria enxerga.
 As propriedades travadas aqui são de privacidade, não de formato:
 - nenhum texto clínico ou dado pessoal escrito no app aparece em view alguma;
 - o role do Metabase lê as views e NÃO lê as tabelas do app;
-- contas `admin` (a equipe testando) ficam fora dos números.
+- contas `admin` e `test` (a equipe testando) ficam fora dos números.
 
 O banco de teste é montado por `create_all`, sem migrations; o schema é criado
-aqui com o mesmo SQL da migration 016, dentro da transação do teste.
+aqui com o mesmo SQL das migrations 016 e 017, dentro da transação do teste.
 """
 
 import importlib.util
@@ -28,10 +28,18 @@ from app.models.models import (
     PharmaAlert,
 )
 
-_MIGRATION = Path(__file__).parent.parent / "alembic" / "versions" / "016_schema_gerencial.py"
-_spec = importlib.util.spec_from_file_location("migration_016", _MIGRATION)
-migration = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(migration)
+_VERSIONS = Path(__file__).parent.parent / "alembic" / "versions"
+
+
+def _carregar(nome_modulo: str, arquivo: str):
+    spec = importlib.util.spec_from_file_location(nome_modulo, _VERSIONS / arquivo)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+migration = _carregar("migration_016", "016_schema_gerencial.py")
+migration_017 = _carregar("migration_017", "017_gerencial_sem_contas_teste.py")
 
 # Marca escrita em todo campo livre e pessoal. Se aparecer em qualquer view,
 # alguma coluna vazou.
@@ -40,7 +48,7 @@ SEGREDO = "SEGREDO-CLINICO-7f3a"
 
 @pytest_asyncio.fixture
 async def gerencial(db_conn):
-    for sql in migration.comandos_upgrade():
+    for sql in [*migration.comandos_upgrade(), *migration_017.comandos_upgrade()]:
         await db_conn.exec_driver_sql(sql)
 
 
@@ -157,6 +165,54 @@ class TestAdminFicaFora:
 
         assert await _linhas(db_conn, "perguntas") == []
         assert await _linhas(db_conn, "usuarios") == []
+
+
+@pytest.mark.usefixtures("gerencial")
+class TestContaDeTesteFicaFora:
+    """Conta marcada com `role = 'test'` some de tudo — custo e captação inclusive."""
+
+    VIEWS_POR_USUARIO = ("usuarios", "perguntas", "respostas_modelo", "acessos", "captacao")
+
+    async def _marcar_como_teste(self, db, medico):
+        medico.role = "test"
+        await db.commit()
+
+    async def test_some_de_todas_as_views_por_usuario(self, db, db_conn, dados):
+        await self._marcar_como_teste(db, dados)
+
+        for view in self.VIEWS_POR_USUARIO:
+            assert await _linhas(db_conn, view) == [], view
+
+    async def test_conta_normal_ao_lado_continua_contando(
+        self, db, db_conn, dados, user_factory, conversation_factory
+    ):
+        medico = await user_factory()
+        conversa = await conversation_factory(medico)
+        db.add(Interaction(
+            conversation_id=conversa.id, user_id=medico.id,
+            feature="ORQUESTRADOR", prompt_text="pergunta real",
+        ))
+        await self._marcar_como_teste(db, dados)
+
+        assert len(await _linhas(db_conn, "usuarios")) == 1
+        assert len(await _linhas(db_conn, "perguntas")) == 1
+
+    async def test_lead_sem_conta_continua_contando(self, db, db_conn):
+        lp = LandingPage(slug="parceiros", name="Parceiros")
+        db.add(lp)
+        await db.flush()
+        db.add(Submission(landing_page_id=lp.id, name="Lead", email="lead@example.com"))
+        await db.commit()
+
+        [lead] = await _linhas(db_conn, "captacao")
+        assert lead["virou_usuario"] is False
+
+    async def test_downgrade_volta_a_contar(self, db, db_conn, dados):
+        await self._marcar_como_teste(db, dados)
+        for sql in migration_017.comandos_downgrade():
+            await db_conn.exec_driver_sql(sql)
+
+        assert len(await _linhas(db_conn, "perguntas")) == 1
 
 
 @pytest.mark.usefixtures("gerencial")

@@ -101,8 +101,11 @@ as views, o que permite contar usuários distintos e montar coortes.
 
 ## Ressalvas que mudam o número
 
-- **Contas `admin` estão fora** de todas as views. Contas de teste com perfil
-  `beta_user` continuam contando.
+- **Contas `admin` e `test` estão fora** de todas as views, custo e captação inclusive
+  (migration 017). Conta de teste é marcada à mão:
+  `UPDATE users SET role = 'test' WHERE email IN (...)`. Ela continua entrando e usando
+  o produto, sem o teto semanal, que só vale para `beta_user`. Para voltar a contar:
+  `role = 'beta_user'`. Conta de teste ainda não marcada continua contando.
 - **`perguntas.custo_usd` já é o total da pergunta.** `respostas_modelo.custo_usd`
   serve para quebrar esse total por modelo. Não somar as duas.
 - **A PREVENT não aparece em `calculadoras`**: ela calcula sem gravar execução.
