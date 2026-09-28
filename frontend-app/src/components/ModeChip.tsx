@@ -47,7 +47,7 @@ const labels: Record<string, string> = {
   busca:        'Busca Rápida',
   produtividade:'Produtividade',
   exames:       'Exames',
-  dados:        'Data Ocean',
+  dados:        'Dados do Brasil',
 };
 
 interface Props {

@@ -26,7 +26,7 @@ export const MODOS: Modo[] = [
   { key: 'PHARMA_CHECK',       nome: 'Fármacos',           curto: 'Fármacos',      icone: 'pill',  descricao: 'Interações, bula, receita e genéricos, com dados da ANVISA.' },
   { key: 'EXAM_REVIEW',        nome: 'Exames',             curto: 'Exames',        icone: 'scan',  descricao: 'Anexe laudo, imagem ou resultado — até 5 arquivos.' },
   { key: 'PRODUCTIVITY',       nome: 'Produtividade',      curto: 'Produtividade', icone: 'tasks', descricao: 'Laudos, e-mails, receitas, resumos e tarefas administrativas.' },
-  { key: 'DATA_OCEAN',         nome: 'Data Ocean',         curto: 'Data Ocean',    icone: 'db',    descricao: 'Dados oficiais brasileiros: saúde, população, economia.' },
+  { key: 'DATA_OCEAN',         nome: 'Dados do Brasil',    curto: 'Dados',         icone: 'db',    descricao: 'Dados oficiais brasileiros: saúde, população, economia.' },
 ];
 
 export function modo(key: OrchestratorMode): Modo {

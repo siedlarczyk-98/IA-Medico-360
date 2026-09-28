@@ -24,7 +24,7 @@ const MODE_OPTIONS: { key: OrchestratorMode; label: string; shortLabel: string }
   { key: 'EXAM_REVIEW',        label: 'Exames',               shortLabel: 'Exames' },
   // Só por escolha explícita: a triagem nunca roteia para cá (é lento e
   // cobrado por uso de ferramenta). Ver MODOS_NAO_TRIADOS no backend.
-  { key: 'DATA_OCEAN',         label: 'Data Ocean',           shortLabel: 'Data Ocean' },
+  { key: 'DATA_OCEAN',         label: 'Dados do Brasil',      shortLabel: 'Dados' },
 ];
 
 const FILE_TYPE_ICON: Record<string, string> = {

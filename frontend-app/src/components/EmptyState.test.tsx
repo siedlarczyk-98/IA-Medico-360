@@ -34,7 +34,7 @@ describe('EmptyState', () => {
       // linha 1 — perguntar
       'Busca rápida', 'Raciocínio clínico',
       // linha 2 — trabalhar
-      'Data Ocean Brasileiro', 'Produtividade',
+      'Dados do Brasil', 'Produtividade',
       // linha 3 — material clínico concreto
       'Exames', 'Checagem farmacológica',
     ]);
@@ -45,7 +45,7 @@ describe('EmptyState', () => {
     // renderizava com um espaço vazio no lugar dele, sem erro nenhum.
     render(<EmptyState />);
 
-    const card = screen.getByRole('button', { name: /Data Ocean Brasileiro/ });
+    const card = screen.getByRole('button', { name: /Dados do Brasil/ });
     expect(card.querySelector('svg')).toBeInTheDocument();
   });
 
@@ -54,7 +54,7 @@ describe('EmptyState', () => {
     // DATASUS e leitos faria o médico não descobrir o resto.
     render(<EmptyState />);
 
-    const card = screen.getByRole('button', { name: /Data Ocean Brasileiro/ });
+    const card = screen.getByRole('button', { name: /Dados do Brasil/ });
     expect(card.textContent).toMatch(/economia|população|clima|educação/i);
   });
 
@@ -62,7 +62,7 @@ describe('EmptyState', () => {
     const onModeSelect = vi.fn();
     render(<EmptyState onModeSelect={onModeSelect} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Data Ocean Brasileiro/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Dados do Brasil/ }));
 
     expect(onModeSelect).toHaveBeenCalledWith('DATA_OCEAN');
   });
@@ -70,7 +70,7 @@ describe('EmptyState', () => {
   it('marca visualmente o modo já selecionado', () => {
     render(<EmptyState selectedMode="DATA_OCEAN" />);
 
-    const card = screen.getByRole('button', { name: /Data Ocean Brasileiro/ });
+    const card = screen.getByRole('button', { name: /Dados do Brasil/ });
     expect(card.textContent).toContain('selecionado');
   });
 });

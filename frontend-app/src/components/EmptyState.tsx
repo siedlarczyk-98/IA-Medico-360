@@ -13,7 +13,7 @@ const suggestions: { icon: string; key: OrchestratorMode; title: string; desc: s
   { icon: 'busca',         key: 'QUICK_SEARCH',       title: 'Busca rápida',            desc: 'Pergunte qualquer coisa — posologia, protocolo, critério diagnóstico. Resposta direta, sem elaboração.' },
   { icon: 'raciocinio',    key: 'CLINICAL_REASONING', title: 'Raciocínio clínico',      desc: 'Descreva o caso e receba hipóteses, exames e conduta validados em diretrizes.' },
   // Linha 2 — trabalhar
-  { icon: 'dados',         key: 'DATA_OCEAN',         title: 'Data Ocean Brasileiro',   desc: 'Dados oficiais brasileiros consultados na hora, com a fonte: saúde, população, economia, clima, educação e mais.' },
+  { icon: 'dados',         key: 'DATA_OCEAN',         title: 'Dados do Brasil',         desc: 'Dados oficiais brasileiros consultados na hora, com a fonte: saúde, população, economia, clima, educação e mais.' },
   { icon: 'produtividade', key: 'PRODUCTIVITY',       title: 'Produtividade',           desc: 'Laudos, emails, receitas, resumos e qualquer tarefa administrativa — sem restrições clínicas.' },
   // Linha 3 — material clínico concreto
   { icon: 'exames',        key: 'EXAM_REVIEW',        title: 'Exames',                  desc: 'Anexe laudo, imagem ou resultado laboratorial e discuta os achados — até 5 arquivos por mensagem.' },
