@@ -1,11 +1,5 @@
 # Arquitetura Técnica — Médico 360
 
-> Estado do código em **2026-09-25**, commit `bd76b44` na `main`, head do Alembic
-> `015_otp_code_hmac`. Referências `arquivo:linha` apontam para a raiz do repositório
-> e envelhecem; o nome da função é âncora melhor que o número da linha.
-> Descreve o sistema como ele é hoje. O histórico vive no `git log`; o raciocínio de
-> cada decisão, nos comentários do código e nos cabeçalhos das migrations.
-
 ## 0. Como ler este documento
 
 Para entender o sistema numa tarde, leia nesta ordem:
@@ -1219,18 +1213,10 @@ Sempre `python -m scripts.<nome>` (a forma com caminho quebra os imports de `app
 | `enviar_email_de_teste` | E-mail `[TESTE]` de código ou de notícias para um destinatário |
 | `generate_dev_token` | JWT de desenvolvimento (não versionado) |
 
----
-
-## 15. Convenções
-
-- **Commits direto na `main`**, feitos pelo Ruben; o push dispara o deploy (§12.3). Para mudança grande, o roteiro de subida recomenda branch + PR para o CI rodar antes.
-- **Comentários carregam o porquê**, muitas vezes com o incidente que motivou a regra. Ao mexer numa área, leia o cabeçalho do módulo antes.
-- `ruff` em escopo total (`ruff.toml`: 120 colunas, regras E/F/I/UP).
-- Coisa nova no backend: **fatia vertical** (§2). Rota nova: decisão explícita em `tests/test_authorization.py`. Garantia silenciosa nova: medição em `vigilancia_service.py`.
 
 ---
 
-## 16. Riscos e problemas até o lançamento
+## 15. Riscos e problemas até o lançamento
 
 **O cenário que orienta esta lista:** um evento com médicos usando o produto **no próprio
 celular**, quase sempre dentro do app da Waid, muitos no **mesmo Wi-Fi**, e boa parte
@@ -1259,16 +1245,7 @@ iPhone dá zoom ao focar), e o cartão do onboarding/login por código perde res
 para o topo em telas até 480 px. Medido em viewport de iPhone SE e 13 mini: todo campo
 com 16 px, sem rolagem lateral. **Falta:** conferir num iPhone de verdade, dentro da Waid.
 
-**3. A homologação em aparelho não terminou.**
-*Varredura + pendências.* O roteiro de 16 passos (`pitacos-do-fable-2.md`, "Roteiro de
-homologação no celular") não tem resultado anotado para a maioria. Os itens 69 (pilha de
-camadas suja depois da reentrada), 70 (handshake de 30 s mesmo com token válido) e 71
-(`sessionStorage` bloqueado no consentimento de imagem) só se confirmam no aparelho. Falta
-também homologar a retomada no chat, nas calculadoras e nas notícias (itens 60, 63, 68 em
-`pendencias.md`). O botão voltar do Android dentro do app da Waid não chega à página — a
-correção é da Waid, não nossa.
-
-**4. Nunca houve ensaio de carga.**
+**3. Nunca houve ensaio de carga.**
 *Varredura + conferido.* A fase 4 removeu os tetos conhecidos (conexão presa no stream), mas
 nada foi medido com dezenas de streams simultâneos. Pontos que só aparecem sob carga:
 - **Limites dos provedores de LLM** (requisições e tokens por minuto da conta). Com muitos `CLINICAL_REASONING` ao mesmo tempo, a Anthropic pode responder 429 e tudo cai na cadeia de fallback — que existe, mas sem medição.
@@ -1279,95 +1256,16 @@ nada foi medido com dezenas de streams simultâneos. Pontos que só aparecem sob
 *Direção:* um ensaio com 30–50 streams simultâneos antes do congelamento, olhando o Sentry,
 o `pg_stat_activity` e os 429 dos provedores.
 
-**5. Configuração que só existe no painel — conferir uma a uma.**
-*Painel.* Nada no código prova que estão certas:
 
-| Serviço | Variável | O que acontece se estiver errada |
-|---|---|---|
-| backend | `REDIS_URL` | Sem Redis, a readiness dá 503 e o rate limit vira por processo |
-| backend | `NOTICIAS_URL` | Links do e-mail de notícias quebrados (em 22/09 ainda apontava para `localhost:5176`); também entra na lista de origens confiáveis |
-| backend | `FRONTEND_URL` | Link de convite errado |
-| backend | `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=90` | Todo deploy corta as respostas em andamento |
-| backend | caminho do health check | Não está registrado em lugar nenhum |
-| chat, calculadoras, notícias, LPs | `VITE_WAID_ORIGIN`, `VITE_API_URL` | Embed em timeout / app chamando localhost |
-| chat | `VITE_SHELL_MOVEL=on` | Confirmado em 24/09 |
-
-**6. O teto de US$ 5 por semana vale para todo médico.**
+**4. O teto de US$ 5 por semana vale para todo médico.**
 *Conferido.* Todo usuário criado pelo embed é `beta_user`. Quem usar muito no evento
 (`DATA_OCEAN` custa ~US$ 0,65 por consulta) recebe "limite semanal atingido" e perde
 **todos** os modos. É decisão de produto, não defeito: manter, subir para o evento ou
-isentar. A exposição de custo é de até US$ 5 × médicos ativos por semana; a vigilância só
-alarma quando o custo de 7 dias triplica.
+isentar. A exposição de custo é de até US$ 5 × médicos ativos por semana; a vigilância só alarma quando o custo de 7 dias triplica.
 
-### 16.2 Dados, operação e conformidade
 
-**7. Backup e restore.** *Varredura + conferido.* O Railway não faz backup. Há 6 dumps
-reais (66 MB) **sem criptografia** em `backups/` na máquina local (item 7, terceiro
-relatório que pede isso). O restore só foi ensaiado em 19/08 (item 83). Antes do evento:
-dump novo → restaurar em banco descartável → `verificar_restore` → guardar o dump
-criptografado fora da máquina.
+**5. O CI não segura o deploy.** *Varredura.* Push na `main` deploya tudo, com CI verde ou não. Na semana do evento: congelar, subir só o necessário, backend antes dos frontends, esperar `/health/ready` e a linha do líder.
 
-**8. Interações órfãs.** *Conferido — aberto.* Parar, falha da cadeia de fallback ou queda
-deixam a interação em `em_andamento` para sempre: a conversa reaberta mostra pergunta sem
-resposta, e o custo do modelo primário já cobrado não é registrado (item 66). No evento,
-com rede ruim e gente apertando Parar, vai acontecer mais. Direção: marcar como
-interrompida no `except`/cancelamento e varrer periodicamente as linhas com mais de 10 min.
-
-**9. O CI não segura o deploy.** *Varredura.* Push na `main` deploya tudo, com CI verde ou
-não. Na semana do evento: congelar, subir só o necessário, backend antes dos frontends,
-esperar `/health/ready` e a linha do líder.
-
-**10. Texto jurídico.** *Pendências.* Termos, privacidade e cookies estão em rascunho
-(`docs/juridico/`). Cada médico aceita uma **versão** no onboarding
-(`VERSAO_DOCUMENTOS`); trocar o texto depois do evento significa subir a versão e
-**bloquear todo mundo** de novo no onboarding até reaceitarem. Vale publicar o texto final
-antes.
-
-**11. Schema de produção não conferido contra os models.** *Conferido que o doc antigo
-errava.* Regras de `ON DELETE` e tabelas legadas só se confirmam no banco (consulta no
-§10.3). A exclusão de conta com conta real em produção ainda não foi homologada.
-
-**12a. Phoenix desligado em produção — CORRIGIDO em 25/09, falta subir.** O
-`requirements.txt` só fixava o `arize-phoenix-otel==0.17.1`; o build instalava o
-OpenTelemetry mais novo, e a 1.45.0 quebra o `register()` dele
-(`'HTTPSpanExporter' object has no attribute '_headers'`). A API subia sem telemetria,
-com o erro como uma linha de aviso no boot. Agora o OpenTelemetry está fixado em 1.44.0,
-a falha alarma no Sentry (`phoenix_desligado`), e um teste com o `register()` real pega a
-incompatibilidade no CI. Depois de subir: conferir "Phoenix ativado" no log do boot.
-
-**12. Segredo exposto.** *Pendências.* A `PHOENIX_API_KEY` foi colada numa conversa e não
-foi rotacionada.
-
-### 16.3 Não bloqueiam o evento, mas convém saber
-
-| # | Achado | Verificação |
-|---|---|---|
-| a | **`.env.example` derruba o startup local**: tem `NEWS_DIGEST_HOUR` e `NEWS_DIGEST_JANELA_DIAS`, que não existem mais, e o `Settings` rejeita chave desconhecida no `.env` (reproduzido). Faltam `SESSION_MAX_AGE_HOURS`, `SEMANTIC_CACHE_ENABLED`, `EMBED_EMAIL_FALLBACK_ENABLED` | conferido |
-| b | **README desatualizado**: `python-jose` (é PyJWT), `SECRET_KEY` (é `JWT_SECRET_KEY`), sem `APP_ENV`, cache "ativo com 0,92" (desligado, 0,88), `/query` como rota principal | conferido |
-| c | Cobertura zero onde importa: acerto do cache pelo stream, conversão de entradas das calculadoras por IA (0/28 ramos), validação PubMed, handler global de 500, DLP na saída da farmácia | varredura |
-| d | `noticias-app` e LPs sem testes; calculadoras sem unitários | conferido |
-| e | Triagem que falha devolve confiança 0 → "reformule" para chamador **sem** modo. A UI sempre manda modo, então hoje só afeta farmácia explícita (que cai em busca genérica) e clientes externos | conferido |
-| f | `/news/*` sem rate limit; `GET /landing-pages/{slug}/check` revela se um e-mail já se cadastrou | conferido |
-| g | LPs sem campo de e-mail: fora do iframe o lead chega sem contato (item 15) | conferido |
-| h | Logout usa `AbortSignal.timeout` direto — em webview Android < 103 o logout nunca chega ao servidor (a renovação já tem o contorno). Impacto baixo: o Sair não aparece dentro da Waid | conferido |
-| i | `VITE_WAID_ORIGIN` ausente no build deixa só `www.medico360.app` na lista de origens | conferido |
-| j | Artigos de notícias anteriores a 21/09 sem re-sanitização no banco (item 67); corpo em chunks escapa do limite de tamanho (item 77) | varredura |
-| k | Dockerfiles dos frontends sem `exec` no `CMD`; Node 20 no CI e 22 no Docker; `serve@14` sem versão exata | conferido |
-| l | `scripts/verificar_prontidao_producao` diz "pronto" sem conferir `DEA_IP_HASH_SALT` (item 84) | conferido |
-| m | Comentários que contradizem o código: ordem dos middlewares em `main.py`; "pós-processamento em background" no stream (é inline); `uploads.py` "única rota com anti-CSRF" (a guarda é global); docstring do `agregador.py` cita rotas que não existem | conferido |
-| n | Código morto: `/orquestrador/query` e o ramo `unsupported_mode`, rotas e componentes do Agregador, `ModeEnum`, slug `benefits` sem rota | conferido |
-| o | Duplicação entre apps: três `lib/auth.ts` com semânticas diferentes de "sessão expirou", `LoginPage` copiada, LPs quase idênticas (item 93) | conferido |
-
-### 16.4 Ordem sugerida
-
-| Quando | O quê |
-|---|---|
-| **Antes do congelamento** | subir 1 e 2 (já corrigidos) · 5 (painel) · 6 (decisão sobre o teto) · 10 (texto jurídico) · 12 (rotacionar a chave) |
-| **Semana de homologação** | 3 (roteiro de 16 passos em Android e iPhone reais, dentro da Waid) · 4 (ensaio de carga) · 8 (órfãs) |
-| **Véspera** | 7 (dump + restore ensaiado) · 11 (consulta de FKs em produção) · deploy final seguindo §12.3, fora do horário de uso |
-| **Depois do evento** | 16.3 inteiro, a remoção do `/query` e do Agregador, a correção do `alembic/env.py`, a migração para o IaC do Railway (prazo: 2026-12-01) |
-
----
 
 ## 17. Armadilhas permanentes
 
