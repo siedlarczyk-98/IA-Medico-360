@@ -144,20 +144,35 @@ FROM gerencial.respostas_modelo WHERE dia > current_date - 30
 GROUP BY 1, 2 ORDER BY custo_usd DESC NULLS LAST;
 
 -- name: base_por_perfil
--- Pergunta 14292. Pergunta da diretoria: quantos especialistas, residentes, generalistas, estudantes.
--- Regra em `_perfil` de alembic/versions/018_canal_e_acesso.py. `perfil_fonte`: cfm
--- (verificado), cursos_active (perfil informado na compra) ou declarado (onboarding).
-SELECT perfil, count(*) AS com_acesso,
-       count(*) FILTER (WHERE usou_ia) AS usaram_a_ia,
-       count(*) FILTER (WHERE perfil_fonte = 'cfm') AS confirmados_pelo_cfm
-FROM gerencial.acesso
-GROUP BY 1
+-- Pergunta 14292, barras horizontais empilhadas por uso (2026-10-13): todo mundo com
+-- acesso num grafico so. Regra do perfil em `_perfil` de
+-- alembic/versions/018_canal_e_acesso.py.
+WITH b AS (
+    SELECT perfil,
+           CASE WHEN usou_ia THEN 'Usou a IA' ELSE 'Ainda não usou' END AS uso,
+           count(*) AS pessoas
+    FROM gerencial.acesso
+    GROUP BY 1, 2
+)
+SELECT perfil, uso, pessoas FROM b
 ORDER BY array_position(ARRAY['Especialista','Residente','Generalista','Médico, estágio não informado',
-                              'Estudante','Enfermagem','Outro profissional de saúde','Não informado'], perfil);
+                              'Estudante','Enfermagem','Outro profissional de saúde','Não informado'], perfil),
+         uso DESC;
 
 -- name: base_por_especialidade
-SELECT COALESCE(especialidade, 'não informada') AS especialidade, count(*) AS usuarios
-FROM gerencial.usuarios GROUP BY 1 ORDER BY 2 DESC;
+-- Pergunta 13867, grafico de barras horizontais empilhado por perfil (2026-10-13).
+-- So especialistas e residentes: antes o "nao informada" juntava estudantes e
+-- generalistas, que nao tem especialidade, e parecia que 77% da base nao respondeu.
+WITH b AS (
+    SELECT COALESCE(especialidade, 'Não informou a especialidade') AS especialidade,
+           perfil, count(*) AS pessoas
+    FROM gerencial.usuarios
+    WHERE perfil IN ('Especialista', 'Residente')
+    GROUP BY 1, 2
+)
+SELECT especialidade, perfil, pessoas FROM b
+ORDER BY (especialidade = 'Não informou a especialidade'),
+         sum(pessoas) OVER (PARTITION BY especialidade) DESC, especialidade, perfil;
 
 -- name: top_calculadoras
 SELECT calculadora, especialidade_calculadora, count(*) AS execucoes,
