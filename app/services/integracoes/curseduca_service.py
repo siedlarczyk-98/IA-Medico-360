@@ -30,6 +30,7 @@ Duas funções, com papéis muito diferentes:
     ninguém, porque o portão já foi a troca do token.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -301,6 +302,29 @@ def nomes_de_grupos(membro: dict | None) -> list[str]:
 
 _PAGINA = 100
 
+# A listagem não está no caminho de ninguém: pode esperar mais que o login.
+# Em 2026-10-13 uma única chamada passou de 8 s e derrubou a rodada inteira.
+_TIMEOUT_LISTAGEM = 20.0
+_TENTATIVAS = 3
+_ESPERA_ENTRE_TENTATIVAS = (2.0, 5.0)
+
+
+async def _get_com_retentativa(url: str, params: dict, headers: dict):
+    """GET que insiste em timeout, falha de rede e 5xx. 4xx não se resolve insistindo."""
+    for tentativa in range(_TENTATIVAS):
+        try:
+            resp = await get_client().get(
+                url, params=params, headers=headers, timeout=_TIMEOUT_LISTAGEM
+            )
+        except httpx.TransportError:
+            if tentativa == _TENTATIVAS - 1:
+                raise
+        else:
+            if resp.status_code < 500 or tentativa == _TENTATIVAS - 1:
+                return resp
+        await asyncio.sleep(_ESPERA_ENTRE_TENTATIVAS[min(tentativa, len(_ESPERA_ENTRE_TENTATIVAS) - 1)])
+    raise AssertionError("inalcançável")  # pragma: no cover
+
 
 async def _listar_paginado(caminho: str, params: dict) -> list[dict]:
     """Percorre um endpoint paginado (`data` + `metadata.hasMore`). Levanta em erro."""
@@ -312,11 +336,8 @@ async def _listar_paginado(caminho: str, params: dict) -> list[dict]:
     itens: list[dict] = []
     offset = 0
     while True:
-        resp = await get_client().get(
-            f"{api_base}{caminho}",
-            params={**params, "limit": _PAGINA, "offset": offset},
-            headers=headers,
-            timeout=_TIMEOUT_SECONDS,
+        resp = await _get_com_retentativa(
+            f"{api_base}{caminho}", {**params, "limit": _PAGINA, "offset": offset}, headers
         )
         if resp.status_code != 200:
             raise CurseducaNotConfigured(
@@ -334,9 +355,12 @@ async def _listar_paginado(caminho: str, params: dict) -> list[dict]:
         offset += len(pagina)
 
 
-async def listar_grupos(busca: str) -> list[dict]:
-    """Grupos de acesso cujo nome casa com `busca` (`GET /groups?search=`)."""
-    return await _listar_paginado("/groups", {"search": busca})
+async def listar_relatorio_de_grupos() -> list[dict]:
+    """Todos os grupos, com os andares que cada um libera (`tenants`) e `membersCount`.
+
+    `GET /reports/groups`. É daqui que sai quem está num andar de farmacêutica.
+    """
+    return await _listar_paginado("/reports/groups", {})
 
 
 async def listar_membros_do_grupo(grupo_id: int | str) -> list[dict]:

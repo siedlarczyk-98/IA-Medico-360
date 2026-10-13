@@ -105,30 +105,37 @@ as views, o que permite contar usuários distintos e montar coortes.
 
 ## Ressalvas que mudam o número
 
-- **Três níveis** (migration 018, 2026-10-13), em `acesso`:
-  - *com acesso*: está num grupo `[CFM]` ou `[Cursos Active]` da Waid, **ou** tem conta
-    no app. Força de vendas e áreas de laboratório não contam (decisão do Ruben);
-  - *abriu a IA*: tem conta, ou seja, abriu o app pelo menos uma vez;
-  - *usou a IA*: fez pergunta, usou calculadora ou favoritou notícia. A PREVENT e o
-    mapa de DEA não gravam uso por pessoa e não contam. Os cards de "ativos" seguem
-    essa definição.
-- **Quem nunca abriu o app vem de uma cópia diária** da Waid (`membros_waid`,
-  `app/services/membros_waid_service.py`, roda no processo líder). Até a primeira rodada
-  depois do deploy, *com acesso* só tem quem abriu a IA. Quem sai de todos os grupos
-  vira `tem_acesso = false` e deixa de contar. A rodada fica em `audit_logs`
-  (`membros_waid.sincronizacao`).
-- **Canal de entrada:** *Cursos Active* (integração do site dos cursos presenciais,
-  grupo `[Cursos Active] ...`, sem consulta ao CFM), *Cadastro CFM* (página de cadastro,
-  grupo `[CFM] ...`), *Waid, outros grupos* e *Login direto*. Para quem tem conta, o
-  canal é gravado no primeiro login em que um desses grupos aparece e não muda depois.
+- **Quem conta como usuário** (regras do Ruben, migration 019, 2026-10-13): só quem está
+  num grupo `[Cursos Active]`, `[CFM]` ou `[ONBOARDING]` da Waid. Quem não está em nenhum
+  deles **nunca conta**, nem se tiver aberto a IA (na prática: equipe e contas antigas de
+  login direto). Também ficam fora: `role` admin/test e e-mails de domínio de teste
+  (`_DOMINIOS_DE_TESTE` na 019: equipe e e-mails descartáveis), com ou sem conta no app.
+- **Três níveis**, em `acesso`: *com acesso* (está num dos três grupos) > *abriu a IA*
+  (tem conta no app) > *usou a IA* (pergunta, calculadora — PREVENT inclusive, desde a
+  019 — ou notícia favoritada).
+- **Canal de entrada**, decidido pela cópia diária (`membros_waid_service`):
+  *Cursos Active* (`[Cursos Active]`, integração do site dos cursos presenciais);
+  *LP do Médico 360* (`[CFM]`/`[ONBOARDING]`, sem andar de farmacêutica);
+  *Usuário Immerso* (`[CFM]`/`[ONBOARDING]` **e** acesso a um andar de farmacêutica —
+  a consulta ao CRM roda também no cadastro dos programas das farmacêuticas). Os andares
+  de farmacêutica estão em `ANDARES_FARMACEUTICA` (`app/medicina/canal.py`); andar novo
+  precisa entrar lá. O canal também é gravado em `users.canal_entrada`.
+- **Membro e conta são ligados** pelo id da Waid ou, para conta criada por login direto,
+  pelo e-mail.
+- **A cópia diária** usa `GET /reports/groups` (grupos, andares e contagem) e
+  `GET /groups/{id}/members`; pula grupo vazio, tenta cada chamada 3 vezes e, se a rodada
+  falhar, não grava nada e tenta de novo em 1 hora (alarme no Sentry). Rodada fica em
+  `audit_logs` (`membros_waid.sincronizacao`).
 - **Perfil:** Especialista, Residente, Generalista, Médico com estágio não informado,
   Estudante, Enfermagem, Outro profissional de saúde ou Não informado. A regra completa,
   com a ordem, está em `_perfil` na migration 018. Em resumo: o que o CFM verificou vem
   antes do que o médico declarou, menos residente (o CFM não separa R1 de especialista).
   O grupo da Cursos Active separa enfermagem e estudante, que o onboarding não separa.
-  `perfil_fonte` = `cfm`, `cursos_active` ou `declarado`.
-- **Admins da Waid sem conta no app** não têm como ser filtrados: se estiverem num grupo
-  `[CFM]` ou `[Cursos Active]`, contam como "com acesso".
+  `perfil_fonte` = `cfm`, `grupo_waid` (`[Cursos Active]`/`[ONBOARDING]`) ou `declarado`.
+- **Admins da Waid sem conta no app** só saem se o e-mail for de domínio de teste: se
+  estiverem num dos três grupos com e-mail pessoal, contam como "com acesso".
+- **Perguntas, custo e calculadoras** (`perguntas`, `respostas_modelo`, `calculadoras`)
+  continuam contando todo mundo menos admin/test: são o uso e o dinheiro gasto, de quem for.
 
 - **Contas `admin` e `test` estão fora** de todas as views, custo e captação inclusive
   (migration 017). Conta de teste é marcada à mão:

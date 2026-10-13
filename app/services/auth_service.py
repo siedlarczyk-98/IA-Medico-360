@@ -332,23 +332,20 @@ def _nome_do_membro(membro: dict | None) -> str | None:
 
 
 def _registrar_canal(user: "User", nomes: list[str]) -> bool:
-    """Grava de onde a pessoa veio e o que os grupos dizem dela (app/medicina/canal.py).
+    """Guarda os grupos que contam e a profissão que eles indicam (app/medicina/canal.py).
 
-    - `waid_grupos` espelha os grupos que contam, a cada login;
-    - `canal_entrada` é gravado UMA vez: é a porta por onde entrou, e um grupo
-      novo depois não muda isso;
+    - `waid_grupos` espelha os grupos `[Cursos Active]`/`[CFM]`/`[ONBOARDING]`, a cada login;
     - `profissao` só existe por esta via (nenhuma tela a preenche). Grupo que
       não diz nada não apaga o que outro grupo já disse.
+
+    O CANAL não é gravado aqui: ele depende de a pessoa estar ou não num andar
+    de farmacêutica, e o payload do membro não traz os andares. Quem grava é a
+    sincronização diária (`membros_waid_service`).
     """
     mudou = False
     grupos = canal.grupos_do_medico360(nomes)
     if (user.waid_grupos or []) != grupos:
         user.waid_grupos = grupos
-        mudou = True
-
-    porta = canal.canal_de_entrada(grupos)
-    if porta and not user.canal_entrada:
-        user.canal_entrada = porta
         mudou = True
 
     profissao = canal.profissao(grupos)

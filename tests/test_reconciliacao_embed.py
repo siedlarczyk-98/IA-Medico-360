@@ -27,7 +27,7 @@ def _membro(*grupos: str, nome: str | None = None) -> dict:
 
 def _CANAL_JA_GRAVADO(*grupos: str) -> dict:  # noqa: N802
     """Campos de canal como o login anterior os deixou — isola o teste de especialidade."""
-    return {"waid_grupos": sorted(grupos), "canal_entrada": "cadastro_cfm", "profissao": "medico"}
+    return {"waid_grupos": sorted(grupos), "profissao": "medico"}
 
 
 class DbFake:
@@ -349,7 +349,6 @@ async def test_quem_veio_do_cursos_active_fica_marcado():
     )
 
     assert mudou is True
-    assert user.canal_entrada == "cursos_active"
     assert user.profissao == "medico"
     assert user.waid_grupos == ["[Cursos Active] Médico(a) - ACLS"]
     assert user.specialty_slug is None
@@ -357,23 +356,32 @@ async def test_quem_veio_do_cursos_active_fica_marcado():
 
 
 @pytest.mark.asyncio
-async def test_canal_nao_muda_depois_de_gravado():
-    db = DbFake()
-    user = UserFake(canal_entrada="cadastro_cfm")
+async def test_login_nao_decide_o_canal():
+    """O canal depende do andar de farmacêutica, que o payload não traz: é da sincronização."""
+    db, user = DbFake(), UserFake()
+
+    await auth_service.reconciliar_especialidade_do_embed(db, user, _membro("[CFM] CARDIOLOGIA"))
+
+    assert user.canal_entrada is None
+
+
+@pytest.mark.asyncio
+async def test_estudante_da_lp_vem_do_onboarding():
+    db, user = DbFake(), UserFake()
 
     await auth_service.reconciliar_especialidade_do_embed(
-        db, user, _membro("[CFM] CARDIOLOGIA", "[Cursos Active] Médico(a) - PALS")
+        db, user, _membro("[ONBOARDING] - Estudante")
     )
 
-    assert user.canal_entrada == "cadastro_cfm"
-    assert user.waid_grupos == ["[CFM] CARDIOLOGIA", "[Cursos Active] Médico(a) - PALS"]
+    assert user.profissao == "estudante_medicina"
+    assert user.waid_grupos == ["[ONBOARDING] - Estudante"]
 
 
 @pytest.mark.asyncio
 async def test_membro_indisponivel_nao_apaga_grupos():
     """API de membros fora do ar (`membro=None`) não é "saiu de todos os grupos"."""
     db = DbFake()
-    user = UserFake(waid_grupos=["[CFM] CARDIOLOGIA"], canal_entrada="cadastro_cfm")
+    user = UserFake(waid_grupos=["[CFM] CARDIOLOGIA"], profissao="medico")
 
     mudou = await auth_service.reconciliar_especialidade_do_embed(db, user, None)
 
@@ -390,18 +398,13 @@ async def test_so_grupos_que_contam_sao_guardados():
     )
 
     assert not user.waid_grupos
-    assert user.canal_entrada is None
     assert user.profissao is None
 
 
 @pytest.mark.asyncio
 async def test_relogin_igual_nao_e_mudanca():
     db = DbFake()
-    user = UserFake(
-        waid_grupos=["[Cursos Active] Enfermeiro(a) - PALS"],
-        canal_entrada="cursos_active",
-        profissao="enfermeiro",
-    )
+    user = UserFake(waid_grupos=["[Cursos Active] Enfermeiro(a) - PALS"], profissao="enfermeiro")
 
     mudou = await auth_service.reconciliar_especialidade_do_embed(
         db, user, _membro("[Cursos Active] Enfermeiro(a) - PALS")

@@ -123,4 +123,71 @@ def test_listagem_com_erro_levanta_em_vez_de_devolver_lista_vazia(monkeypatch):
     monkeypatch.setattr(curseduca_service, "get_client", lambda: _ClienteFake([(403, {"message": "x"})]))
 
     with pytest.raises(curseduca_service.CurseducaNotConfigured):
-        _run(curseduca_service.listar_grupos("CFM"))
+        _run(curseduca_service.listar_relatorio_de_grupos())
+
+
+class _ClienteInstavel:
+    """Cada item é uma resposta (status, corpo) ou uma exceção a levantar."""
+
+    def __init__(self, roteiro):
+        self.roteiro = list(roteiro)
+        self.chamadas = 0
+
+    async def get(self, url, params=None, headers=None, timeout=None):
+        self.chamadas += 1
+        passo = self.roteiro.pop(0)
+        if isinstance(passo, Exception):
+            raise passo
+        status, corpo = passo
+        return SimpleNamespace(status_code=status, json=lambda: corpo, text=str(corpo))
+
+
+@pytest.fixture
+def sem_espera(monkeypatch):
+    async def _nada(_segundos):
+        return None
+
+    monkeypatch.setattr(curseduca_service.asyncio, "sleep", _nada)
+    monkeypatch.setattr(curseduca_service, "get_settings", _settings)
+
+
+_OK = (200, {"data": [{"id": 1}], "metadata": {"hasMore": False}})
+
+
+def test_timeout_isolado_e_tentado_de_novo(monkeypatch, sem_espera):
+    """O que derrubou a rodada de 2026-10-13: um ReadTimeout num grupo só."""
+    import httpx
+
+    cliente = _ClienteInstavel([httpx.ReadTimeout(""), _OK])
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: cliente)
+
+    assert _run(curseduca_service.listar_membros_do_grupo(64)) == [{"id": 1}]
+    assert cliente.chamadas == 2
+
+
+def test_erro_5xx_e_tentado_de_novo(monkeypatch, sem_espera):
+    cliente = _ClienteInstavel([(502, {}), (503, {}), _OK])
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: cliente)
+
+    assert _run(curseduca_service.listar_membros_do_grupo(64)) == [{"id": 1}]
+
+
+def test_timeout_persistente_desiste(monkeypatch, sem_espera):
+    import httpx
+
+    cliente = _ClienteInstavel([httpx.ReadTimeout("")] * 3)
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: cliente)
+
+    with pytest.raises(httpx.ReadTimeout):
+        _run(curseduca_service.listar_membros_do_grupo(64))
+    assert cliente.chamadas == 3
+
+
+def test_4xx_nao_insiste(monkeypatch, sem_espera):
+    """Credencial sem permissão não se resolve tentando de novo."""
+    cliente = _ClienteInstavel([(403, {"message": "x"})])
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: cliente)
+
+    with pytest.raises(curseduca_service.CurseducaNotConfigured):
+        _run(curseduca_service.listar_relatorio_de_grupos())
+    assert cliente.chamadas == 1

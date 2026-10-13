@@ -6,10 +6,11 @@ As propriedades travadas aqui são de privacidade, não de formato:
 - o role do Metabase lê as views e NÃO lê as tabelas do app;
 - contas `admin` e `test` (a equipe testando) ficam fora dos números;
 - a única exceção é `usuarios_lista` (018): nome e e-mail, e nada além disso;
-- `acesso` (018) conta quem tem acesso pela Waid, abriu a IA e usou a IA.
+- `acesso` (018) conta quem tem acesso pela Waid, abriu a IA e usou a IA;
+- só conta quem está em `[Cursos Active]`, `[CFM]` ou `[ONBOARDING]` (019).
 
 O banco de teste é montado por `create_all`, sem migrations; o schema é criado
-aqui com o mesmo SQL das migrations 016, 017 e 018, dentro da transação do teste
+aqui com o mesmo SQL das migrations 016 a 019, dentro da transação do teste
 (a tabela `membros_waid` e as colunas novas de `users` vêm do `create_all`).
 """
 
@@ -46,6 +47,7 @@ def _carregar(nome_modulo: str, arquivo: str):
 migration = _carregar("migration_016", "016_schema_gerencial.py")
 migration_017 = _carregar("migration_017", "017_gerencial_sem_contas_teste.py")
 migration_018 = _carregar("migration_018", "018_canal_e_acesso.py")
+migration_019 = _carregar("migration_019", "019_prevent_conta_como_uso.py")
 LISTA = migration_018.VIEW_LISTA
 ACESSO = migration_018.VIEW_ACESSO
 
@@ -60,12 +62,41 @@ async def gerencial(db_conn):
         *migration.comandos_upgrade(),
         *migration_017.comandos_upgrade(),
         *migration_018.comandos_upgrade(),
+        *migration_019.comandos_upgrade(),
     ]:
         await db_conn.exec_driver_sql(sql)
 
 
+def _membro_waid(
+    uuid: str, *grupos: str, tem_acesso: bool = True, farmaceutica: bool = False, **kw
+) -> MembroWaid:
+    from app.medicina import canal
+
+    return MembroWaid(
+        waid_uuid=uuid, grupos=sorted(grupos), tem_acesso=tem_acesso,
+        canal_entrada=canal.canal_de_entrada(grupos, em_andar_de_farmaceutica=farmaceutica),
+        profissao=canal.profissao(grupos),
+        entrou_em=datetime(2026, 10, 13, tzinfo=UTC), **kw,
+    )
+
+
 @pytest_asyncio.fixture
-async def dados(db, user_factory, conversation_factory):
+async def ligar(db):
+    """Põe a conta num grupo da Waid que conta — sem isso ela não aparece desde a 019."""
+    async def _ligar(user, *grupos, tem_acesso=True, farmaceutica=False):
+        user.waid_uuid = f"u-{user.id}"
+        db.add(_membro_waid(
+            user.waid_uuid, *(grupos or ("[CFM] CARDIOLOGIA",)),
+            tem_acesso=tem_acesso, farmaceutica=farmaceutica, email=user.email,
+        ))
+        await db.commit()
+        return user
+
+    return _ligar
+
+
+@pytest_asyncio.fixture
+async def dados(db, user_factory, conversation_factory, ligar):
     """Um médico com uma pergunta completa, anexo, alerta, login e lead."""
     medico = await user_factory(
         email=f"{SEGREDO.lower()}@example.com", name=f"Dr. {SEGREDO}"
@@ -126,7 +157,7 @@ async def dados(db, user_factory, conversation_factory):
         phone="11988887777",
     ))
     await db.commit()
-    return medico
+    return await ligar(medico, "[CFM] CARDIOLOGIA")
 
 
 async def _linhas(conn, view: str) -> list[dict]:
@@ -196,9 +227,9 @@ class TestContaDeTesteFicaFora:
             assert await _linhas(db_conn, view) == [], view
 
     async def test_conta_normal_ao_lado_continua_contando(
-        self, db, db_conn, dados, user_factory, conversation_factory
+        self, db, db_conn, dados, user_factory, conversation_factory, ligar
     ):
-        medico = await user_factory()
+        medico = await ligar(await user_factory())
         conversa = await conversation_factory(medico)
         db.add(Interaction(
             conversation_id=conversa.id, user_id=medico.id,
@@ -222,7 +253,11 @@ class TestContaDeTesteFicaFora:
     async def test_downgrade_volta_a_contar(self, db, db_conn, dados):
         await self._marcar_como_teste(db, dados)
         # Na ordem do alembic: a 018 sai antes da 017.
-        for sql in [*migration_018.comandos_downgrade(), *migration_017.comandos_downgrade()]:
+        for sql in [
+            *migration_019.comandos_downgrade(),
+            *migration_018.comandos_downgrade(),
+            *migration_017.comandos_downgrade(),
+        ]:
             await db_conn.exec_driver_sql(sql)
 
         assert len(await _linhas(db_conn, "perguntas")) == 1
@@ -256,16 +291,16 @@ class TestListaDeUsuarios:
         assert linha["ultimo_uso_em"] is not None
         assert linha["ultimo_acesso_waid_em"] is not None
 
-    async def test_conta_sem_uso_aparece_com_zero(self, db_conn, user_factory):
-        await user_factory()
+    async def test_conta_sem_uso_aparece_com_zero(self, db_conn, user_factory, ligar):
+        await ligar(await user_factory())
         [linha] = await _linhas(db_conn, LISTA)
         assert linha["perguntas"] == 0
         assert linha["usou_ia"] is False
         assert linha["situacao"] == "Abriu a IA, não usou"
         assert linha["ultimo_uso_em"] is None
 
-    async def test_so_entrar_pela_waid_e_acesso_nao_uso(self, db, db_conn, user_factory):
-        medico = await user_factory()
+    async def test_so_entrar_pela_waid_e_acesso_nao_uso(self, db, db_conn, user_factory, ligar):
+        medico = await ligar(await user_factory())
         db.add(AuditLog(user_id=medico.id, action="auth.embed", metadata_={"via": "token"}))
         await db.commit()
 
@@ -280,7 +315,7 @@ class TestListaDeUsuarios:
         assert await _linhas(db_conn, LISTA) == []
 
     async def test_downgrade_remove_as_views_e_o_perfil(self, db_conn, dados):
-        for sql in migration_018.comandos_downgrade():
+        for sql in [*migration_019.comandos_downgrade(), *migration_018.comandos_downgrade()]:
             await db_conn.exec_driver_sql(sql)
         for view in (LISTA, ACESSO):
             res = await db_conn.exec_driver_sql(f"SELECT to_regclass('gerencial.{view}')")
@@ -289,22 +324,9 @@ class TestListaDeUsuarios:
         assert "perfil" not in usuario
 
 
-_CFM = datetime(2026, 9, 1, tzinfo=UTC)
-
-
-def _membro_waid(uuid: str, *grupos: str, tem_acesso: bool = True, **kw) -> MembroWaid:
-    from app.medicina import canal
-
-    return MembroWaid(
-        waid_uuid=uuid, grupos=sorted(grupos), tem_acesso=tem_acesso,
-        canal_entrada=canal.canal_de_entrada(grupos), profissao=canal.profissao(grupos),
-        entrou_em=datetime(2026, 10, 13, tzinfo=UTC), **kw,
-    )
-
-
 @pytest.mark.usefixtures("gerencial")
-class TestAcesso:
-    """Com acesso > abriu a IA > usou a IA, uma linha por pessoa."""
+class TestQuemConta:
+    """019: só conta quem está em `[Cursos Active]`, `[CFM]` ou `[ONBOARDING]`."""
 
     async def test_quem_so_tem_acesso_conta_sem_ter_aberto(self, db, db_conn):
         db.add(_membro_waid("u-mayara", "[Cursos Active] Médico(a) - ACLS",
@@ -320,49 +342,55 @@ class TestAcesso:
 
         [nominal] = await _linhas(db_conn, LISTA)
         assert (nominal["nome"], nominal["situacao"]) == ("Mayara", "Só tem acesso")
+        assert await _linhas(db_conn, "usuarios") == []
 
-    async def test_membro_com_conta_e_uma_pessoa_so(self, db, db_conn, dados):
-        dados.waid_uuid = "u-dados"
-        db.add(_membro_waid("u-dados", "[CFM] CARDIOLOGIA"))
-        await db.commit()
-
+    async def test_membro_com_conta_e_uma_pessoa_so(self, db_conn, dados):
         [linha] = await _linhas(db_conn, ACESSO)
         assert linha["abriu_ia"] is True
         assert linha["usou_ia"] is True
-        assert linha["em_grupo_medico360"] is True
-        assert linha["canal_entrada"] == "Cadastro CFM"
+        assert linha["canal_entrada"] == "LP do Médico 360"
         assert linha["perfil"] == "Especialista"
         [usuario] = await _linhas(db_conn, "usuarios")
         assert linha["usuario_ref"] == usuario["usuario_ref"]
 
-    async def test_conta_sem_grupo_tambem_tem_acesso(self, db, db_conn, user_factory):
-        await user_factory()
+    async def test_conta_sem_nenhum_dos_tres_grupos_nao_conta(self, db_conn, user_factory, ligar):
+        """Mesmo tendo aberto a IA (regra do Ruben): equipe e login direto antigo."""
+        await user_factory()  # sem membro na Waid
+        await ligar(await user_factory(), tem_acesso=False)  # saiu dos grupos
+        for view in ("usuarios", ACESSO, LISTA):
+            assert await _linhas(db_conn, view) == [], view
+
+    async def test_conta_de_login_direto_liga_pelo_email(self, db, db_conn, user_factory):
+        """O caso do fabricio@: conta sem id da Waid + membro com o mesmo e-mail."""
+        medico = await user_factory(email="Dr.Ana@example.com")
+        db.add(_membro_waid("u-ana", "[CFM] PEDIATRIA", email="dr.ana@example.com"))
+        await db.commit()
+
         [linha] = await _linhas(db_conn, ACESSO)
         assert linha["abriu_ia"] is True
-        assert linha["em_grupo_medico360"] is False
-        assert linha["canal_entrada"] == "Login direto"
+        [usuario] = await _linhas(db_conn, "usuarios")
+        assert usuario["usuario_ref"] == linha["usuario_ref"]
+        assert medico.waid_uuid is None
+
+    @pytest.mark.parametrize("email", [
+        "lucas.mendes+11@cursosactive.com.br", "arthur+0710@PACIENTE360.com.br",
+        "rodrigo@immerso.com.br", "luciana@waid.io", "jimehad245@slotbeer.com",
+        "teste.ruben@teste.com",
+    ])
+    async def test_email_de_teste_nao_conta(self, db, db_conn, email):
+        db.add(_membro_waid("u-teste", "[CFM] CARDIOLOGIA", email=email))
+        await db.commit()
+        assert await _linhas(db_conn, ACESSO) == []
+
+    async def test_conta_de_teste_sai_mesmo_estando_na_waid(self, db, db_conn, dados):
+        dados.role = "test"
+        await db.commit()
+        assert await _linhas(db_conn, ACESSO) == []
 
     async def test_quem_perdeu_o_acesso_e_nao_tem_conta_sai(self, db, db_conn):
         db.add(_membro_waid("u-saiu", "[Cursos Active] Médico(a) - ACLS", tem_acesso=False))
         await db.commit()
         assert await _linhas(db_conn, ACESSO) == []
-
-    async def test_conta_de_teste_sai_mesmo_estando_na_waid(self, db, db_conn, dados):
-        dados.waid_uuid = "u-dados"
-        dados.role = "test"
-        db.add(_membro_waid("u-dados", "[CFM] CARDIOLOGIA"))
-        await db.commit()
-        assert await _linhas(db_conn, ACESSO) == []
-
-    async def test_perfil_do_grupo_sem_conta(self, db, db_conn):
-        db.add_all([
-            _membro_waid("u-gen", "[CFM] GENERALISTA"),
-            _membro_waid("u-esp", "[CFM] PEDIATRIA"),
-            _membro_waid("u-enf", "[Cursos Active] Enfermeiro(a) - PALS"),
-        ])
-        await db.commit()
-        perfis = sorted(linha["perfil"] for linha in await _linhas(db_conn, ACESSO))
-        assert perfis == ["Enfermagem", "Especialista", "Generalista"]
 
     async def test_acesso_nao_tem_nome_nem_email(self, db, db_conn):
         db.add(_membro_waid("u-x", "[CFM] PEDIATRIA", nome=f"Dr. {SEGREDO}",
@@ -374,46 +402,63 @@ class TestAcesso:
 
 
 @pytest.mark.usefixtures("gerencial")
-class TestPerfil:
-    """Especialista / residente / generalista / estudante: CFM primeiro, declarado depois."""
-
-    @pytest.mark.parametrize(("campos", "perfil", "fonte"), [
-        # Grupo `[CFM] <especialidade>`
-        ({"specialty_slug": "cardiologia", "specialty_source": "waid_grupo",
-          "crm_verified_at": _CFM}, "Especialista", "cfm"),
-        # O CFM não separa R1 de especialista; quem declarou residente é residente.
-        ({"specialty_slug": "cardiologia", "specialty_source": "waid_grupo",
-          "crm_verified_at": _CFM, "med_status": "residente"}, "Residente", "declarado"),
-        # `[CFM] GENERALISTA`: só `crm_verified_at`, sem especialidade.
-        ({"crm_verified_at": _CFM}, "Generalista", "cfm"),
-        ({"crm_verified_at": _CFM, "med_status": "residente"}, "Residente", "declarado"),
-        # Grupo `[CFM]` prova CRM: "graduando" declarado perde.
-        ({"crm_verified_at": _CFM, "med_status": "graduando"}, "Generalista", "cfm"),
-        # Só o declarado.
-        ({"med_status": "especialista"}, "Especialista", "declarado"),
-        ({"med_status": "generalista"}, "Generalista", "declarado"),
-        ({"med_status": "graduando"}, "Estudante", "declarado"),
-        # Grupo da Cursos Active.
-        ({"profissao": "enfermeiro", "med_status": "especialista"}, "Enfermagem", "cursos_active"),
-        ({"profissao": "estudante_enfermagem"}, "Enfermagem", "cursos_active"),
-        ({"profissao": "estudante_medicina"}, "Estudante", "cursos_active"),
-        # Estudante pelo grupo, mas já com CRM no CFM: formou-se.
-        ({"profissao": "estudante_medicina", "crm_verified_at": _CFM}, "Generalista", "cfm"),
-        # "Médico(a)" da Cursos Active: o onboarding diz o estágio...
-        ({"profissao": "medico", "med_status": "generalista"}, "Generalista", "declarado"),
-        # ...e sem onboarding fica médico sem estágio.
-        ({"profissao": "medico"}, "Médico, estágio não informado", "cursos_active"),
-        ({"profissao": "profissional_saude"}, "Outro profissional de saúde", "cursos_active"),
-        # Especialidade digitada pelo médico não é verificação.
-        ({"specialty_slug": "cardiologia", "specialty_source": "declarado"},
-         "Não informado", None),
-        ({}, "Não informado", None),
+class TestCanal:
+    @pytest.mark.parametrize(("grupos", "farmaceutica", "rotulo"), [
+        (["[Cursos Active] Médico(a) - ACLS"], False, "Cursos Active"),
+        (["[CFM] CARDIOLOGIA"], False, "LP do Médico 360"),
+        (["[ONBOARDING] - Estudante"], False, "LP do Médico 360"),
+        (["[CFM] CARDIOLOGIA"], True, "Usuário Immerso"),
+        (["[ONBOARDING] - Médico(a)"], True, "Usuário Immerso"),
     ])
-    async def test_classifica(self, db, db_conn, user_factory, campos, perfil, fonte):
+    async def test_rotulo(self, db, db_conn, user_factory, ligar, grupos, farmaceutica, rotulo):
+        await ligar(await user_factory(), *grupos, farmaceutica=farmaceutica)
+
+        for view in ("usuarios", ACESSO, LISTA):
+            [linha] = await _linhas(db_conn, view)
+            assert linha["canal_entrada"] == rotulo, view
+
+
+_CFM = datetime(2026, 9, 1, tzinfo=UTC)
+_CARDIO = "[CFM] CARDIOLOGIA"
+_GENERALISTA = "[CFM] GENERALISTA"
+
+
+@pytest.mark.usefixtures("gerencial")
+class TestPerfil:
+    """Especialista / residente / generalista / estudante / enfermagem."""
+
+    @pytest.mark.parametrize(("campos", "grupos", "perfil", "fonte"), [
+        # `[CFM] <especialidade>`
+        ({"specialty_slug": "cardiologia", "specialty_source": "waid_grupo", "crm_verified_at": _CFM},
+         [_CARDIO], "Especialista", "cfm"),
+        # O CFM não separa R1 de especialista; quem declarou residente é residente.
+        ({"crm_verified_at": _CFM, "med_status": "residente"}, [_CARDIO], "Residente", "declarado"),
+        # `[CFM] GENERALISTA`
+        ({"crm_verified_at": _CFM}, [_GENERALISTA], "Generalista", "cfm"),
+        ({"crm_verified_at": _CFM, "med_status": "residente"}, [_GENERALISTA], "Residente", "declarado"),
+        # Grupo `[CFM]` prova CRM: "graduando" declarado perde.
+        ({"med_status": "graduando"}, [_GENERALISTA], "Generalista", "cfm"),
+        # `[ONBOARDING]`: o que o grupo diz, e o onboarding completa.
+        ({}, ["[ONBOARDING] - Estudante"], "Estudante", "grupo_waid"),
+        ({}, ["[ONBOARDING] - Enfermeiro(a)"], "Enfermagem", "grupo_waid"),
+        ({"med_status": "especialista"}, ["[ONBOARDING] - Médico(a)"], "Especialista", "declarado"),
+        ({}, ["[ONBOARDING] - Médico(a)"], "Médico, estágio não informado", "grupo_waid"),
+        # Cursos Active.
+        ({"med_status": "especialista"}, ["[Cursos Active] Enfermeiro(a) - PALS"], "Enfermagem", "grupo_waid"),
+        ({}, ["[Cursos Active] Estudante 6º Medicina - ACLS"], "Estudante", "grupo_waid"),
+        # Estudante pelo grupo, mas já com CRM no CFM: formou-se.
+        ({"crm_verified_at": _CFM}, ["[Cursos Active] Estudante 6º Medicina - ACLS", _GENERALISTA],
+         "Generalista", "cfm"),
+        ({"med_status": "generalista"}, ["[Cursos Active] Médico(a) - ACLS"], "Generalista", "declarado"),
+        ({}, ["[Cursos Active] Profissionais de saúde - BLS"], "Outro profissional de saúde", "grupo_waid"),
+        # Grupo que não diz a profissão e onboarding em branco.
+        ({}, ["[Cursos Active] Turma nova - ACLS"], "Não informado", None),
+    ])
+    async def test_classifica(self, db, db_conn, user_factory, ligar, campos, grupos, perfil, fonte):
         medico = await user_factory()
         for campo, valor in campos.items():
             setattr(medico, campo, valor)
-        await db.commit()
+        await ligar(medico, *grupos)
 
         for view in ("usuarios", LISTA, ACESSO):
             [linha] = await _linhas(db_conn, view)
@@ -436,10 +481,10 @@ class TestRoleDoMetabase:
         linhas = await self._como_metabase(db_conn, "SELECT count(*) FROM gerencial.perguntas")
         assert linhas[0][0] == 1
 
-    @pytest.mark.parametrize("view", [LISTA, ACESSO])
-    async def test_le_as_views_da_018(self, db_conn, dados, view):
+    @pytest.mark.parametrize("view", ["usuarios", LISTA, ACESSO, "calculadoras"])
+    async def test_le_as_views_recriadas(self, db_conn, dados, view):
         linhas = await self._como_metabase(db_conn, f"SELECT count(*) FROM gerencial.{view}")
-        assert linhas[0][0] == 1
+        assert linhas[0][0] == (0 if view == "calculadoras" else 1)
 
     @pytest.mark.parametrize("tabela", [
         "public.users",
@@ -454,3 +499,52 @@ class TestRoleDoMetabase:
     async def test_nao_le_as_tabelas_do_app(self, db_conn, tabela):
         with pytest.raises(DBAPIError, match="permission denied"):
             await self._como_metabase(db_conn, f"SELECT 1 FROM {tabela} LIMIT 1")
+
+
+@pytest.mark.usefixtures("gerencial")
+class TestPreventContaComoUso:
+    """019: o rastro `prevent.calculo` conta como uso de calculadora."""
+
+    async def _usou_prevent(self, db, medico):
+        db.add(AuditLog(user_id=medico.id, action=migration_019.ACAO_PREVENT, entity_type="calculadora"))
+        await db.commit()
+
+    async def test_entra_no_ranking_de_calculadoras(self, db, db_conn, user_factory):
+        await self._usou_prevent(db, await user_factory())
+
+        [linha] = await _linhas(db_conn, "calculadoras")
+        assert (linha["calculadora"], linha["especialidade_calculadora"]) == ("PREVENT", "Cardiologia")
+        assert linha["pelo_chat"] is False
+
+    async def test_quem_so_usou_a_prevent_usou_a_ia(self, db, db_conn, user_factory, ligar):
+        await self._usou_prevent(db, await ligar(await user_factory()))
+
+        [pessoa] = await _linhas(db_conn, ACESSO)
+        assert pessoa["usou_ia"] is True
+        assert pessoa["ultimo_uso_em"] is not None
+        [nominal] = await _linhas(db_conn, LISTA)
+        assert nominal["calculadoras"] == 1
+        assert nominal["situacao"] == "Usou a IA"
+
+    async def test_outra_acao_de_auditoria_nao_conta(self, db, db_conn, user_factory, ligar):
+        medico = await ligar(await user_factory())
+        db.add(AuditLog(user_id=medico.id, action="auth.embed", metadata_={"via": "token"}))
+        await db.commit()
+
+        assert await _linhas(db_conn, "calculadoras") == []
+        [pessoa] = await _linhas(db_conn, ACESSO)
+        assert pessoa["usou_ia"] is False
+
+    async def test_conta_de_teste_nao_entra(self, db, db_conn, user_factory):
+        await self._usou_prevent(db, await user_factory(role="test"))
+        assert await _linhas(db_conn, "calculadoras") == []
+
+    async def test_downgrade_volta_a_018(self, db, db_conn, user_factory):
+        await self._usou_prevent(db, await user_factory())
+        for sql in migration_019.comandos_downgrade():
+            await db_conn.exec_driver_sql(sql)
+
+        assert await _linhas(db_conn, "calculadoras") == []
+        # A 018 contava toda conta do app, com ou sem grupo.
+        [pessoa] = await _linhas(db_conn, ACESSO)
+        assert pessoa["usou_ia"] is False
