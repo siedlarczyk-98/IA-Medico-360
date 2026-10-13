@@ -246,9 +246,11 @@ test.describe('Passo 4 — PREVENT', () => {
     await calcularPrevent(page, JOVEM_SAUDAVEL);
     await expect(page.locator('#prevent-ascvd_10a')).toHaveText('0.22%', { timeout: 15_000 });
     await escolher(page, 'mmol/L');
-    // 180 mg/dL x 0,02586 = 4,65 mmol/L; 60 mg/dL = 1,55 mmol/L.
-    await expect(page.locator('#prevent-ct')).toHaveValue('4.65');
-    await expect(page.locator('#prevent-hdl')).toHaveValue('1.55');
+    // 180 mg/dL x 0,02586 = 4,65 mmol/L; 60 mg/dL = 1,55 mmol/L. Exibido com
+    // vírgula: o campo mostra o separador do teclado do celular em português
+    // (`CampoNumerico`), embora o valor guardado tenha ponto.
+    await expect(page.locator('#prevent-ct')).toHaveValue('4,65');
+    await expect(page.locator('#prevent-hdl')).toHaveValue('1,55');
     await expect(page.getByText('Colesterol total (mmol/L)')).toBeVisible();
   });
 });
