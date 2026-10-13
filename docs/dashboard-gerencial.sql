@@ -20,6 +20,7 @@ WITH a AS (
 SELECT CASE WHEN dia > current_date - 7 THEN current_date - 6 ELSE current_date - 13 END AS inicio_periodo,
        count(DISTINCT usuario_ref) AS usuarios_ativos
 FROM a WHERE dia > current_date - 14
+  AND usuario_ref IN (SELECT usuario_ref FROM gerencial.usuarios)  -- so quem conta (019)
 GROUP BY 1 ORDER BY 1;
 
 -- name: kpi_perguntas_7d
@@ -78,7 +79,9 @@ WITH a AS (
     UNION ALL SELECT usuario_ref, dia FROM gerencial.noticias_favoritos
 )
         SELECT date_trunc('week', dia)::date AS semana, count(DISTINCT usuario_ref) AS usuarios_ativos
-        FROM a WHERE dia < date_trunc('week', current_date) GROUP BY 1 ORDER BY 1;
+        FROM a WHERE dia < date_trunc('week', current_date)
+          AND usuario_ref IN (SELECT usuario_ref FROM gerencial.usuarios)  -- so quem conta (019)
+        GROUP BY 1 ORDER BY 1;
 
 -- name: semanal_contas_novas
 SELECT date_trunc('week', dia_cadastro)::date AS semana, count(*) AS contas_novas
@@ -115,7 +118,8 @@ WITH c AS (
     SELECT usuario_ref, dia FROM gerencial.perguntas
     UNION ALL SELECT usuario_ref, dia FROM gerencial.calculadoras
     UNION ALL SELECT usuario_ref, dia FROM gerencial.noticias_favoritos
-) x GROUP BY 1)
+) x WHERE usuario_ref IN (SELECT usuario_ref FROM gerencial.usuarios)  -- so quem conta (019)
+        GROUP BY 1)
         SELECT c.semana, round(c.custo, 2) AS custo_usd,
                round(c.custo / NULLIF(a.ativos, 0), 3) AS custo_por_ativo_usd
         FROM c LEFT JOIN a USING (semana) ORDER BY 1;
