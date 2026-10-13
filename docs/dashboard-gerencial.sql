@@ -49,6 +49,7 @@ FROM gerencial.usuarios;
 SELECT count(*) AS com_acesso FROM gerencial.acesso;
 
 -- name: abriram_a_ia
+-- Big number (pergunta 14291).
 SELECT count(*) FILTER (WHERE abriu_ia) AS abriram_a_ia FROM gerencial.acesso;
 
 -- name: usaram
@@ -56,8 +57,7 @@ SELECT count(*) FILTER (WHERE abriu_ia) AS abriram_a_ia FROM gerencial.acesso;
 SELECT count(*) FILTER (WHERE usou_ia) AS usaram FROM gerencial.acesso;
 
 -- name: funil_acesso_uso
--- Grafico de funil (pergunta 14290, display "funnel"). Criada em 2026-10-13 com uma
--- versao PROVISORIA sobre `gerencial.usuarios`; trocar por esta depois da 018.
+-- Grafico de funil (pergunta 14290, display "funnel").
 SELECT etapa, pessoas FROM (
     SELECT 1 AS ordem, 'Com acesso' AS etapa, count(*) AS pessoas FROM gerencial.acesso
     UNION ALL SELECT 2, 'Abriu a IA', count(*) FILTER (WHERE abriu_ia) FROM gerencial.acesso
@@ -65,6 +65,7 @@ SELECT etapa, pessoas FROM (
 ) e ORDER BY ordem;
 
 -- name: funil_por_canal
+-- Pergunta 14293.
 SELECT canal_entrada, count(*) AS com_acesso,
        count(*) FILTER (WHERE abriu_ia) AS abriram_a_ia,
        count(*) FILTER (WHERE usou_ia) AS usaram_a_ia
@@ -143,7 +144,7 @@ FROM gerencial.respostas_modelo WHERE dia > current_date - 30
 GROUP BY 1, 2 ORDER BY custo_usd DESC NULLS LAST;
 
 -- name: base_por_perfil
--- Pergunta da diretoria: quantos especialistas, residentes, generalistas, estudantes.
+-- Pergunta 14292. Pergunta da diretoria: quantos especialistas, residentes, generalistas, estudantes.
 -- Regra em `_perfil` de alembic/versions/018_canal_e_acesso.py. `perfil_fonte`: cfm
 -- (verificado), cursos_active (perfil informado na compra) ou declarado (onboarding).
 SELECT perfil, count(*) AS com_acesso,
@@ -175,7 +176,7 @@ SELECT landing_page, count(*) AS leads,
 FROM gerencial.captacao GROUP BY 1 ORDER BY 2 DESC;
 
 -- name: lista_usuarios
--- Aba "Usuarios" (2026-10-13). Unica pergunta nominal do painel: ver migration 018.
+-- Pergunta 14294, aba "Usuarios" (2026-10-13). Unica pergunta nominal do painel: ver migration 018.
 -- Inclui quem so tem acesso e nunca abriu a IA (situacao = 'Só tem acesso').
 SELECT nome, email, situacao, canal_entrada, perfil,
        COALESCE(especialidade, 'não informada') AS especialidade, uf,

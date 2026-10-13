@@ -165,7 +165,8 @@ validados em produção com o role `gerencial_leitura` em 2026-09-28.
 - Instância: `metabase-pro.paciente360.com.br`, banco "Médico 360 - Railway" (id 331),
   conectado com o login `metabase`.
 - Coleção "Médico 360 — Gerencial" (id 1783), perguntas 13861 a 13875, 14257
-  (Com acesso), 14258 (Usaram) e a da lista de usuários.
+  (Com acesso), 14258 (Usaram a IA), 14290 (funil), 14291 (Abriram a IA), 14292 (Base por
+  perfil), 14293 (Funil por canal) e 14294 (Lista de usuários, nominal).
 - Dashboard "Médico 360 — Painel Gerencial":
   <https://metabase-pro.paciente360.com.br/dashboard/1651>.
 
