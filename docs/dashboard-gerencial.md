@@ -55,7 +55,9 @@ depende dela.
 
 ## As views
 
-Nenhuma view expõe texto livre, e-mail, nome, telefone, CRM, IP ou user-agent.
+Nenhuma view expõe texto livre, telefone, CRM, IP ou user-agent. Nome e e-mail só
+aparecem em `usuarios_lista` (migration 018, pedido do Ruben em 2026-10-13: a
+diretoria quer saber quem usa). As outras views não têm nada pessoal.
 `usuario_ref` é um pseudônimo estável: o mesmo médico tem o mesmo valor em todas
 as views, o que permite contar usuários distintos e montar coortes.
 
@@ -73,12 +75,14 @@ as views, o que permite contar usuários distintos e montar coortes.
 | `noticias_favoritos` | favorito | engajamento com o feed |
 | `dea_dispositivos` | DEA cadastrado | cobertura por cidade/UF, status, verificações |
 | `captacao` | envio de landing page | leads por página, conversão em usuário |
+| `acesso` | pessoa com acesso | os três níveis (com acesso, abriu a IA, usou a IA), canal de entrada, profissão e perfil. Inclui quem nunca abriu o app |
+| `usuarios_lista` | pessoa com acesso | **nominal**: as colunas de `acesso` mais nome, e-mail, situação, especialidade, UF, contagens de uso e grupos da Waid |
 
 ## Painéis sugeridos para a diretoria
 
 1. **Adoção**
-   - Usuários ativos por semana: `usuario_ref` distintos em `perguntas`,
-     `calculadoras` ou `acessos`.
+   - Pessoas que usaram, por semana: `usuario_ref` distintos em `perguntas`,
+     `calculadoras` ou `noticias_favoritos` (`acessos` é acesso, não uso).
    - Contas novas por semana (`usuarios.dia_cadastro`).
    - Base por especialidade.
 2. **Uso**
@@ -100,6 +104,31 @@ as views, o que permite contar usuários distintos e montar coortes.
    - Leads por landing page.
 
 ## Ressalvas que mudam o número
+
+- **Três níveis** (migration 018, 2026-10-13), em `acesso`:
+  - *com acesso*: está num grupo `[CFM]` ou `[Cursos Active]` da Waid, **ou** tem conta
+    no app. Força de vendas e áreas de laboratório não contam (decisão do Ruben);
+  - *abriu a IA*: tem conta, ou seja, abriu o app pelo menos uma vez;
+  - *usou a IA*: fez pergunta, usou calculadora ou favoritou notícia. A PREVENT e o
+    mapa de DEA não gravam uso por pessoa e não contam. Os cards de "ativos" seguem
+    essa definição.
+- **Quem nunca abriu o app vem de uma cópia diária** da Waid (`membros_waid`,
+  `app/services/membros_waid_service.py`, roda no processo líder). Até a primeira rodada
+  depois do deploy, *com acesso* só tem quem abriu a IA. Quem sai de todos os grupos
+  vira `tem_acesso = false` e deixa de contar. A rodada fica em `audit_logs`
+  (`membros_waid.sincronizacao`).
+- **Canal de entrada:** *Cursos Active* (integração do site dos cursos presenciais,
+  grupo `[Cursos Active] ...`, sem consulta ao CFM), *Cadastro CFM* (página de cadastro,
+  grupo `[CFM] ...`), *Waid, outros grupos* e *Login direto*. Para quem tem conta, o
+  canal é gravado no primeiro login em que um desses grupos aparece e não muda depois.
+- **Perfil:** Especialista, Residente, Generalista, Médico com estágio não informado,
+  Estudante, Enfermagem, Outro profissional de saúde ou Não informado. A regra completa,
+  com a ordem, está em `_perfil` na migration 018. Em resumo: o que o CFM verificou vem
+  antes do que o médico declarou, menos residente (o CFM não separa R1 de especialista).
+  O grupo da Cursos Active separa enfermagem e estudante, que o onboarding não separa.
+  `perfil_fonte` = `cfm`, `cursos_active` ou `declarado`.
+- **Admins da Waid sem conta no app** não têm como ser filtrados: se estiverem num grupo
+  `[CFM]` ou `[Cursos Active]`, contam como "com acesso".
 
 - **Contas `admin` e `test` estão fora** de todas as views, custo e captação inclusive
   (migration 017). Conta de teste é marcada à mão:
@@ -127,7 +156,7 @@ teste e confirmar que a marca `SEGREDO` não aparece nela.
 
 ## SQL dos cards
 
-Os 15 cards (KPIs de 7 dias, tendências semanais, custo por modelo, qualidade e módulos)
+Os cards (KPIs de 7 dias, tendências semanais, custo por modelo, qualidade e módulos)
 estão em `docs/dashboard-gerencial.sql`, um bloco `-- name:` por pergunta. Todos foram
 validados em produção com o role `gerencial_leitura` em 2026-09-28.
 
@@ -135,7 +164,8 @@ validados em produção com o role `gerencial_leitura` em 2026-09-28.
 
 - Instância: `metabase-pro.paciente360.com.br`, banco "Médico 360 - Railway" (id 331),
   conectado com o login `metabase`.
-- Coleção "Médico 360 — Gerencial" (id 1783), perguntas 13861 a 13875.
+- Coleção "Médico 360 — Gerencial" (id 1783), perguntas 13861 a 13875, 14257
+  (Com acesso), 14258 (Usaram) e a da lista de usuários.
 - Dashboard "Médico 360 — Painel Gerencial":
   <https://metabase-pro.paciente360.com.br/dashboard/1651>.
 

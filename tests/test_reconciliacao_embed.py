@@ -25,6 +25,11 @@ def _membro(*grupos: str, nome: str | None = None) -> dict:
     return corpo
 
 
+def _CANAL_JA_GRAVADO(*grupos: str) -> dict:  # noqa: N802
+    """Campos de canal como o login anterior os deixou — isola o teste de especialidade."""
+    return {"waid_grupos": sorted(grupos), "canal_entrada": "cadastro_cfm", "profissao": "medico"}
+
+
 class DbFake:
     """Só o que a rotina usa. Registra se houve commit/rollback."""
 
@@ -51,6 +56,9 @@ class UserFake:
         self.specialty_rqe = kw.get("specialty_rqe")
         self.specialty_updated_at = None
         self.crm_verified_at = kw.get("crm_verified_at")
+        self.waid_grupos = kw.get("waid_grupos")
+        self.canal_entrada = kw.get("canal_entrada")
+        self.profissao = kw.get("profissao")
 
 
 @pytest.mark.asyncio
@@ -143,6 +151,8 @@ async def test_nao_desfaz_o_que_veio_do_cadastro():
         # Já verificado antes: assim o teste isola a precedência da
         # especialidade, sem o efeito colateral de marcar a verificação.
         crm_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+        # Canal já registrado, pelo mesmo motivo.
+        **_CANAL_JA_GRAVADO("[CFM] CARDIOLOGIA"),
     )
 
     mudou = await auth_service.reconciliar_especialidade_do_embed(
@@ -172,7 +182,7 @@ async def test_grupo_nao_reconhecido_alerta_e_nao_grava(caplog):
     Tem que sair no log — é o insumo para virar alias. Sem isso o médico fica
     sem especialidade e ninguém descobre.
     """
-    db, user = DbFake(), UserFake()
+    db, user = DbFake(), UserFake(**_CANAL_JA_GRAVADO("[CFM] Hepatologia"))
 
     with caplog.at_level("WARNING"):
         mudou = await auth_service.reconciliar_especialidade_do_embed(
@@ -324,3 +334,78 @@ async def test_falha_interna_nunca_derruba_o_login(monkeypatch):
         db, user, _membro("[CFM] CARDIOLOGIA")
     ) is False
     assert db.rollbacks == 1
+
+
+# ── Canal de entrada e profissão (app/medicina/canal.py) ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_quem_veio_do_cursos_active_fica_marcado():
+    """O caso da Mayara: comprou o ACLS presencial, nunca passou pela página do CFM."""
+    db, user = DbFake(), UserFake()
+
+    mudou = await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("[Cursos Active] Médico(a) - ACLS", "Turma 2026")
+    )
+
+    assert mudou is True
+    assert user.canal_entrada == "cursos_active"
+    assert user.profissao == "medico"
+    assert user.waid_grupos == ["[Cursos Active] Médico(a) - ACLS"]
+    assert user.specialty_slug is None
+    assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_canal_nao_muda_depois_de_gravado():
+    db = DbFake()
+    user = UserFake(canal_entrada="cadastro_cfm")
+
+    await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("[CFM] CARDIOLOGIA", "[Cursos Active] Médico(a) - PALS")
+    )
+
+    assert user.canal_entrada == "cadastro_cfm"
+    assert user.waid_grupos == ["[CFM] CARDIOLOGIA", "[Cursos Active] Médico(a) - PALS"]
+
+
+@pytest.mark.asyncio
+async def test_membro_indisponivel_nao_apaga_grupos():
+    """API de membros fora do ar (`membro=None`) não é "saiu de todos os grupos"."""
+    db = DbFake()
+    user = UserFake(waid_grupos=["[CFM] CARDIOLOGIA"], canal_entrada="cadastro_cfm")
+
+    mudou = await auth_service.reconciliar_especialidade_do_embed(db, user, None)
+
+    assert mudou is False
+    assert user.waid_grupos == ["[CFM] CARDIOLOGIA"]
+
+
+@pytest.mark.asyncio
+async def test_so_grupos_que_contam_sao_guardados():
+    db, user = DbFake(), UserFake()
+
+    await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("Pfizer | Speakers", "Força de Vendas")
+    )
+
+    assert not user.waid_grupos
+    assert user.canal_entrada is None
+    assert user.profissao is None
+
+
+@pytest.mark.asyncio
+async def test_relogin_igual_nao_e_mudanca():
+    db = DbFake()
+    user = UserFake(
+        waid_grupos=["[Cursos Active] Enfermeiro(a) - PALS"],
+        canal_entrada="cursos_active",
+        profissao="enfermeiro",
+    )
+
+    mudou = await auth_service.reconciliar_especialidade_do_embed(
+        db, user, _membro("[Cursos Active] Enfermeiro(a) - PALS")
+    )
+
+    assert mudou is False
+    assert db.commits == 0

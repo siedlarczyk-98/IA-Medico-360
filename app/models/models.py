@@ -113,6 +113,12 @@ class User(Base):
     cadastro_externo_id: Mapped[str | None] = mapped_column(String(64))
     cfm_payload: Mapped[dict | None] = mapped_column(JSONB)
     enrollment_date: Mapped[date | None] = mapped_column(Date)
+    # Os grupos `[CFM]` e `[Cursos Active]` do membro na Waid, como vieram no
+    # último login (app/medicina/canal.py). Os outros grupos não são guardados.
+    waid_grupos: Mapped[list | None] = mapped_column(JSONB)
+    # Por qual porta a pessoa entrou: `cursos_active` ou `cadastro_cfm`. Gravado
+    # uma vez, no primeiro login em que um desses grupos aparece.
+    canal_entrada: Mapped[str | None] = mapped_column(String(30))
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[bool] = mapped_column(Boolean, default=True)
     legacy_user_id: Mapped[str | None] = mapped_column(String(255))
@@ -124,6 +130,38 @@ class User(Base):
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     weekly_usage: Mapped["UserWeeklyUsage | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+# ── Membros da Waid com acesso ao Médico 360 ─────────────────
+
+class MembroWaid(Base):
+    """Quem tem acesso ao Médico 360 pela Waid, tenha ou não aberto o app.
+
+    `users` só ganha uma linha quando a pessoa abre o app de IA. Quem comprou um
+    curso presencial e só fez o pré-curso tem acesso e não existia em lugar
+    nenhum daqui. Esta tabela é a cópia diária, feita por
+    `membros_waid_service`, dos membros dos grupos `[CFM]` e `[Cursos Active]` —
+    e só deles: força de vendas e áreas de laboratório não entram.
+
+    NÃO é `users`: essas pessoas não aceitaram os termos do app e não podem
+    receber o digest de notícias. A ligação com a conta é por `waid_uuid`.
+    """
+
+    __tablename__ = "membros_waid"
+
+    waid_uuid: Mapped[str] = mapped_column(String(64), primary_key=True)
+    waid_id: Mapped[int | None] = mapped_column(Integer)
+    email: Mapped[str | None] = mapped_column(String(255))
+    nome: Mapped[str | None] = mapped_column(String(255))
+    grupos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    canal_entrada: Mapped[str | None] = mapped_column(String(30))
+    profissao: Mapped[str | None] = mapped_column(String(40))
+    # Entrada mais antiga num dos grupos que contam.
+    entrou_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Falso quando a pessoa saiu de todos os grupos que contam (ou perdeu o
+    # acesso por validade). A linha fica: "quantos tinham acesso em tal mês".
+    tem_acesso: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sincronizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 # ── User Preferences - ok ─────────────────────────────────────

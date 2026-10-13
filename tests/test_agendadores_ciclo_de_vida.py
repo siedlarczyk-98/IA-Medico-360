@@ -14,9 +14,9 @@ import asyncio
 import pytest
 
 from app import main
-from app.services import expurgo_agendado, news_agendado, vigilancia_agendada
+from app.services import expurgo_agendado, membros_waid_service, news_agendado, vigilancia_agendada
 
-ESPERADOS = {"expurgo-agendado", "vigilancia-agendada", "noticias-agendado"}
+ESPERADOS = {"expurgo-agendado", "vigilancia-agendada", "noticias-agendado", "membros-waid"}
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,7 @@ def lacos_inertes(monkeypatch):
     async def _espera():
         await asyncio.Event().wait()
 
-    for modulo in (expurgo_agendado, vigilancia_agendada, news_agendado):
+    for modulo in (expurgo_agendado, vigilancia_agendada, news_agendado, membros_waid_service):
         monkeypatch.setattr(modulo, "_laco", _espera)
     # Carregar o modelo de NER leva segundos e não é o assunto.
     monkeypatch.setattr(main.ner, "warmup", lambda: True)
@@ -35,7 +35,7 @@ def _agendadores_vivos() -> set[str]:
     return {t.get_name() for t in asyncio.all_tasks() if t.get_name() in ESPERADOS and not t.done()}
 
 
-async def test_o_lifespan_liga_os_tres_agendadores_e_desliga_na_saida():
+async def test_o_lifespan_liga_os_agendadores_e_desliga_na_saida():
     assert _agendadores_vivos() == set()
 
     async with main.app.router.lifespan_context(main.app):

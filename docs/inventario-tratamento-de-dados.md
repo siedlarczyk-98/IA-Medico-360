@@ -24,6 +24,12 @@ O que a política publicada hoje afirma e o código contradiz:
 estágio de carreira, profissão, `waid_uuid` (id no LMS), data de matrícula.
 `app/models/models.py:70-118`
 
+**De quem tem acesso pela Waid e nunca abriu o app** (`membros_waid`, migration 018):
+nome, e-mail, id e grupos da Waid (só `[CFM]` e `[Cursos Active]`), canal de entrada,
+profissão indicada pelo grupo e data de entrada. Cópia diária feita pelo backend para o
+painel da diretoria; essas pessoas não aceitaram os termos do app e não recebem nada
+dele. `app/services/membros_waid_service.py`
+
 **Conteúdo clínico produzido pelo médico** — é o volume principal:
 - `interactions.prompt_text` — a pergunta clínica. `app/models/models.py:242`
 - `interaction_responses.response_text` — a resposta. `app/models/models.py:274`
@@ -60,6 +66,7 @@ bucket no backend.
 | PubMed/NCBI | termos de busca + e-mail do operador | não se aplica |
 | Redis | cache de triagem (prompt) e de membro (e-mail) | prompt sim, e-mail não |
 | Railway/Postgres | tudo que está no banco | — |
+| Metabase (Paciente 360, AWS) e o LLM do MCP do Metabase | métricas agregadas e pseudonimizadas (schema `gerencial`); **nome e e-mail** na view `usuarios_lista` (migration 018), inclusive de quem só tem acesso pela Waid e nunca abriu o app. Nenhum texto clínico, telefone ou CRM | não (é o destino) |
 
 Nenhum analytics ou pixel: varredura por gtag/GA/Hotjar/PostHog/Mixpanel/
 Meta/Clarity nos seis frontends não achou nada. O único terceiro no browser é

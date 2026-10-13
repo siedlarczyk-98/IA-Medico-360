@@ -291,3 +291,54 @@ def nomes_de_grupos(membro: dict | None) -> list[str]:
     if not isinstance(grupos, list):
         return []
     return [g["name"] for g in grupos if isinstance(g, dict) and isinstance(g.get("name"), str)]
+
+
+# ── Listagem para a sincronização diária (membros_waid_service) ────────────
+#
+# Fora do disjuntor `circuit_breaker.curseduca` DE PROPÓSITO: ele protege o
+# login. Uma rotina diária que falha várias vezes seguidas o abriria e barraria
+# a entrada dos médicos por causa de um relatório.
+
+_PAGINA = 100
+
+
+async def _listar_paginado(caminho: str, params: dict) -> list[dict]:
+    """Percorre um endpoint paginado (`data` + `metadata.hasMore`). Levanta em erro."""
+    api_base, api_key, access_token = _credenciais()
+    headers = {"api_key": api_key, "accept": "application/json"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+
+    itens: list[dict] = []
+    offset = 0
+    while True:
+        resp = await get_client().get(
+            f"{api_base}{caminho}",
+            params={**params, "limit": _PAGINA, "offset": offset},
+            headers=headers,
+            timeout=_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200:
+            raise CurseducaNotConfigured(
+                f"Curseduca respondeu {resp.status_code} em {caminho}: {resp.text[:200]}"
+            )
+        corpo = resp.json()
+        pagina = corpo.get("data") if isinstance(corpo, dict) else None
+        if not isinstance(pagina, list):
+            raise CurseducaNotConfigured(f"Resposta inesperada de {caminho}: {str(corpo)[:200]}")
+        itens.extend(i for i in pagina if isinstance(i, dict))
+
+        meta = corpo.get("metadata") or {}
+        if not meta.get("hasMore") or not pagina:
+            return itens
+        offset += len(pagina)
+
+
+async def listar_grupos(busca: str) -> list[dict]:
+    """Grupos de acesso cujo nome casa com `busca` (`GET /groups?search=`)."""
+    return await _listar_paginado("/groups", {"search": busca})
+
+
+async def listar_membros_do_grupo(grupo_id: int | str) -> list[dict]:
+    """Quem está hoje no grupo (`GET /groups/{id}/members`): id, uuid, nome, e-mail, entrada."""
+    return await _listar_paginado(f"/groups/{grupo_id}/members", {})

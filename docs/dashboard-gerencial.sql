@@ -2,6 +2,12 @@
 -- Validados em producao em 2026-09-28 com o role gerencial_leitura.
 -- Graficos semanais excluem a semana corrente (incompleta). Ver docs/dashboard-gerencial.md.
 
+-- ACESSO x USO (pedido do Ruben em 2026-10-13): "com acesso" = tem conta, abriu o produto
+-- pelo menos uma vez. "Usou" = pergunta ao assistente, calculadora ou noticia favoritada.
+-- So entrar pela Waid e acesso, NAO uso: os cards de "ativos" deixaram de contar `acessos`.
+-- Os nomes de coluna antigos (usuarios_ativos, custo_por_ativo_usd) ficaram para nao
+-- quebrar a formatacao salva dos graficos.
+
 -- KPIs de 7 dias: uma linha por janela (inicio_periodo = primeiro dia da janela), para o
 -- card "smartscalar" do Metabase mostrar o valor atual e a variacao sobre os 7 dias anteriores.
 
@@ -9,7 +15,7 @@
 WITH a AS (
     SELECT usuario_ref, dia FROM gerencial.perguntas
     UNION ALL SELECT usuario_ref, dia FROM gerencial.calculadoras
-    UNION ALL SELECT usuario_ref, dia FROM gerencial.acessos
+    UNION ALL SELECT usuario_ref, dia FROM gerencial.noticias_favoritos
 )
 SELECT CASE WHEN dia > current_date - 7 THEN current_date - 6 ELSE current_date - 13 END AS inicio_periodo,
        count(DISTINCT usuario_ref) AS usuarios_ativos
@@ -34,11 +40,41 @@ SELECT count(*) AS total,
        count(*) FILTER (WHERE onboarding_completo) AS onboarding_completo
 FROM gerencial.usuarios;
 
+-- Tres niveis (migration 018): com acesso > abriu a IA > usou a IA. `gerencial.acesso`
+-- tem uma linha por pessoa com acesso: membro de grupo [CFM] ou [Cursos Active] na Waid
+-- (copia diaria em `membros_waid`) OU dono de conta no app.
+
+-- name: com_acesso
+-- Big number no topo (pergunta 14257). Antes da 018 contava so `usuarios` (quem abriu).
+SELECT count(*) AS com_acesso FROM gerencial.acesso;
+
+-- name: abriram_a_ia
+SELECT count(*) FILTER (WHERE abriu_ia) AS abriram_a_ia FROM gerencial.acesso;
+
+-- name: usaram
+-- Big number (pergunta 14258).
+SELECT count(*) FILTER (WHERE usou_ia) AS usaram FROM gerencial.acesso;
+
+-- name: funil_acesso_uso
+-- Grafico de funil (pergunta 14290, display "funnel"). Criada em 2026-10-13 com uma
+-- versao PROVISORIA sobre `gerencial.usuarios`; trocar por esta depois da 018.
+SELECT etapa, pessoas FROM (
+    SELECT 1 AS ordem, 'Com acesso' AS etapa, count(*) AS pessoas FROM gerencial.acesso
+    UNION ALL SELECT 2, 'Abriu a IA', count(*) FILTER (WHERE abriu_ia) FROM gerencial.acesso
+    UNION ALL SELECT 3, 'Usou a IA', count(*) FILTER (WHERE usou_ia) FROM gerencial.acesso
+) e ORDER BY ordem;
+
+-- name: funil_por_canal
+SELECT canal_entrada, count(*) AS com_acesso,
+       count(*) FILTER (WHERE abriu_ia) AS abriram_a_ia,
+       count(*) FILTER (WHERE usou_ia) AS usaram_a_ia
+FROM gerencial.acesso GROUP BY 1 ORDER BY 2 DESC;
+
 -- name: semanal_ativos
 WITH a AS (
     SELECT usuario_ref, dia FROM gerencial.perguntas
     UNION ALL SELECT usuario_ref, dia FROM gerencial.calculadoras
-    UNION ALL SELECT usuario_ref, dia FROM gerencial.acessos
+    UNION ALL SELECT usuario_ref, dia FROM gerencial.noticias_favoritos
 )
         SELECT date_trunc('week', dia)::date AS semana, count(DISTINCT usuario_ref) AS usuarios_ativos
         FROM a WHERE dia < date_trunc('week', current_date) GROUP BY 1 ORDER BY 1;
@@ -77,7 +113,7 @@ WITH c AS (
           FROM (
     SELECT usuario_ref, dia FROM gerencial.perguntas
     UNION ALL SELECT usuario_ref, dia FROM gerencial.calculadoras
-    UNION ALL SELECT usuario_ref, dia FROM gerencial.acessos
+    UNION ALL SELECT usuario_ref, dia FROM gerencial.noticias_favoritos
 ) x GROUP BY 1)
         SELECT c.semana, round(c.custo, 2) AS custo_usd,
                round(c.custo / NULLIF(a.ativos, 0), 3) AS custo_por_ativo_usd
@@ -106,6 +142,18 @@ SELECT COALESCE(modelo_nome, modelo) AS modelo, COALESCE(provedor, '?') AS prove
 FROM gerencial.respostas_modelo WHERE dia > current_date - 30
 GROUP BY 1, 2 ORDER BY custo_usd DESC NULLS LAST;
 
+-- name: base_por_perfil
+-- Pergunta da diretoria: quantos especialistas, residentes, generalistas, estudantes.
+-- Regra em `_perfil` de alembic/versions/018_canal_e_acesso.py. `perfil_fonte`: cfm
+-- (verificado), cursos_active (perfil informado na compra) ou declarado (onboarding).
+SELECT perfil, count(*) AS com_acesso,
+       count(*) FILTER (WHERE usou_ia) AS usaram_a_ia,
+       count(*) FILTER (WHERE perfil_fonte = 'cfm') AS confirmados_pelo_cfm
+FROM gerencial.acesso
+GROUP BY 1
+ORDER BY array_position(ARRAY['Especialista','Residente','Generalista','Médico, estágio não informado',
+                              'Estudante','Enfermagem','Outro profissional de saúde','Não informado'], perfil);
+
 -- name: base_por_especialidade
 SELECT COALESCE(especialidade, 'não informada') AS especialidade, count(*) AS usuarios
 FROM gerencial.usuarios GROUP BY 1 ORDER BY 2 DESC;
@@ -125,3 +173,13 @@ SELECT landing_page, count(*) AS leads,
        count(*) FILTER (WHERE virou_usuario) AS viraram_usuario,
        round(100.0 * count(*) FILTER (WHERE virou_usuario) / count(*), 1) AS pct_conversao
 FROM gerencial.captacao GROUP BY 1 ORDER BY 2 DESC;
+
+-- name: lista_usuarios
+-- Aba "Usuarios" (2026-10-13). Unica pergunta nominal do painel: ver migration 018.
+-- Inclui quem so tem acesso e nunca abriu a IA (situacao = 'Só tem acesso').
+SELECT nome, email, situacao, canal_entrada, perfil,
+       COALESCE(especialidade, 'não informada') AS especialidade, uf,
+       dia_entrada, abriu_ia_em, ultimo_uso_em,
+       perguntas, calculadoras, noticias_favoritadas, grupos_waid
+FROM gerencial.usuarios_lista
+ORDER BY usou_ia DESC, abriu_ia DESC, ultimo_uso_em DESC NULLS LAST, entrou_em DESC;

@@ -35,7 +35,7 @@ from app.core.logging_config import RequestIdMiddleware, setup_logging
 from app.core.security_headers import CabecalhosDeSegurancaMiddleware
 from app.core.telemetry import setup_phoenix
 from app.middleware import ner
-from app.services import expurgo_agendado, news_agendado, vigilancia_agendada
+from app.services import expurgo_agendado, membros_waid_service, news_agendado, vigilancia_agendada
 
 settings = get_settings()
 
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     # aqui, e nao na primeira execucao clinica em producao.
     load_all_formulas()
 
-    # OS TRÊS AGENDADORES SÓ RODAM NO PROCESSO LÍDER. Cada worker do uvicorn roda
+    # OS AGENDADORES SÓ RODAM NO PROCESSO LÍDER. Cada worker do uvicorn roda
     # este `lifespan` inteiro; sem a eleição, N workers = N cópias de cada
     # agendador. O expurgo é idempotente, mas a vigilância alarmaria N vezes (o
     # silêncio de 24h por tag é um dict em memória, por processo) e o pipeline de
@@ -84,14 +84,19 @@ async def lifespan(app: FastAPI):
     #   app/services/vigilancia_agendada.py.
     # - Pipeline de noticias no processo, e nao num Cron Job do painel, pelo mesmo
     #   motivo do expurgo.
+    # - Copia diaria dos membros da Waid com acesso ao Medico 360, para o painel
+    #   contar quem tem acesso e nunca abriu o app. Ver
+    #   app/services/membros_waid_service.py.
     agendadores: dict[str, object] = {}
 
     def subir_agendadores() -> None:
         agendadores["expurgo"] = expurgo_agendado.iniciar()
         agendadores["vigilancia"] = vigilancia_agendada.iniciar()
         agendadores["noticias"] = news_agendado.iniciar()
+        agendadores["membros_waid"] = membros_waid_service.iniciar()
 
     async def derrubar_agendadores() -> None:
+        await membros_waid_service.parar(agendadores.pop("membros_waid", None))
         await news_agendado.parar(agendadores.pop("noticias", None))
         await vigilancia_agendada.parar(agendadores.pop("vigilancia", None))
         await expurgo_agendado.parar(agendadores.pop("expurgo", None))

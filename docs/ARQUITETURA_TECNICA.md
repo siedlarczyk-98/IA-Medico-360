@@ -330,7 +330,7 @@ outro lado não responde:
 | Módulo | Sistema | Política de falha |
 |---|---|---|
 | `ai_providers.py` | Anthropic, OpenAI, Gemini, Perplexity, Maritaca | cadeia de fallback por modo; **todo** provider é envolvido por `DlpEnforcingProvider` |
-| `curseduca_service.py` | API da Waid (troca de token, membro, grupos `[CFM]`) | **fail-closed** para autenticar; fail-open para enriquecer perfil |
+| `curseduca_service.py` | API da Waid (troca de token, membro, grupos `[CFM]`/`[Cursos Active]`, listagem de grupos e membros para `membros_waid`) | **fail-closed** para autenticar; fail-open para enriquecer perfil; a listagem fica fora do disjuntor do login |
 | `pharmadb_service.py` | PharmaDB (bula, interação, receita, genérico) | degrada para um modo de LLM **com aviso** — nunca "nenhuma interação conhecida" |
 | `pubmed_service.py` / `pubmed_eutils.py` | PubMed (validação de citações, diretrizes novas) | degrada para "sem validação"; cadência de 8/s **por processo** (item 75) |
 | `news_pubmed.py` | PubMed (coleta do feed) | pula a rodada |

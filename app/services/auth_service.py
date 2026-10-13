@@ -11,7 +11,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.medicina import especialidades, identidade
+from app.medicina import canal, especialidades, identidade
 from app.models.models import InviteToken, OtpCode, User
 from app.repositories import auth_repository as repo
 from app.services import email_service
@@ -331,6 +331,33 @@ def _nome_do_membro(membro: dict | None) -> str | None:
     return nome.strip() if isinstance(nome, str) and nome.strip() else None
 
 
+def _registrar_canal(user: "User", nomes: list[str]) -> bool:
+    """Grava de onde a pessoa veio e o que os grupos dizem dela (app/medicina/canal.py).
+
+    - `waid_grupos` espelha os grupos que contam, a cada login;
+    - `canal_entrada` é gravado UMA vez: é a porta por onde entrou, e um grupo
+      novo depois não muda isso;
+    - `profissao` só existe por esta via (nenhuma tela a preenche). Grupo que
+      não diz nada não apaga o que outro grupo já disse.
+    """
+    mudou = False
+    grupos = canal.grupos_do_medico360(nomes)
+    if (user.waid_grupos or []) != grupos:
+        user.waid_grupos = grupos
+        mudou = True
+
+    porta = canal.canal_de_entrada(grupos)
+    if porta and not user.canal_entrada:
+        user.canal_entrada = porta
+        mudou = True
+
+    profissao = canal.profissao(grupos)
+    if profissao and user.profissao != profissao:
+        user.profissao = profissao
+        mudou = True
+    return mudou
+
+
 async def reconciliar_especialidade_do_embed(
     db: AsyncSession, user: "User", membro: dict | None
 ) -> bool:
@@ -366,6 +393,8 @@ async def reconciliar_especialidade_do_embed(
             mudou = True
 
         nomes = curseduca_service.nomes_de_grupos(membro)
+        if isinstance(membro, dict):
+            mudou = _registrar_canal(user, nomes) or mudou
         if not nomes:
             if mudou:
                 await db.commit()

@@ -86,3 +86,41 @@ def test_nomes_de_grupos_tolera_payload_estranho():
     assert curseduca_service.nomes_de_grupos(
         {"groups": [{"name": "Turma"}, {"name": "[CFM] Cardiologia"}]}
     ) == ["Turma", "[CFM] Cardiologia"]
+
+
+# ── Listagem paginada (sincronização de membros_waid) ──────────────────────
+
+
+class _ClienteFake:
+    def __init__(self, paginas):
+        self.paginas = list(paginas)
+        self.pedidos = []
+
+    async def get(self, url, params=None, headers=None, timeout=None):
+        self.pedidos.append((url, dict(params or {})))
+        status, corpo = self.paginas.pop(0)
+        return SimpleNamespace(status_code=status, json=lambda: corpo, text=str(corpo))
+
+
+def test_listagem_percorre_todas_as_paginas(monkeypatch):
+    monkeypatch.setattr(curseduca_service, "get_settings", _settings)
+    cliente = _ClienteFake([
+        (200, {"data": [{"id": 1}, {"id": 2}], "metadata": {"hasMore": True}}),
+        (200, {"data": [{"id": 3}], "metadata": {"hasMore": False}}),
+    ])
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: cliente)
+
+    membros = _run(curseduca_service.listar_membros_do_grupo(120))
+
+    assert [m["id"] for m in membros] == [1, 2, 3]
+    assert cliente.pedidos[0][0] == "https://prof.curseduca.pro/groups/120/members"
+    assert [p[1]["offset"] for p in cliente.pedidos] == [0, 2]
+
+
+def test_listagem_com_erro_levanta_em_vez_de_devolver_lista_vazia(monkeypatch):
+    """Lista vazia faria a sincronização marcar todo mundo como sem acesso."""
+    monkeypatch.setattr(curseduca_service, "get_settings", _settings)
+    monkeypatch.setattr(curseduca_service, "get_client", lambda: _ClienteFake([(403, {"message": "x"})]))
+
+    with pytest.raises(curseduca_service.CurseducaNotConfigured):
+        _run(curseduca_service.listar_grupos("CFM"))
