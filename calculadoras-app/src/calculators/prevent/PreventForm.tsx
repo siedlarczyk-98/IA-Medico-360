@@ -137,7 +137,7 @@ export function PreventForm() {
           </div>
           <div style={{ flex: 1 }}>
             <Label htmlFor="prevent-idade">Idade (anos)</Label>
-            <InputField id="prevent-idade" type="number" min={30} max={79} placeholder="30 – 79" value={campos.idade} onChange={v => onChange({ idade: v })} />
+            <InputField id="prevent-idade" type="number" step={1} min={30} max={79} placeholder="30 – 79" value={campos.idade} onChange={v => onChange({ idade: v })} />
           </div>
         </div>
 

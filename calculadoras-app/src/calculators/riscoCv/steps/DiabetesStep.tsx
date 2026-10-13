@@ -102,7 +102,7 @@ export function DiabetesStep({ state, onChange, onResult, onNext, onBack }: Wiza
           <div style={{ display: 'flex', gap: 16 }}>
             <div style={{ flex: 1 }}>
               <Label htmlFor="dm-age">Idade (anos)</Label>
-              <InputField id="dm-age" type="number" min={1} max={120} placeholder="Ex: 55" value={state.dmAge} onChange={v => onChange({ dmAge: v })} />
+              <InputField id="dm-age" type="number" step={1} min={1} max={120} placeholder="Ex: 55" value={state.dmAge} onChange={v => onChange({ dmAge: v })} />
             </div>
             <div style={{ flex: 1 }}>
               <Label>Sexo</Label>

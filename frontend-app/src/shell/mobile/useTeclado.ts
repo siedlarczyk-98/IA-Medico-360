@@ -26,6 +26,16 @@
  * O teclado nunca era detectado, e a saudação ficava na tela ocupando metade do
  * espaço acima dele (item 64 de `docs/pitacos-do-fable-2.md`, visto no app da
  * Waid em 2026-09-24).
+ *
+ * A PÁGINA NUNCA ROLA
+ * A casca é `position: fixed` e cabe inteira na área visível, então qualquer
+ * rolagem do DOCUMENTO é o iOS empurrando a página para mostrar o campo — e
+ * ele empurra sem saber que a casca já encolheu. No app da Waid no iPhone
+ * (2026-10-13) a página subia quase a tela inteira: sobrava o campo de pergunta
+ * colado no cabeçalho do app e, embaixo, o fundo escuro do webview, além do fim
+ * do documento. Por isso a rolagem é desfeita a cada medida: com a casca do
+ * tamanho da área visível, o campo já está acima do teclado e não há o que
+ * mostrar. Com zoom de pinça (`scale > 1`) o deslocamento é do usuário e fica.
  */
 
 import { useCallback } from 'react';
@@ -47,6 +57,8 @@ export function useTeclado(): (el: HTMLElement | null) => (() => void) | undefin
 
     function aplicar() {
       if (!vv || !el) return;
+      const empurrada = window.scrollY > 0 || (vv.scale <= 1.01 && vv.offsetTop > 0);
+      if (empurrada) window.scrollTo(0, 0);
       if (Math.abs(vv.width - largura) > 1) {
         largura = vv.width;
         alturaSemTeclado = vv.height;
@@ -64,9 +76,11 @@ export function useTeclado(): (el: HTMLElement | null) => (() => void) | undefin
     aplicar();
     vv.addEventListener('resize', aplicar);
     vv.addEventListener('scroll', aplicar);
+    window.addEventListener('scroll', aplicar);
     return () => {
       vv.removeEventListener('resize', aplicar);
       vv.removeEventListener('scroll', aplicar);
+      window.removeEventListener('scroll', aplicar);
     };
   }, []);
 }

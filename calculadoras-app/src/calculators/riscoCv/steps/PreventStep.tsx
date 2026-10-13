@@ -126,7 +126,7 @@ export function PreventStep({ state, onChange, onResult, onBack }: Step4Props) {
           </div>
           <div style={{ flex: 1 }}>
             <Label htmlFor="prevent-idade">Idade (anos)</Label>
-            <InputField id="prevent-idade" type="number" min={30} max={79} value={state.idade} onChange={v => { onChange({ idade: v }); clinicalInputChanged(); }} />
+            <InputField id="prevent-idade" type="number" step={1} min={30} max={79} value={state.idade} onChange={v => { onChange({ idade: v }); clinicalInputChanged(); }} />
           </div>
         </div>
 

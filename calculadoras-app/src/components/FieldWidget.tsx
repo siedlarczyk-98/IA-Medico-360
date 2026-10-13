@@ -1,4 +1,5 @@
 import type { CalculatorField } from '../api/calculators';
+import { CampoNumerico } from './CampoNumerico';
 
 interface Props {
   field: CalculatorField;
@@ -153,6 +154,27 @@ export function FieldWidget({ field, value, onChange, aiPrefilled, error, showEr
   }
 
   if (field.field_type === 'number' || field.field_type === 'integer') {
+    const inteiro = field.field_type === 'integer';
+    // Só quem declara mínimo negativo precisa da tecla "-", que o teclado
+    // numérico do iPhone não tem. Os demais (todos, hoje) abrem o numérico.
+    const aceitaNegativo = field.min_value != null && field.min_value < 0;
+    if (!aceitaNegativo) {
+      return (
+        <div data-field={field.key}>
+          {labelNode}
+          <CampoNumerico
+            decimal={!inteiro}
+            value={value != null ? String(value) : ''}
+            onChange={v => {
+              const n = inteiro ? parseInt(v, 10) : parseFloat(v);
+              onChange(Number.isNaN(n) ? undefined : n);
+            }}
+            style={base}
+          />
+          {hasError && <p style={{ fontSize: 'var(--texto-micro)', color: 'var(--red)', marginTop: 3 }}>{error}</p>}
+        </div>
+      );
+    }
     return (
       <div data-field={field.key}>
         {labelNode}

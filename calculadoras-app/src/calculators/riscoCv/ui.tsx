@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+
+import { CampoNumerico } from '../../components/CampoNumerico';
 
 interface ButtonProps {
   children: ReactNode;
@@ -86,7 +88,30 @@ interface InputFieldProps {
   step?: number;
 }
 
+const estiloCampo: CSSProperties = {
+  width: '100%',
+  padding: '8px 10px',
+  border: '1px solid var(--line)',
+  borderRadius: 8,
+  fontSize: 'var(--texto-campo)',
+  color: 'var(--ink)',
+  outline: 'none',
+  background: '#fff',
+  boxSizing: 'border-box',
+};
+
+/**
+ * `type="number"` vira `CampoNumerico`: teclado numérico no celular, vírgula
+ * aceita, valor entregue com ponto. `step={1}` = inteiro (sem tecla decimal).
+ * Todos os campos numéricos destas calculadoras são positivos; um que aceite
+ * negativo não pode usar o teclado numérico do iPhone (não tem "-").
+ */
 export function InputField({ id, value, onChange, type = 'text', placeholder, min, max, step }: InputFieldProps) {
+  if (type === 'number') {
+    return (
+      <CampoNumerico id={id} decimal={step !== 1} value={value} onChange={onChange} placeholder={placeholder} style={estiloCampo} />
+    );
+  }
   return (
     <input
       id={id}
@@ -97,17 +122,7 @@ export function InputField({ id, value, onChange, type = 'text', placeholder, mi
       max={max}
       step={step}
       onChange={e => onChange(e.target.value)}
-      style={{
-        width: '100%',
-        padding: '8px 10px',
-        border: '1px solid var(--line)',
-        borderRadius: 8,
-        fontSize: 'var(--texto-campo)',
-        color: 'var(--ink)',
-        outline: 'none',
-        background: '#fff',
-        boxSizing: 'border-box',
-      }}
+      style={estiloCampo}
     />
   );
 }

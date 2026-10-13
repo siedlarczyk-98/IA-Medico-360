@@ -14,6 +14,7 @@ class ViewportFalso extends EventTarget {
   width = 400;
   height = 800;
   offsetTop = 0;
+  scale = 1;
 }
 
 let vv: ViewportFalso;
@@ -40,6 +41,8 @@ beforeEach(() => {
   original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
   Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true });
+  Object.defineProperty(window, 'scrollY', { value: 0, configurable: true, writable: true });
+  vi.mocked(window.scrollTo).mockClear();
 });
 
 afterEach(() => {
@@ -98,4 +101,53 @@ it('expõe a altura visível para o CSS posicionar a casca', () => {
   mudar({ altura: 450, janela: 450 });
 
   expect(el.style.getPropertyValue('--altura-visivel')).toBe('450px');
+});
+
+/*
+ * iPhone, app da Waid (2026-10-13): ao tocar no campo, o iOS rolava a página
+ * quase inteira para cima — sobrava o campo colado no cabeçalho do app e o
+ * fundo escuro do webview embaixo. A casca cabe na área visível; rolagem do
+ * documento é sempre o iOS empurrando, e é desfeita.
+ */
+it('iOS: a rolagem que o teclado causa na página é desfeita', () => {
+  montar();
+
+  act(() => {
+    (window as { scrollY: number }).scrollY = 340;
+    window.dispatchEvent(new Event('scroll'));
+  });
+
+  expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
+});
+
+it('iOS: o deslocamento da área visível também é desfeito', () => {
+  montar();
+
+  act(() => {
+    vv.height = 450;
+    vv.offsetTop = 340;
+    vv.dispatchEvent(new Event('resize'));
+  });
+
+  expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
+});
+
+it('com zoom de pinça o deslocamento é do usuário e fica', () => {
+  montar();
+
+  act(() => {
+    vv.scale = 2;
+    vv.offsetTop = 200;
+    vv.dispatchEvent(new Event('scroll'));
+  });
+
+  expect(window.scrollTo).not.toHaveBeenCalled();
+});
+
+it('página parada não é mexida', () => {
+  montar();
+
+  mudar({ altura: 450, janela: 450 });
+
+  expect(window.scrollTo).not.toHaveBeenCalled();
 });

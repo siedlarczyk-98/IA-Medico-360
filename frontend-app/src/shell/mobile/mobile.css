@@ -46,6 +46,16 @@
   .shell-movel { height: var(--altura-visivel, 100dvh); }
 }
 
+/* A página por trás da casca não rola nem "quica": quem rola é o chat, dentro
+   dela. Sem isto, com o teclado aberto no iPhone o dedo arrastava o documento
+   inteiro e mostrava o fundo escuro do webview (ver `useTeclado`). `:has` em
+   vez de classe posta por JS: vale exatamente enquanto a casca está montada. */
+html:has(> body .shell-movel),
+html:has(> body .shell-movel) body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* DENTRO DA WAID, margem do aparelho é zero.
    O app da Waid já desenha a barra de status e a de navegação em volta do
    webview — e mesmo assim o webview do Android INFORMA as margens ao
