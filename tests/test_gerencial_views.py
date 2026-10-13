@@ -27,6 +27,7 @@ from sqlalchemy.exc import DBAPIError
 from app.models.landing_pages import LandingPage, Submission
 from app.models.models import (
     AuditLog,
+    EmailForaDoPainel,
     FileExtraction,
     Interaction,
     InteractionResponse,
@@ -48,6 +49,7 @@ migration = _carregar("migration_016", "016_schema_gerencial.py")
 migration_017 = _carregar("migration_017", "017_gerencial_sem_contas_teste.py")
 migration_018 = _carregar("migration_018", "018_canal_e_acesso.py")
 migration_019 = _carregar("migration_019", "019_prevent_conta_como_uso.py")
+migration_020 = _carregar("migration_020", "020_emails_fora_do_painel.py")
 LISTA = migration_018.VIEW_LISTA
 ACESSO = migration_018.VIEW_ACESSO
 
@@ -63,6 +65,7 @@ async def gerencial(db_conn):
         *migration_017.comandos_upgrade(),
         *migration_018.comandos_upgrade(),
         *migration_019.comandos_upgrade(),
+        *migration_020.comandos_upgrade(),
     ]:
         await db_conn.exec_driver_sql(sql)
 
@@ -254,6 +257,7 @@ class TestContaDeTesteFicaFora:
         await self._marcar_como_teste(db, dados)
         # Na ordem do alembic: a 018 sai antes da 017.
         for sql in [
+            *migration_020.comandos_downgrade(),
             *migration_019.comandos_downgrade(),
             *migration_018.comandos_downgrade(),
             *migration_017.comandos_downgrade(),
@@ -315,7 +319,11 @@ class TestListaDeUsuarios:
         assert await _linhas(db_conn, LISTA) == []
 
     async def test_downgrade_remove_as_views_e_o_perfil(self, db_conn, dados):
-        for sql in [*migration_019.comandos_downgrade(), *migration_018.comandos_downgrade()]:
+        for sql in [
+            *migration_020.comandos_downgrade(),
+            *migration_019.comandos_downgrade(),
+            *migration_018.comandos_downgrade(),
+        ]:
             await db_conn.exec_driver_sql(sql)
         for view in (LISTA, ACESSO):
             res = await db_conn.exec_driver_sql(f"SELECT to_regclass('gerencial.{view}')")
@@ -541,10 +549,42 @@ class TestPreventContaComoUso:
 
     async def test_downgrade_volta_a_018(self, db, db_conn, user_factory):
         await self._usou_prevent(db, await user_factory())
-        for sql in migration_019.comandos_downgrade():
+        for sql in [*migration_020.comandos_downgrade(), *migration_019.comandos_downgrade()]:
             await db_conn.exec_driver_sql(sql)
 
         assert await _linhas(db_conn, "calculadoras") == []
         # A 018 contava toda conta do app, com ou sem grupo.
         [pessoa] = await _linhas(db_conn, ACESSO)
         assert pessoa["usou_ia"] is False
+
+
+@pytest.mark.usefixtures("gerencial")
+class TestEmailsForaDoPainel:
+    """020: equipe com e-mail pessoal sai por uma linha em `emails_fora_do_painel`."""
+
+    async def test_quem_esta_na_lista_sai_das_views_de_pessoas(self, db, db_conn, dados):
+        db.add(EmailForaDoPainel(email=dados.email.lower(), motivo="equipe"))
+        await db.commit()
+
+        for view in ("usuarios", ACESSO, LISTA):
+            assert await _linhas(db_conn, view) == [], view
+        # O uso continua contado: é custo real, de quem for.
+        assert len(await _linhas(db_conn, "perguntas")) == 1
+
+    async def test_sai_mesmo_sem_conta_no_app(self, db, db_conn):
+        db.add(_membro_waid("u-equipe", "[CFM] CARDIOLOGIA", email="Fulano.Equipe@Gmail.com"))
+        db.add(EmailForaDoPainel(email="fulano.equipe@gmail.com"))
+        await db.commit()
+        assert await _linhas(db_conn, ACESSO) == []
+
+    async def test_quem_nao_esta_na_lista_continua(self, db, db_conn, dados):
+        db.add(EmailForaDoPainel(email="outra.pessoa@gmail.com"))
+        await db.commit()
+        assert len(await _linhas(db_conn, ACESSO)) == 1
+
+    async def test_downgrade_volta_a_contar(self, db, db_conn, dados):
+        db.add(EmailForaDoPainel(email=dados.email.lower()))
+        await db.commit()
+        for sql in migration_020.comandos_downgrade():
+            await db_conn.exec_driver_sql(sql)
+        assert len(await _linhas(db_conn, ACESSO)) == 1

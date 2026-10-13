@@ -110,6 +110,14 @@ as views, o que permite contar usuários distintos e montar coortes.
   deles **nunca conta**, nem se tiver aberto a IA (na prática: equipe e contas antigas de
   login direto). Também ficam fora: `role` admin/test e e-mails de domínio de teste
   (`_DOMINIOS_DE_TESTE` na 019: equipe e e-mails descartáveis), com ou sem conta no app.
+- **Equipe com e-mail pessoal** (gmail, outlook) o domínio não pega. Desde a migration 020,
+  sai por uma linha em `emails_fora_do_painel`, com ou sem conta no app, sem migration nova:
+  ```sql
+  INSERT INTO emails_fora_do_painel (email, motivo) VALUES ('fulano@gmail.com', 'equipe');
+  ```
+  Sempre em minúsculas (a tabela recusa maiúsculas). Os e-mails não ficam no repositório.
+  Quem está na lista sai de `usuarios`, `acesso` e `usuarios_lista`; o uso e o custo dela
+  continuam em `perguntas` e `calculadoras`.
 - **Três níveis**, em `acesso`: *com acesso* (está num dos três grupos) > *abriu a IA*
   (tem conta no app) > *usou a IA* (pergunta, calculadora — PREVENT inclusive, desde a
   019 — ou notícia favoritada).

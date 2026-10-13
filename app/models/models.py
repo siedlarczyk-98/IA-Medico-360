@@ -11,6 +11,7 @@ from decimal import Decimal
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -130,6 +131,27 @@ class User(Base):
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     weekly_usage: Mapped["UserWeeklyUsage | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+# ── E-mails que não contam no painel da diretoria ────────────
+
+class EmailForaDoPainel(Base):
+    """Equipe que usa e-mail pessoal: o domínio não a denuncia e `role = 'test'`
+    só pega quem tem conta no app. Quem está aqui sai de `usuarios`, `acesso` e
+    `usuarios_lista` (migration 020). Gravar SEMPRE em minúsculas.
+
+    Os e-mails não vão para o repositório (são pessoais): entram por INSERT em
+    produção, ver docs/dashboard-gerencial.md.
+    """
+
+    __tablename__ = "emails_fora_do_painel"
+    __table_args__ = (
+        CheckConstraint("email = lower(email)", name="ck_emails_fora_do_painel_minusculo"),
+    )
+
+    email: Mapped[str] = mapped_column(String(255), primary_key=True)
+    motivo: Mapped[str | None] = mapped_column(String(255))
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 # ── Membros da Waid com acesso ao Médico 360 ─────────────────
