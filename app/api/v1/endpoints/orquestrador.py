@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -20,13 +20,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orquestrador", tags=["Orquestrador Multi-Agente"])
 
+# Instrução usada quando o médico envia só o anexo, sem digitar nada. O front
+# permite (o botão de enviar habilita com texto OU anexo), mas o `prompt` era
+# obrigatório com `min_length=1`: a mensagem morria em 422 antes de chegar à
+# rota, sem nada no log além do status. Parecia bug do arquivo — o mesmo
+# arquivo funcionava para quem digitava uma pergunta junto.
+PROMPT_SO_ANEXO = "Analise o conteúdo do(s) arquivo(s) anexado(s)."
+
 
 class OrquestradorRequest(BaseModel):
     prompt: str = Field(
-        ...,
-        min_length=1,
+        default="",
         max_length=4000,
-        description="Pergunta do médico",
+        description="Pergunta do médico. Pode vir vazia só quando há anexo.",
     )
     conversation_id: UUID | None = Field(
         default=None,
@@ -66,6 +72,14 @@ class OrquestradorRequest(BaseModel):
             "cada imagem custa uma chamada de visão e pesa base64 no prompt."
         ),
     )
+
+    @model_validator(mode="after")
+    def _prompt_ou_anexo(self) -> "OrquestradorRequest":
+        if not self.prompt.strip():
+            if not self.anexos():
+                raise ValueError("Envie uma pergunta ou um arquivo.")
+            self.prompt = PROMPT_SO_ANEXO
+        return self
 
     def anexos(self) -> list[UUID]:
         """Anexos da mensagem, unificando o campo novo e o legado sem duplicar."""

@@ -8,6 +8,8 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -196,6 +198,27 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Erro interno do servidor."},
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Loga QUAL campo falhou num 422 de validação e devolve a resposta padrão.
+
+    Sem isto, o 422 aparecia só no access log do uvicorn, sem dizer o motivo —
+    e diagnosticar exigia pedir ao médico o console do navegador. Loga só
+    `loc`/`type`/`msg`, nunca `input`: o valor rejeitado pode ser o prompt,
+    que é texto clínico.
+    """
+    campos = [
+        {"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")}
+        for e in exc.errors()
+    ]
+    logger.warning(
+        "Validação falhou em %s %s: %s", request.method, request.url.path, campos,
+        extra={"erros_validacao": campos},
+    )
+    return await request_validation_exception_handler(request, exc)
 
 
 # ── Routes ───────────────────────────────────────────────────
